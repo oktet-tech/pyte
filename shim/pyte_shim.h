@@ -17,6 +17,12 @@
 
 #include <signal.h>
 
+#include "asn_usr.h"
+#include "ndn.h"
+#include "tad_common.h"
+#include "rcf_api.h"
+#include "tapi_tad.h"
+
 #include "conf_api.h"
 #include "rcf_rpc.h"
 #include "tapi_job.h"
@@ -33,6 +39,7 @@
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
 #define PYTE_ENOENT TE_ENOENT
 #define PYTE_EINPROGRESS TE_EINPROGRESS
+#define PYTE_ESMALLBUF TE_ESMALLBUF
 
 /* Job completion cause passthrough */
 #define PYTE_JOB_EXITED TAPI_JOB_STATUS_EXITED
@@ -210,6 +217,62 @@ extern te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
                               size_t len);
 extern te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                               int timeout_ms);
+
+/*
+ * TAD/CSAP wrappers.  All NDN values cross the boundary as ASN.1 text
+ * and are parsed here against the proper ndn_* type.
+ *
+ * Packet ownership: tapi_tad_trrecv_pkt_handler() hands each parsed
+ * packet to the user callback and does NOT free it afterwards
+ * ("Packet is owned by callback", lib/tapi_tad/tapi_tad.c), so the
+ * collector stores the pointer directly — no copy.  Python wraps each
+ * pointer in a Packet object and frees it via pyte_pkt_free().
+ */
+
+/** Received-packets collector filled by recv_stop/recv_wait */
+typedef struct pyte_pkts {
+    void        **pkts; /**< malloc'ed array of asn_value pointers */
+    unsigned int  n;    /**< number of packets in the array */
+} pyte_pkts;
+
+/*
+ * Parse NDN ASN.1 text without doing anything else (DSL calibration).
+ * kind: 0 = CSAP spec, 1 = traffic template, 2 = traffic pattern.
+ * On parse failure *err (if not NULL) gets a malloc'ed message with
+ * the failing symbol position; free it with pyte_free_string().
+ */
+extern te_errno pyte_asn_check(const char *text, int kind, char **err);
+
+extern te_errno pyte_ta_session(const char *ta, int *out);
+extern te_errno pyte_csap_create(const char *ta, int session,
+                                 const char *stack_id,
+                                 const char *spec_text,
+                                 unsigned int *out_csap);
+extern te_errno pyte_csap_destroy(const char *ta, int session,
+                                  unsigned int csap);
+extern te_errno pyte_csap_send(const char *ta, int session,
+                               unsigned int csap, const char *templ_text,
+                               int blocking);
+extern te_errno pyte_csap_recv_start(const char *ta, int session,
+                                     unsigned int csap,
+                                     const char *pattern_text,
+                                     unsigned int timeout_ms,
+                                     unsigned int num);
+extern te_errno pyte_csap_recv_stop(const char *ta, int session,
+                                    unsigned int csap, pyte_pkts *out);
+extern te_errno pyte_csap_recv_wait(const char *ta, int session,
+                                    unsigned int csap, pyte_pkts *out);
+extern te_errno pyte_pkt_read_int(void *pkt, const char *labels,
+                                  int64_t *out);
+/*
+ * Read packet payload.  In: *len = capacity of buf.  Out: *len =
+ * actual payload length.  Returns TE_ESMALLBUF (with *len = needed)
+ * if buf is NULL or too small; absent payload reads as length 0.
+ */
+extern te_errno pyte_pkt_payload(void *pkt, uint8_t *buf, size_t *len);
+extern void pyte_pkt_free(void *pkt);
+/* Frees the pkts array only, NOT the packets (Python wraps each) */
+extern void pyte_pkts_free(pyte_pkts *p);
 
 /* Local sockaddr helpers (no RPC involved) */
 extern te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,

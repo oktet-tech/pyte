@@ -123,6 +123,31 @@ te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
 te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                        int timeout_ms);
 
+typedef struct pyte_pkts {
+    void        **pkts;
+    unsigned int  n;
+} pyte_pkts;
+
+te_errno pyte_asn_check(const char *text, int kind, char **err);
+te_errno pyte_ta_session(const char *ta, int *out);
+te_errno pyte_csap_create(const char *ta, int session,
+                          const char *stack_id, const char *spec_text,
+                          unsigned int *out_csap);
+te_errno pyte_csap_destroy(const char *ta, int session, unsigned int csap);
+te_errno pyte_csap_send(const char *ta, int session, unsigned int csap,
+                        const char *templ_text, int blocking);
+te_errno pyte_csap_recv_start(const char *ta, int session,
+                              unsigned int csap, const char *pattern_text,
+                              unsigned int timeout_ms, unsigned int num);
+te_errno pyte_csap_recv_stop(const char *ta, int session,
+                             unsigned int csap, pyte_pkts *out);
+te_errno pyte_csap_recv_wait(const char *ta, int session,
+                             unsigned int csap, pyte_pkts *out);
+te_errno pyte_pkt_read_int(void *pkt, const char *labels, int64_t *out);
+te_errno pyte_pkt_payload(void *pkt, uint8_t *buf, size_t *len);
+void pyte_pkt_free(void *pkt);
+void pyte_pkts_free(pyte_pkts *p);
+
 te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,
                            struct sockaddr_storage *ss, socklen_t *len);
 te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
@@ -163,6 +188,7 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define TE_LL_INFO ...
 #define TE_LL_VERB ...
 #define PYTE_ETIMEDOUT ...
+#define PYTE_ESMALLBUF ...
 #define PYTE_EINPROGRESS ...
 #define PYTE_JOB_EXITED ...
 #define PYTE_JOB_SIGNALED ...

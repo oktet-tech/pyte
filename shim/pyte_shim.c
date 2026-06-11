@@ -897,6 +897,265 @@ pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
     return 0;
 }
 
+/*
+ * TAD section.  NDN values cross the boundary as ASN.1 text; parsing
+ * happens here so Python never holds an asn_value it did not create.
+ * Everything is guarded; tapi_tad calls return te_errno (no longjmp),
+ * but the guard keeps a surprise jump from unwinding into Python.
+ */
+
+static const asn_type *
+pyte_ndn_kind_type(int kind)
+{
+    switch (kind)
+    {
+        case 0: return ndn_csap_spec;
+        case 1: return ndn_traffic_template;
+        case 2: return ndn_traffic_pattern;
+        default: return NULL;
+    }
+}
+
+static te_errno
+pyte_asn_parse_nojmp(const char *text, int kind, asn_value **out,
+                     char **err)
+{
+    const asn_type *type = pyte_ndn_kind_type(kind);
+    int             syms = -1;
+    te_errno        rc;
+
+    if (err != NULL)
+        *err = NULL;
+    if (type == NULL)
+        return TE_RC(TE_TAPI, TE_EINVAL);
+    rc = asn_parse_value_text(text, type, out, &syms);
+    if (rc != 0 && err != NULL &&
+        asprintf(err, "parse failed at symbol %d", syms) < 0)
+        *err = NULL;
+    return rc;
+}
+
+te_errno
+pyte_asn_check(const char *text, int kind, char **err)
+{
+    asn_value *val = NULL;
+
+    PYTE_GUARD_RC(pyte_asn_parse_nojmp(text, kind, &val, err));
+    asn_free_value(val);
+    return 0;
+}
+
+te_errno
+pyte_ta_session(const char *ta, int *out)
+{
+    PYTE_GUARD_RC(rcf_ta_create_session(ta, out));
+    return 0;
+}
+
+static te_errno
+pyte_csap_create_nojmp(const char *ta, int session, const char *stack_id,
+                       const char *spec_text, unsigned int *out_csap)
+{
+    asn_value     *spec = NULL;
+    csap_handle_t  csap = CSAP_INVALID_HANDLE;
+    te_errno       rc;
+
+    rc = pyte_asn_parse_nojmp(spec_text, 0, &spec, NULL);
+    if (rc != 0)
+        return rc;
+    rc = tapi_tad_csap_create(ta, session, stack_id, spec, &csap);
+    asn_free_value(spec);
+    if (rc == 0)
+        *out_csap = csap;
+    return rc;
+}
+
+te_errno
+pyte_csap_create(const char *ta, int session, const char *stack_id,
+                 const char *spec_text, unsigned int *out_csap)
+{
+    PYTE_GUARD_RC(pyte_csap_create_nojmp(ta, session, stack_id,
+                                         spec_text, out_csap));
+    return 0;
+}
+
+te_errno
+pyte_csap_destroy(const char *ta, int session, unsigned int csap)
+{
+    PYTE_GUARD_RC(tapi_tad_csap_destroy(ta, session, csap));
+    return 0;
+}
+
+static te_errno
+pyte_csap_send_nojmp(const char *ta, int session, unsigned int csap,
+                     const char *templ_text, int blocking)
+{
+    asn_value *templ = NULL;
+    te_errno   rc;
+
+    rc = pyte_asn_parse_nojmp(templ_text, 1, &templ, NULL);
+    if (rc != 0)
+        return rc;
+    rc = tapi_tad_trsend_start(ta, session, csap, templ,
+                               blocking ? RCF_MODE_BLOCKING
+                                        : RCF_MODE_NONBLOCKING);
+    asn_free_value(templ);
+    return rc;
+}
+
+te_errno
+pyte_csap_send(const char *ta, int session, unsigned int csap,
+               const char *templ_text, int blocking)
+{
+    PYTE_GUARD_RC(pyte_csap_send_nojmp(ta, session, csap, templ_text,
+                                       blocking));
+    return 0;
+}
+
+static te_errno
+pyte_csap_recv_start_nojmp(const char *ta, int session, unsigned int csap,
+                           const char *pattern_text,
+                           unsigned int timeout_ms, unsigned int num)
+{
+    asn_value *pattern = NULL;
+    te_errno   rc;
+
+    rc = pyte_asn_parse_nojmp(pattern_text, 2, &pattern, NULL);
+    if (rc != 0)
+        return rc;
+    rc = tapi_tad_trrecv_start(ta, session, csap, pattern, timeout_ms,
+                               num, RCF_TRRECV_PACKETS);
+    asn_free_value(pattern);
+    return rc;
+}
+
+te_errno
+pyte_csap_recv_start(const char *ta, int session, unsigned int csap,
+                     const char *pattern_text, unsigned int timeout_ms,
+                     unsigned int num)
+{
+    PYTE_GUARD_RC(pyte_csap_recv_start_nojmp(ta, session, csap,
+                                             pattern_text, timeout_ms,
+                                             num));
+    return 0;
+}
+
+/*
+ * Collector callback: takes ownership of the packet (tapi_tad's
+ * trrecv handler does not free it once a callback is set) and stores
+ * the pointer in the growing pyte_pkts array.
+ */
+static void
+pyte_pkt_collect_cb(asn_value *packet, void *user_data)
+{
+    pyte_pkts  *p = user_data;
+    void      **grown;
+
+    grown = realloc(p->pkts, (p->n + 1) * sizeof(*grown));
+    if (grown == NULL)
+    {
+        asn_free_value(packet);
+        return;
+    }
+    p->pkts = grown;
+    p->pkts[p->n++] = packet;
+}
+
+static te_errno
+pyte_csap_recv_fin_nojmp(const char *ta, int session, unsigned int csap,
+                         pyte_pkts *out, int wait)
+{
+    tapi_tad_trrecv_cb_data cb = { pyte_pkt_collect_cb, out };
+    unsigned int            num = 0;
+
+    out->pkts = NULL;
+    out->n = 0;
+    return wait ? tapi_tad_trrecv_wait(ta, session, csap, &cb, &num)
+                : tapi_tad_trrecv_stop(ta, session, csap, &cb, &num);
+}
+
+te_errno
+pyte_csap_recv_stop(const char *ta, int session, unsigned int csap,
+                    pyte_pkts *out)
+{
+    PYTE_GUARD_RC(pyte_csap_recv_fin_nojmp(ta, session, csap, out, 0));
+    return 0;
+}
+
+te_errno
+pyte_csap_recv_wait(const char *ta, int session, unsigned int csap,
+                    pyte_pkts *out)
+{
+    PYTE_GUARD_RC(pyte_csap_recv_fin_nojmp(ta, session, csap, out, 1));
+    return 0;
+}
+
+static te_errno
+pyte_pkt_read_int_nojmp(void *pkt, const char *labels, int64_t *out)
+{
+    int32_t  v = 0;
+    te_errno rc;
+
+    rc = asn_read_int32(pkt, &v, labels);
+    if (rc == 0)
+        *out = v;
+    return rc;
+}
+
+te_errno
+pyte_pkt_read_int(void *pkt, const char *labels, int64_t *out)
+{
+    PYTE_GUARD_RC(pyte_pkt_read_int_nojmp(pkt, labels, out));
+    return 0;
+}
+
+static te_errno
+pyte_pkt_payload_nojmp(void *pkt, uint8_t *buf, size_t *len)
+{
+    int      needed;
+    size_t   d_len;
+    te_errno rc;
+
+    needed = asn_get_length(pkt, "payload.#bytes");
+    if (needed <= 0)
+    {
+        /* Absent or empty payload reads as empty */
+        *len = 0;
+        return 0;
+    }
+    if (buf == NULL || *len < (size_t)needed)
+    {
+        *len = needed;
+        return TE_RC(TE_TAPI, TE_ESMALLBUF);
+    }
+    d_len = *len;
+    rc = asn_read_value_field(pkt, buf, &d_len, "payload.#bytes");
+    if (rc == 0)
+        *len = d_len;
+    return rc;
+}
+
+te_errno
+pyte_pkt_payload(void *pkt, uint8_t *buf, size_t *len)
+{
+    PYTE_GUARD_RC(pyte_pkt_payload_nojmp(pkt, buf, len));
+    return 0;
+}
+
+void
+pyte_pkt_free(void *pkt)
+{
+    asn_free_value(pkt);
+}
+
+void
+pyte_pkts_free(pyte_pkts *p)
+{
+    free(p->pkts);
+    p->pkts = NULL;
+    p->n = 0;
+}
+
 te_errno
 pyte_sockaddr_in4(const char *ip, uint16_t port,
                   struct sockaddr_storage *ss, socklen_t *len)
