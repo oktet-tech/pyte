@@ -214,6 +214,8 @@ extern te_errno pyte_cfg_sys_get_int(const char *ta, const char *path,
                                      int *out);
 extern te_errno pyte_cfg_sys_set_int(const char *ta, const char *path,
                                      int val, int *old_val);
+extern te_errno pyte_cfg_sys_get_uint64(const char *ta, const char *path,
+                                        uint64_t *out);
 
 /*
  * Job wrappers (tapi_job over an RPC factory).  Channel sets cross the

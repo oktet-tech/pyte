@@ -106,6 +106,8 @@ te_errno pyte_cfg_sys_set_str(const char *ta, const char *path,
 te_errno pyte_cfg_sys_get_int(const char *ta, const char *path, int *out);
 te_errno pyte_cfg_sys_set_int(const char *ta, const char *path, int val,
                               int *old_val);
+te_errno pyte_cfg_sys_get_uint64(const char *ta, const char *path,
+                                 uint64_t *out);
 
 typedef struct tapi_job_factory_t tapi_job_factory_t;
 typedef struct tapi_job_t tapi_job_t;

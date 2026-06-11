@@ -95,8 +95,10 @@ Caveats:
   string for non-numeric values (`tapi_cfg_sys` is typed, the kernel
   tree is not); `sysctl_set()` returns the previous value so cleanups
   can restore it.
-- Route deletion goes by spec (`tapi_cfg_del_route_tmp`), so
-  `route_del()` must repeat the gw/dev/metric used at add time.
+- Route identity in the Configurator tree is `dst|prefix[,metric,tos]`;
+  gw and dev do not participate in matching.  `route_del()` must repeat
+  the metric (and tos, if set) used at add time; gw/dev are passed to
+  the kernel lookup but do not affect which instance is deleted.
 
 ## Extending pyte (the pattern)
 

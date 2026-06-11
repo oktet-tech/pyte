@@ -16,9 +16,10 @@ root agent; on a non-root rig they raise CfgError (EPERM).
 from __future__ import annotations
 
 import ipaddress
+import re
 from dataclasses import dataclass
 
-from pyte import cfg
+from pyte import cfg, log
 from pyte.errors import CfgError, check
 from pyte.log import _enc
 
@@ -52,6 +53,16 @@ def _parse_route_inst(name: str) -> tuple[str, int, dict[str, str]]:
 def _sys_path(path: str) -> str:
     """Accept dotted or slashed sysctl paths."""
     return path.replace(".", "/") if "/" not in path else path
+
+
+_MAC_RE = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+
+
+def _parse_mac(mac: str) -> bytes:
+    """Validate colon-separated MAC and return 6 raw bytes."""
+    if not _MAC_RE.match(mac):
+        raise ValueError(f"bad MAC address {mac!r}")
+    return bytes(int(b, 16) for b in mac.split(":"))
 
 
 @dataclass(frozen=True)
@@ -152,13 +163,17 @@ class AgentNet:
             try:
                 dst, prefix, opts = _parse_route_inst(n.name)
             except ValueError:
+                log.warn(f"skipping route instance {n.name!r}")
                 continue          # unknown encoding: skip, don't crash
-            gw = n.value or None
+            gw = n.value
+            gw = None if gw in ("", "0.0.0.0", None) else gw
             dev = None
             try:
                 dev = cfg.get(f"{n.oid}/dev:") or None
-            except CfgError:
-                pass
+            except CfgError as e:
+                from pyte import errors
+                if e.code != errors.ENOENT:
+                    raise
             metric = int(opts["metric"]) if "metric" in opts else None
             out.append(Route(dst, prefix, gw, dev, metric))
         return out
@@ -189,6 +204,7 @@ class AgentNet:
         out = []
         for ifn in ifaces:
             base = f"/agent:{self.name}/interface:{ifn}"
+            cfg.synchronize(base, subtree=True)
             for sub, static in (("neigh_dynamic", False),
                                 ("neigh_static", True)):
                 for n in cfg.find(f"{base}/{sub}:*"):
@@ -198,9 +214,7 @@ class AgentNet:
     def neigh_add(self, ip: str, mac: str, iface: str,
                   static: bool = True) -> None:
         from pyte._shim import lib
-        raw = bytes(int(b, 16) for b in mac.split(":"))
-        if len(raw) != 6:
-            raise ValueError(f"bad MAC {mac!r}")
+        raw = _parse_mac(mac)
         check(lib.pyte_cfg_neigh_add(_enc(self.name), _enc(iface),
                                      _enc(ip), raw, static),
               f"neigh_add({ip})", CfgError)
@@ -219,6 +233,10 @@ class AgentNet:
         rc = lib.pyte_cfg_sys_get_int(_enc(self.name), _enc(p), out)
         if rc == 0:
             return out[0]
+        u64out = ffi.new("uint64_t *")
+        rc = lib.pyte_cfg_sys_get_uint64(_enc(self.name), _enc(p), u64out)
+        if rc == 0:
+            return int(u64out[0])
         sout = ffi.new("char **")
         check(lib.pyte_cfg_sys_get_str(_enc(self.name), _enc(p), sout),
               f"sysctl({path})", CfgError)

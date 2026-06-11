@@ -304,10 +304,10 @@ pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
 
 /*
  * Configurator section.  cfg_* calls do not longjmp today, but every
- * entry point is still wrapped in PYTE_GUARD via a _nojmp helper so a
- * surprise jump cannot unwind past the C/Python boundary.  The helpers
- * are ordinary functions: returning from them inside the guard is fine
- * (the guarded statement is just the rc assignment).
+ * entry point is still wrapped in PYTE_GUARD so a surprise jump cannot
+ * unwind past the C/Python boundary.  Helpers with internal control
+ * flow use the _nojmp pattern (a helper function called inside the
+ * guard); single-expression wrappers may guard the tapi call directly.
  */
 
 static te_errno
@@ -855,6 +855,13 @@ pyte_cfg_sys_set_int(const char *ta, const char *path, int val,
                      int *old_val)
 {
     PYTE_GUARD_RC(tapi_cfg_sys_set_int(ta, val, old_val, "%s", path));
+    return 0;
+}
+
+te_errno
+pyte_cfg_sys_get_uint64(const char *ta, const char *path, uint64_t *out)
+{
+    PYTE_GUARD_RC(tapi_cfg_sys_get_uint64(ta, out, "%s", path));
     return 0;
 }
 

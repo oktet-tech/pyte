@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
+import dataclasses
+
 import pytest
 
-from pyte.net import Route, _parse_route_inst, _sys_path
+from pyte.net import Route, _parse_dst, _parse_mac, _parse_route_inst, _sys_path
 
 
 def test_parse_route_inst_plain():
@@ -32,13 +34,38 @@ def test_sys_path_dots_and_slashes():
 
 def test_route_dataclass_frozen():
     r = Route(dst="10.0.0.0", prefix=24, gw=None, dev="lo", metric=10)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         r.dst = "x"
 
 
 def test_dst_spec_parsing():
-    from pyte.net import _parse_dst
     assert _parse_dst("10.0.0.0/24") == ("10.0.0.0", 24)
     assert _parse_dst("10.0.0.1") == ("10.0.0.1", 32)
     with pytest.raises(ValueError):
         _parse_dst("10.0.0.0/33")
+
+
+def test_parse_dst_bad_ip():
+    with pytest.raises(ValueError):
+        _parse_dst("999.1.1.1")
+
+
+def test_route_spec():
+    r = Route(dst="10.0.0.0", prefix=24, gw=None, dev=None, metric=None)
+    assert r.spec == "10.0.0.0/24"
+
+
+def test_parse_mac_good():
+    raw = _parse_mac("02:ab:cd:ef:12:34")
+    assert raw == bytes([0x02, 0xab, 0xcd, 0xef, 0x12, 0x34])
+    assert len(raw) == 6
+
+
+def test_parse_mac_dashed_rejected():
+    with pytest.raises(ValueError, match="bad MAC"):
+        _parse_mac("02-ab-cd-ef-12-34")
+
+
+def test_parse_mac_short_rejected():
+    with pytest.raises(ValueError, match="bad MAC"):
+        _parse_mac("02:ab:cd:ef:12")
