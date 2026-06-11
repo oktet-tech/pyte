@@ -75,7 +75,13 @@ class JobStatus:
 
 @dataclass(frozen=True)
 class JobMessage:
-    """One message read from a job filter."""
+    """One message read from a job filter.
+
+    ``data`` is text decoded from UTF-8 (errors replaced with U+FFFD).
+    TE truncates data at interior NUL bytes before delivery, so
+    ``data`` may be shorter than the raw output.  This is asymmetric
+    with :meth:`InputChannel.send`, which is binary-safe.
+    """
     data: str
     eos: bool
     dropped: int
@@ -139,28 +145,36 @@ class InputChannel:
 class Filter:
     """A secondary (filter) channel: a message source for the test."""
 
-    def __init__(self, job: "Job", handle, name: str):
+    def __init__(self, job: "Job", handle, name: str, n_channels: int = 1):
         self._job = job
         self._h = handle
         self.name = name
+        self._n_channels: int = n_channels
 
     def attach(self, channel: Channel) -> None:
-        """Attach this filter to one more output channel."""
+        """Attach this filter to one more output channel.
+
+        Increments the internal channel count so that
+        :meth:`messages` waits for the correct number of eos messages.
+        """
         from pyte._shim import ffi, lib
         arr = ffi.new("tapi_job_channel_t *[]", [channel._h])
         check(lib.pyte_job_filter_add(self._h, arr, 1),
               f"filter_add_channels({self.name})")
+        self._n_channels += 1
 
     def detach(self, channel: Channel) -> None:
         """Detach this filter from a channel.
 
-        Once detached from all its channels the filter is freed by
-        the TAPI and this object must not be used again.
+        Decrements the internal channel count.  Once detached from all
+        its channels the filter is freed by the TAPI and this object
+        must not be used again.
         """
         from pyte._shim import ffi, lib
         arr = ffi.new("tapi_job_channel_t *[]", [channel._h])
         check(lib.pyte_job_filter_remove(self._h, arr, 1),
               f"filter_remove_channels({self.name})")
+        self._n_channels -= 1
 
     def next(self, timeout: float = DEFAULT_TIMEOUT) -> JobMessage:
         """Read the next message (raises TimeoutError if none)."""
@@ -172,15 +186,32 @@ class Filter:
 
     def messages(self,
                  timeout: float = DEFAULT_TIMEOUT) -> Iterator[JobMessage]:
-        """Yield messages until end-of-stream (eos is consumed)."""
-        while True:
+        """Yield messages until all attached channels have sent eos.
+
+        ta_job emits one eos message per attached primary channel, so a
+        filter attached to both stdout and stderr receives two eos
+        messages.  This method counts them and stops only after all
+        ``self._n_channels`` eos messages have been consumed.  Eos
+        messages themselves are not yielded.
+
+        ``timeout`` is forwarded to each :meth:`next` call;
+        :exc:`pyte.errors.TimeoutError` propagates immediately if a
+        receive times out (already-yielded messages are not replayed).
+        """
+        eos_seen = 0
+        while eos_seen < self._n_channels:
             msg = self.next(timeout=timeout)
             if msg.eos:
-                return
-            yield msg
+                eos_seen += 1
+            else:
+                yield msg
 
     def read_all(self, timeout: float = DEFAULT_TIMEOUT) -> str:
-        """Concatenate all message data until end-of-stream."""
+        """Concatenate all message data until end-of-stream.
+
+        Calls :meth:`messages` internally; :exc:`pyte.errors.TimeoutError`
+        propagates if a receive times out mid-stream.
+        """
         return "".join(m.data for m in self.messages(timeout=timeout))
 
     def __repr__(self) -> str:
@@ -201,7 +232,8 @@ def _attach_filter(channels: list[Channel], *, name: str | None,
                                      1 if readable else 0,
                                      _log_level(log_level), out),
           f"job.attach_filter({name or ''})")
-    flt = Filter(job, out[0], name or regex or "filter")
+    flt = Filter(job, out[0], name or regex or "filter",
+                 n_channels=len(channels))
     if regex is not None:
         check(lib.pyte_job_filter_regexp(flt._h, _enc(regex), group),
               f"job.filter_add_regexp({regex!r})")
@@ -212,7 +244,13 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
                 last: bool = False) -> JobMessage:
     """Read the next message from any of the given filters.
 
-    Raises pyte.errors.TimeoutError if nothing arrives in time.
+    The returned :class:`JobMessage` ``data`` field is text decoded
+    from UTF-8 (errors replaced).  TE truncates output at interior NUL
+    bytes before delivery, so ``data`` may be shorter than the raw
+    output — asymmetric with :meth:`InputChannel.send` which is
+    binary-safe.
+
+    Raises :exc:`pyte.errors.TimeoutError` if nothing arrives in time.
     """
     from pyte._shim import ffi, lib
     if not filters:
@@ -231,7 +269,11 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
         raw = bytes(ffi.buffer(data[0], dlen[0]))
     finally:
         lib.pyte_free_string(data[0])
-    flt = next((f for f in filters if f._h == src[0]), filters[0])
+    flt = next((f for f in filters if f._h == src[0]), None)
+    if flt is None:
+        raise RuntimeError(
+            "receive_any: message arrived from a filter not in the "
+            "provided set")
     return JobMessage(data=raw.decode("utf-8", errors="replace"),
                       eos=bool(eos[0]), dropped=dropped[0], filter=flt)
 
@@ -272,18 +314,23 @@ class Job:
         args are the program arguments (argv[0] = program is added
         here, per the exec convention tapi_job_create() expects).
         env replaces the whole environment when given (None inherits).
+
+        The argv/env cffi arrays are built before the factory is
+        created so that a Python-side exception (e.g. encoding error)
+        cannot leak an allocated factory handle.
         """
         from pyte._shim import ffi, lib
-        fac = ffi.new("tapi_job_factory_t **")
-        check(lib.pyte_job_factory_rpc(server._h, fac),
-              f"job_factory_rpc_create({server.name})")
-        # Keep the cdata strings alive in locals across the call
+        # Build argv/env arrays first; a Python error here leaks nothing.
+        # Keep the cdata strings alive in locals across the call.
         argv_strs = [ffi.new("char[]", _enc(a)) for a in [program, *args]]
         argv = ffi.new("const char *[]", [*argv_strs, ffi.NULL])
         env_strs = None if env is None else [
             ffi.new("char[]", _enc(f"{k}={v}")) for k, v in env.items()]
         envp = ffi.NULL if env_strs is None else ffi.new(
             "const char *[]", [*env_strs, ffi.NULL])
+        fac = ffi.new("tapi_job_factory_t **")
+        check(lib.pyte_job_factory_rpc(server._h, fac),
+              f"job_factory_rpc_create({server.name})")
         out = ffi.new("tapi_job_t **")
         rc = lib.pyte_job_create(fac[0], _enc(program), argv, envp, out)
         if rc != 0:
