@@ -134,6 +134,49 @@ class RpcServer:
             if pbuf[0] != ffi.NULL:
                 lib.pyte_free_string(pbuf[0])
 
+    def sleep(self, seconds: float) -> None:
+        """Sleep on the agent side (a remote, not engine-side, delay).
+
+        This TE has no rpc_sleep() RPC (checked tapi_rpc_unistd.h),
+        so the delay runs as a remote shell ``sleep``.  The RPC
+        timeout is raised for this one call to cover the sleep;
+        rcf_rpc resets it to the default afterwards (rpcs->timeout
+        is per-call).
+        """
+        from pyte._shim import lib
+        if seconds < 0:
+            raise ValueError("seconds must be >= 0")
+        lib.pyte_rpc_set_timeout(self._h, int(seconds * 1000) + 10000)
+        self.sh(f"sleep {seconds:g}")
+
+    def getenv(self, name: str) -> str | None:
+        """Get an agent environment variable (None if unset)."""
+        from pyte._shim import ffi, lib
+        out = ffi.new("char **")
+        rc = lib.pyte_rpc_getenv(self._h, _enc(name), out)
+        # rpc_getenv() returns NULL both for "unset" and "call
+        # failed"; only the latter sets the remote errno.
+        ret = self._check_call(
+            rc, out[0],
+            lambda v: v != ffi.NULL or lib.pyte_rpc_errno(self._h) == 0,
+            f"getenv({name})")
+        if ret is SUPPRESSED or out[0] == ffi.NULL:
+            return None
+        try:
+            return ffi.string(out[0]).decode(errors="replace")
+        finally:
+            lib.pyte_free_string(out[0])
+
+    def setenv(self, name: str, value: str,
+               overwrite: bool = True) -> None:
+        """Set an agent environment variable."""
+        from pyte._shim import ffi, lib
+        out = ffi.new("int *")
+        rc = lib.pyte_rpc_setenv(self._h, _enc(name), _enc(value),
+                                 1 if overwrite else 0, out)
+        self._check_call(rc, out[0], lambda v: v == 0,
+                         f"setenv({name}={value!r})")
+
     def socket(self, family="inet", type="stream"):
         from pyte.rpc.socket import RpcSocket
         return RpcSocket.open(self, family, type)
@@ -151,3 +194,11 @@ class RpcServer:
     def unlink(self, path: str) -> None:
         from pyte.rpc.files import unlink
         unlink(self, path)
+
+    def file_put(self, path: str, data: bytes) -> None:
+        from pyte.rpc.files import file_put
+        file_put(self, path, data)
+
+    def file_get(self, path: str) -> bytes:
+        from pyte.rpc.files import file_get
+        return file_get(self, path)

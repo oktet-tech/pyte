@@ -18,6 +18,7 @@ from pyte.errors import TestFail, TestSkip
 from pyte.log import _enc
 
 EXIT_SIGINT = 0x2
+EXIT_SIGUSR2 = 0x4
 EXIT_SKIP = 0x5
 
 _current: "Test | None" = None
@@ -63,6 +64,12 @@ class Test:
         """Name of the suite's single test agent."""
         return os.environ.get("TE_IUT_TA_NAME", "Agt_A")
 
+    @property
+    def agents(self) -> list[str]:
+        """Names of all test agents in the configuration tree."""
+        from pyte import cfg
+        return [n.name for n in cfg.find("/agent:*")]
+
     def rpc_server(self, name: str):
         from pyte.rpc import RpcServer
         srv = RpcServer.create(self.agent, name)
@@ -89,6 +96,11 @@ def current() -> Test:
 def _sig_handler(signum, frame):
     if signum == signal.SIGINT:
         os._exit(EXIT_SIGINT)
+    # TE's C handler exits on SIGUSR2 only when TE_TEST_SIGUSR2_STOP
+    # is set; otherwise the signal fails the test like SIGUSR1.
+    if (signum == signal.SIGUSR2
+            and os.environ.get("TE_TEST_SIGUSR2_STOP") is not None):
+        os._exit(EXIT_SIGUSR2)
     raise TestFail(f"Test got signal {signal.Signals(signum).name}")
 
 
@@ -119,6 +131,7 @@ def start(name: str | None = None):
 
     signal.signal(signal.SIGINT, _sig_handler)
     signal.signal(signal.SIGUSR1, _sig_handler)
+    signal.signal(signal.SIGUSR2, _sig_handler)
 
     t = Test(params)
     _current = t
@@ -148,7 +161,13 @@ def start(name: str | None = None):
         log.error(f"Test failed: {e}")
         result = 1
     except SystemExit as e:
-        result = int(e.code or 0)
+        if e.code is None:
+            result = 0
+        elif isinstance(e.code, int):
+            result = e.code
+        else:
+            log.error(f"SystemExit with non-integer code: {e.code!r}")
+            result = 1
     except Exception:
         log.error("Unhandled exception:\n" + traceback.format_exc())
         result = 1

@@ -49,6 +49,8 @@ te_errno pyte_rpc_sendto(rcf_rpc_server *rpcs, int s, const uint8_t *buf,
 te_errno pyte_rpc_recvfrom(rcf_rpc_server *rpcs, int s, uint8_t *buf,
                            size_t len, int flags, struct sockaddr *from,
                            socklen_t *fromlen, ssize_t *out);
+te_errno pyte_rpc_setsockopt_int(rcf_rpc_server *rpcs, int s, int optname,
+                                 int optval, int *out);
 te_errno pyte_rpc_getsockname(rcf_rpc_server *rpcs, int s,
                               struct sockaddr *name, socklen_t *namelen,
                               int *out);
@@ -63,6 +65,10 @@ te_errno pyte_rpc_unlink(rcf_rpc_server *rpcs, const char *path, int *out);
 te_errno pyte_rpc_getpid(rcf_rpc_server *rpcs, int *out);
 te_errno pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf, size_t len,
                               int *out);
+te_errno pyte_rpc_getenv(rcf_rpc_server *rpcs, const char *name,
+                         char **out);
+te_errno pyte_rpc_setenv(rcf_rpc_server *rpcs, const char *name,
+                         const char *value, int overwrite, int *out);
 te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                 const char *cmd, int *out_flag,
                                 int *out_value);
@@ -166,6 +172,7 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define PYTE_O_TRUNC ...
 #define PYTE_O_APPEND ...
 #define PYTE_MODE_0644 ...
+#define PYTE_SO_REUSEADDR ...
 #define PYTE_ECONNREFUSED ...
 #define PYTE_ENOENT ...
 #define PYTE_CVT_NONE ...

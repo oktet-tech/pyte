@@ -130,6 +130,13 @@ Worked example — how `rpc_listen()` was added:
   `RpcServer.socket()`/`RpcSocket.open()` and
   `RpcServer.open()`/`open_file()` return `None`, not a wrapper
   around fd -1.
+- `RpcSocket.setsockopt()` deliberately exposes a minimal int-valued
+  option surface (currently `SO_REUSEADDR`).  To add an option:
+  passthrough the `RPC_SO_*` constant from `te_rpc_sys_socket.h` as
+  `PYTE_SO_*` in `shim/pyte_shim.h` + the cdef, then add a row to
+  `_SOCKOPTS` in `src/pyte/rpc/socket.py`.
+- `RpcServer.sleep()` is a remote shell `sleep` with RPC-timeout
+  headroom: this TE has no `rpc_sleep()` RPC.
 - `pyte.errors.check()` raises `pyte.errors.TimeoutError` for
   `TE_ETIMEDOUT` regardless of the exception class passed in.
 - `pyte.tad.validate(text, kind)` wraps the shim's `pyte_asn_check()`

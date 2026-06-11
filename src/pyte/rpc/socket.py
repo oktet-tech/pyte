@@ -16,6 +16,13 @@ _TYPES = {
     "stream": "PYTE_SOCK_STREAM",
     "dgram": "PYTE_SOCK_DGRAM",
 }
+# Minimal int-valued setsockopt surface.  To support another option,
+# add a PYTE_SO_* constant passthrough to shim/pyte_shim.{h,cdef.h}
+# (value = the matching RPC_SO_* from te_rpc_sys_socket.h) and a row
+# here; rpc_setsockopt_int() derives the level from the option itself.
+_SOCKOPTS = {
+    "SO_REUSEADDR": "PYTE_SO_REUSEADDR",
+}
 
 
 def _mk_addr(ffi, lib, addr: tuple[str, int]):
@@ -76,6 +83,24 @@ class RpcSocket:
         rc = lib.pyte_rpc_close(self.server._h, self.fd, out)
         self.fd = -1
         self.server._check_call(rc, out[0], lambda v: v == 0, "close()")
+
+    def setsockopt(self, opt: str, value: int) -> None:
+        """Set an int-valued socket option, e.g. ("SO_REUSEADDR", 1).
+
+        Only the options listed in ``_SOCKOPTS`` are supported; see
+        the comment there for how to extend the surface.
+        """
+        from pyte._shim import ffi, lib
+        try:
+            optname = getattr(lib, _SOCKOPTS[opt])
+        except KeyError:
+            raise ValueError(
+                f"unsupported socket option {opt!r}") from None
+        out = ffi.new("int *")
+        rc = lib.pyte_rpc_setsockopt_int(self.server._h, self.fd,
+                                         optname, value, out)
+        self.server._check_call(rc, out[0], lambda v: v == 0,
+                                f"setsockopt({opt}, {value})")
 
     def bind(self, addr: tuple[str, int]) -> None:
         from pyte._shim import ffi, lib

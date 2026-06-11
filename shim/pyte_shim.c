@@ -188,6 +188,16 @@ pyte_rpc_recvfrom(rcf_rpc_server *rpcs, int s, uint8_t *buf, size_t len,
 }
 
 te_errno
+pyte_rpc_setsockopt_int(rcf_rpc_server *rpcs, int s, int optname,
+                        int optval, int *out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_setsockopt_int(rpcs, s, (rpc_sockopt)optname,
+                                         optval));
+    return 0;
+}
+
+te_errno
 pyte_rpc_getsockname(rcf_rpc_server *rpcs, int s, struct sockaddr *name,
                      socklen_t *namelen, int *out)
 {
@@ -252,6 +262,25 @@ pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf, size_t len, int *out)
 {
     RPC_AWAIT_ERROR(rpcs);
     PYTE_GUARD(*out = rpc_gethostname(rpcs, buf, len));
+    return 0;
+}
+
+te_errno
+pyte_rpc_getenv(rcf_rpc_server *rpcs, const char *name, char **out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    /* NULL means both "variable unset" and "call failed":
+     * Python tells them apart via pyte_rpc_errno() */
+    PYTE_GUARD(*out = rpc_getenv(rpcs, name));
+    return 0;
+}
+
+te_errno
+pyte_rpc_setenv(rcf_rpc_server *rpcs, const char *name, const char *value,
+                int overwrite, int *out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_setenv(rpcs, name, value, overwrite));
     return 0;
 }
 
@@ -389,6 +418,12 @@ pyte_cfg_get_str_nojmp(const char *oid, char **out, int *out_type)
             char     buf[INET6_ADDRSTRLEN];
             uint16_t port;
 
+            if (v.sa == NULL)
+            {
+                /* A NULL address instance reads as an empty string */
+                *out = strdup("");
+                break;
+            }
             rc = pyte_sockaddr_parse(v.sa, buf, sizeof(buf), &port);
             free(v.sa);
             if (rc != 0)

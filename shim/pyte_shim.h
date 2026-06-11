@@ -74,6 +74,8 @@
 /* rpc_open() mode is an RPC bitmap (te_rpc_sys_stat.h), not raw octal */
 #define PYTE_MODE_0644 \
     (RPC_S_IRUSR | RPC_S_IWUSR | RPC_S_IRGRP | RPC_S_IROTH)
+/* Socket options for pyte_rpc_setsockopt_int() (rpc_sockopt values) */
+#define PYTE_SO_REUSEADDR RPC_SO_REUSEADDR
 
 /* Configurator value-type passthrough */
 #define PYTE_CVT_NONE CVT_NONE
@@ -134,6 +136,8 @@ extern te_errno pyte_rpc_recvfrom(rcf_rpc_server *rpcs, int s,
                                   uint8_t *buf, size_t len, int flags,
                                   struct sockaddr *from, socklen_t *fromlen,
                                   ssize_t *out);
+extern te_errno pyte_rpc_setsockopt_int(rcf_rpc_server *rpcs, int s,
+                                        int optname, int optval, int *out);
 extern te_errno pyte_rpc_getsockname(rcf_rpc_server *rpcs, int s,
                                      struct sockaddr *name,
                                      socklen_t *namelen, int *out);
@@ -149,6 +153,11 @@ extern te_errno pyte_rpc_unlink(rcf_rpc_server *rpcs, const char *path,
 extern te_errno pyte_rpc_getpid(rcf_rpc_server *rpcs, int *out);
 extern te_errno pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf,
                                      size_t len, int *out);
+/* *out is malloc'ed (pyte_free_string) or NULL: unset OR call failed */
+extern te_errno pyte_rpc_getenv(rcf_rpc_server *rpcs, const char *name,
+                                char **out);
+extern te_errno pyte_rpc_setenv(rcf_rpc_server *rpcs, const char *name,
+                                const char *value, int overwrite, int *out);
 extern te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                        const char *cmd, int *out_flag,
                                        int *out_value);

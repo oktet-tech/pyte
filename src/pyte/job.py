@@ -206,6 +206,31 @@ class Filter:
             else:
                 yield msg
 
+    def read_many(self, count: int,
+                  timeout: float = DEFAULT_TIMEOUT) -> list[JobMessage]:
+        """Read up to ``count`` messages from this filter.
+
+        Stops early once every attached channel has reported
+        end-of-stream (one eos per channel, counted against
+        ``self._n_channels`` exactly like :meth:`messages`); eos
+        messages are consumed but not returned.
+
+        This is a Python-side loop over :meth:`next` rather than a
+        wrapper of C ``tapi_job_receive_many()``: the semantics are
+        the same at test-scale message counts and it needs no extra
+        shim surface.  ``timeout`` applies to each receive;
+        :exc:`pyte.errors.TimeoutError` propagates immediately.
+        """
+        msgs: list[JobMessage] = []
+        eos_seen = 0
+        while len(msgs) < count and eos_seen < self._n_channels:
+            msg = self.next(timeout=timeout)
+            if msg.eos:
+                eos_seen += 1
+            else:
+                msgs.append(msg)
+        return msgs
+
     def read_all(self, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Concatenate all message data until end-of-stream.
 
@@ -431,6 +456,25 @@ class Job:
         from pyte._shim import lib
         check(lib.pyte_job_stop(self._h, _signo(signal), _ms(timeout)),
               f"job.stop({self.program})")
+
+    def restart(self, timeout: float = DEFAULT_TIMEOUT,
+                signal: int | str = "SIGTERM") -> None:
+        """Stop the job if it is running, then start it again.
+
+        tapi_job has no restart call (tapi_job.h documents stopping
+        as "Stop a job.  It can be started over with
+        tapi_job_start()"), so this is stop-then-start.  Stop errors
+        are ignored: a job that already completed (and was waited
+        for) or never ran needs no stopping.  Primary channels and
+        filters stay attached; the agent re-binds them to the new
+        process on start.
+        """
+        from pyte.errors import TeError
+        try:
+            self.stop(timeout=timeout, signal=signal)
+        except TeError:
+            pass
+        self.start()
 
     def kill(self, signal: int | str = "SIGKILL") -> None:
         """Send a signal to the job."""

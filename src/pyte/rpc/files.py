@@ -83,3 +83,51 @@ def unlink(server, path: str) -> None:
     out = ffi.new("int *")
     rc = lib.pyte_rpc_unlink(server._h, _enc(path), out)
     server._check_call(rc, out[0], lambda v: v == 0, f"unlink({path})")
+
+
+#: Chunk size for file_put()/file_get() loops.
+_CHUNK = 4096
+
+
+def file_put(server, path: str, data: bytes) -> None:
+    """Write data to a file on the RPC server (created or truncated).
+
+    Convenience composition of open/write/close; writes in _CHUNK
+    pieces and follows short writes.  Inside expect_error() a
+    suppressed failure aborts the transfer silently.
+    """
+    f = open_file(server, path, "w")
+    if f is None:
+        return
+    with f:
+        view = memoryview(data)
+        while len(view) > 0:
+            n = f.write(bytes(view[:_CHUNK]))
+            if n is None:
+                return
+            if n == 0:
+                raise RuntimeError(
+                    f"file_put({path}): write() returned 0 with "
+                    f"{len(view)} bytes left")
+            view = view[n:]
+
+
+def file_get(server, path: str) -> bytes:
+    """Read a whole file from the RPC server.
+
+    Convenience composition of open/read/close; loops in _CHUNK
+    pieces until rpc_read() returns 0 (EOF).  Inside expect_error()
+    a suppressed failure yields the data read so far (b"" if the
+    open itself failed).
+    """
+    f = open_file(server, path, "r")
+    if f is None:
+        return b""
+    chunks = []
+    with f:
+        while True:
+            chunk = f.read(_CHUNK)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b"".join(chunks)
