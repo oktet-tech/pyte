@@ -126,7 +126,10 @@ Worked example — how `rpc_listen()` was added:
   cleared (or the test process restarted).
 - Inside `RpcServer.expect_error()`, value-returning facade calls
   whose failure was swallowed return `None` (raw `_check_call` users
-  see the `SUPPRESSED` sentinel).
+  see the `SUPPRESSED` sentinel).  This includes the open facades:
+  `RpcServer.socket()`/`RpcSocket.open()` and
+  `RpcServer.open()`/`open_file()` return `None`, not a wrapper
+  around fd -1.
 - `pyte.errors.check()` raises `pyte.errors.TimeoutError` for
   `TE_ETIMEDOUT` regardless of the exception class passed in.
 - `pyte.tad.validate(text, kind)` wraps the shim's `pyte_asn_check()`

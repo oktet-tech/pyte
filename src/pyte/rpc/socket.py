@@ -45,15 +45,17 @@ class RpcSocket:
 
     @classmethod
     def open(cls, server, family: str = "inet",
-             type: str = "stream") -> "RpcSocket":
+             type: str = "stream") -> "RpcSocket | None":
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
         rc = lib.pyte_rpc_socket(server._h,
                                  getattr(lib, _FAMILIES[family]),
                                  getattr(lib, _TYPES[type]),
                                  lib.PYTE_PROTO_DEF, out)
-        server._check_call(rc, out[0], lambda v: v >= 0,
-                           f"socket({family}, {type})")
+        ret = server._check_call(rc, out[0], lambda v: v >= 0,
+                                 f"socket({family}, {type})")
+        if ret is SUPPRESSED:
+            return None
         return cls(server, out[0])
 
     def __enter__(self):

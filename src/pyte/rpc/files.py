@@ -59,7 +59,7 @@ class RpcFile:
         return bytes(ffi.buffer(buf, out[0]))
 
 
-def open_file(server, path: str, mode: str = "r") -> RpcFile:
+def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
     """Open a file on the RPC server; mode is "r", "w" or "a"."""
     from pyte._shim import ffi, lib
     flags = {
@@ -70,8 +70,10 @@ def open_file(server, path: str, mode: str = "r") -> RpcFile:
     out = ffi.new("int *")
     rc = lib.pyte_rpc_open(server._h, _enc(path), flags,
                            lib.PYTE_MODE_0644, out)
-    server._check_call(rc, out[0], lambda v: v >= 0,
-                       f"open({path}, {mode!r})")
+    ret = server._check_call(rc, out[0], lambda v: v >= 0,
+                             f"open({path}, {mode!r})")
+    if ret is SUPPRESSED:
+        return None
     return RpcFile(server, out[0], path)
 
 
