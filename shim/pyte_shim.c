@@ -418,10 +418,28 @@ pyte_cfg_get_str_nojmp(const char *oid, char **out, int *out_type)
             char     buf[INET6_ADDRSTRLEN];
             uint16_t port;
 
-            if (v.sa == NULL)
+            if (v.sa == NULL || v.sa->sa_family == AF_UNSPEC)
             {
-                /* A NULL address instance reads as an empty string */
+                /* NULL/unspecified address reads as an empty string */
+                free(v.sa);
                 *out = strdup("");
+                break;
+            }
+            if (v.sa->sa_family == AF_LOCAL)
+            {
+                /*
+                 * Configurator stores link-layer (MAC) addresses as
+                 * AF_LOCAL with the bytes in sa_data (conf_types.c
+                 * addr_to_str); render them the same way.
+                 */
+                const unsigned char *mac =
+                    (const unsigned char *)v.sa->sa_data;
+
+                snprintf(buf, sizeof(buf),
+                         "%02x:%02x:%02x:%02x:%02x:%02x",
+                         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                free(v.sa);
+                *out = strdup(buf);
                 break;
             }
             rc = pyte_sockaddr_parse(v.sa, buf, sizeof(buf), &port);

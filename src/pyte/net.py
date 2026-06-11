@@ -122,11 +122,9 @@ class Iface:
 
     @property
     def addresses(self) -> list[tuple[str, int]]:
-        out = []
-        for n in cfg.find(f"{self.oid}/net_addr:*"):
-            prefix = n.child("prefix").value
-            out.append((n.name, int(prefix)))
-        return out
+        """[(ip, prefix)]: the net_addr node's own value is the prefix."""
+        return [(n.name, int(n.value))
+                for n in cfg.find(f"{self.oid}/net_addr:*")]
 
     def addr_add(self, ip: str, prefix: int, broadcast: bool = True) -> None:
         from pyte._shim import lib
@@ -158,6 +156,14 @@ class AgentNet:
 
     # -- routes ----------------------------------------------------------
     def routes(self) -> list[Route]:
+        """Routing table snapshot.
+
+        The agent reports only routes whose output interface is a
+        grabbed resource and hides the kernel's local table
+        (agents/unix/conf/route), so e.g. a lo-only rig sees an empty
+        table. Plain pattern find, no sync — same as TE's own
+        tapi_cfg_get_route_table().
+        """
         out = []
         for n in cfg.find(f"/agent:{self.name}/route:*"):
             try:
