@@ -1044,6 +1044,8 @@ pyte_csap_recv_start(const char *ta, int session, unsigned int csap,
  * Collector callback: takes ownership of the packet (tapi_tad's
  * trrecv handler does not free it once a callback is set) and stores
  * the pointer in the growing pyte_pkts array.
+ *
+ * Per-packet realloc is fine at test volumes; don't optimize without need.
  */
 static void
 pyte_pkt_collect_cb(asn_value *packet, void *user_data)

@@ -55,10 +55,13 @@ def _int(v) -> str:
 
 
 def _du_str(v) -> str:
-    """Data-unit character string: ``plain:"lo"``."""
-    s = str(v)
-    if '"' in s:
-        raise ValueError(f"double quote not allowed in {s!r}")
+    """Data-unit character string: ``plain:"lo"``.
+
+    Backslashes and double quotes are escaped (``\\`` → ``\\\\``,
+    ``"`` → ``\\"``); TE's ASN.1 charstring parser (asn_text.c)
+    recognises both sequences.
+    """
+    s = str(v).replace("\\", "\\\\").replace('"', '\\"')
     return f'plain:"{s}"'
 
 
@@ -264,9 +267,11 @@ class Stack:
         if isinstance(other, Layer):
             return Stack(self.layers + (other,), self.payload)
         if isinstance(other, Stack):
-            return Stack(self.layers + other.layers,
-                         other.payload if other.payload is not None
-                         else self.payload)
+            if self.payload is not None and other.payload is not None:
+                raise ValueError("both stacks carry a payload")
+            payload = other.payload if other.payload is not None \
+                else self.payload
+            return Stack(self.layers + other.layers, payload)
         if isinstance(other, (bytes, bytearray)):
             return Stack(self.layers, bytes(other))
         return NotImplemented

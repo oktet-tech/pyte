@@ -16,6 +16,8 @@ from pyte.tad.dsl import Layer, Stack, stack
 DEFAULT_TIMEOUT = 10.0
 
 #: Cached RCF session per agent (one session is enough for a suite).
+#: Assumes agents live for the whole run; if an agent restarts the cache
+#: must be cleared manually (or the process restarted).
 _sessions: dict[str, int] = {}
 
 
@@ -39,13 +41,24 @@ class Packet:
     def __init__(self, handle):
         self._h = handle
 
-    def int_field(self, labels: str) -> int:
-        """Read an integer field by its NDN labels."""
+    def int_field(self, labels: str, unsigned: bool = False) -> int:
+        """Read an integer field by its NDN labels.
+
+        The shim reads via asn_read_int32 (signed 32-bit) and widens to
+        int64.  For NDN UINTEGER fields (e.g. TCP seqn/ackn, port
+        numbers ≥ 2^15, IP length) pass ``unsigned=True`` to interpret
+        the 32-bit value as unsigned: values below 2^31 are unaffected.
+        Genuinely signed fields (TTL, flags) should use the default
+        ``unsigned=False``.
+        """
         from pyte._shim import ffi, lib
         out = ffi.new("int64_t *")
         check(lib.pyte_pkt_read_int(self._h, _enc(labels), out),
               f"pkt.int_field({labels})")
-        return out[0]
+        value = int(out[0])
+        if unsigned:
+            value &= 0xFFFFFFFF
+        return value
 
     @property
     def payload(self) -> bytes:
@@ -232,8 +245,15 @@ class Csap:
     def __enter__(self) -> "Csap":
         return self
 
-    def __exit__(self, *exc) -> bool:
-        self.destroy()
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        if exc_type is None:
+            self.destroy()
+        else:
+            try:
+                self.destroy()
+            except Exception as e:
+                import pyte.log as _log
+                _log.error(f"csap.destroy failed during exception unwind: {e}")
         return False
 
     def __repr__(self) -> str:

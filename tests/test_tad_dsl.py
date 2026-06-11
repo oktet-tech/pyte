@@ -148,3 +148,44 @@ def test_socket_type_conflict_rejected():
 def test_socket_fd_type():
     assert Socket(fd=5).csap_spec() == \
         "{ layers { socket:{ type file-descr:5 } } }"
+
+
+# -- _du_str escaping -------------------------------------------------
+
+def test_du_str_double_quote_escaped():
+    """Device name containing a double quote must be escaped, not rejected."""
+    text = Ether(device='a"b').csap_spec()
+    assert text == '{ layers { eth:{ device-id plain:"a\\"b" } } }'
+
+
+def test_du_str_backslash_escaped():
+    """Backslash in device name must be doubled."""
+    text = Ether(device='a\\b').csap_spec()
+    assert text == '{ layers { eth:{ device-id plain:"a\\\\b" } } }'
+
+
+def test_du_str_both_escaped():
+    """Backslash followed by double quote: both are escaped in order."""
+    text = Ether(device='a\\"b').csap_spec()
+    assert text == '{ layers { eth:{ device-id plain:"a\\\\\\"b" } } }'
+
+
+# -- Stack dual-payload ambiguity -------------------------------------
+
+def test_stack_div_stack_both_payload_raises():
+    """Composing two payload-carrying stacks is ambiguous: must raise."""
+    s1 = Stack((UDP(),), payload=b"left")
+    s2 = Stack((IP4(),), payload=b"right")
+    with pytest.raises(ValueError, match="both stacks carry a payload"):
+        _ = s1 / s2
+
+
+def test_stack_div_stack_one_payload_ok():
+    """Single-payload composition: payload is preserved (whichever side)."""
+    s_left = Stack((UDP(),), payload=b"data")
+    s_right = Stack((IP4(),))
+    assert (s_left / s_right).payload == b"data"
+
+    s_right2 = Stack((IP4(),), payload=b"data2")
+    s_left2 = Stack((UDP(),))
+    assert (s_left2 / s_right2).payload == b"data2"
