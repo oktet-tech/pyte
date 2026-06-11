@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Copyright (C) 2026 Konstantin Ushakov */
+#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "pyte_shim.h"
 
@@ -305,7 +307,7 @@ pyte_cfg_get_type(const char *oid, int *out_type)
 }
 
 static te_errno
-pyte_cfg_get_str_nojmp(const char *oid, char **out)
+pyte_cfg_get_str_nojmp(const char *oid, char **out, int *out_type)
 {
     cfg_val_type t = CVT_UNSPECIFIED;
     union {
@@ -329,6 +331,8 @@ pyte_cfg_get_str_nojmp(const char *oid, char **out)
     rc = cfg_get_instance_str(&t, &v, oid);
     if (rc != 0)
         return rc;
+    if (out_type != NULL)
+        *out_type = (int)t;
 
     switch (t)
     {
@@ -377,7 +381,7 @@ pyte_cfg_get_str_nojmp(const char *oid, char **out)
             break;
 
         case CVT_DOUBLE:
-            n = asprintf(out, "%g", v.d);
+            n = asprintf(out, "%.17g", v.d);
             break;
 
         case CVT_ADDRESS:
@@ -403,9 +407,9 @@ pyte_cfg_get_str_nojmp(const char *oid, char **out)
 }
 
 te_errno
-pyte_cfg_get_str(const char *oid, char **out)
+pyte_cfg_get_str(const char *oid, char **out, int *out_type)
 {
-    PYTE_GUARD_RC(pyte_cfg_get_str_nojmp(oid, out));
+    PYTE_GUARD_RC(pyte_cfg_get_str_nojmp(oid, out, out_type));
     return 0;
 }
 
@@ -431,8 +435,15 @@ pyte_parse_uint(const char *value, uint64_t max, uint64_t *out)
 {
     char              *end = NULL;
     unsigned long long v;
+    const char        *p;
 
-    if (value == NULL || value[0] == '-')
+    if (value == NULL)
+        return TE_RC(TE_TAPI, TE_EINVAL);
+    /* Skip leading whitespace, then reject a '-' sign.  strtoull()
+     * itself would silently accept " -1" as a large positive number. */
+    for (p = value; isspace((unsigned char)*p); p++)
+        ;
+    if (*p == '-')
         return TE_RC(TE_TAPI, TE_EINVAL);
     errno = 0;
     v = strtoull(value, &end, 0);

@@ -129,7 +129,7 @@ extern te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
  * with_children/with_subtree are int (0/1) for cffi friendliness.
  */
 extern te_errno pyte_cfg_get_type(const char *oid, int *out_type);
-extern te_errno pyte_cfg_get_str(const char *oid, char **out);
+extern te_errno pyte_cfg_get_str(const char *oid, char **out, int *out_type);
 extern te_errno pyte_cfg_set_str(const char *oid, int type,
                                  const char *value);
 extern te_errno pyte_cfg_add_str(const char *oid, int type,

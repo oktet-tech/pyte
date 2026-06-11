@@ -5,6 +5,12 @@
 Values cross the C boundary as text; the shim converts them using the
 real instance type, and get() converts integers back to int.
 
+Notes:
+    - CVT_ADDRESS values are portless IP strings (e.g. "192.0.2.1").
+    - CVT_BOOL instances read back as int 0 or 1, not Python bool.
+    - A literal ``*`` in a CfgSubtree name cannot be matched by
+      iteration; ``*`` is reserved as a wildcard for find().
+
 Usage::
 
     from pyte import cfg
@@ -20,6 +26,8 @@ Usage::
     cfg.delete(f"/agent:Agt_A/env:DEMO")
 """
 from __future__ import annotations
+
+import re
 
 from pyte.errors import CfgError, check
 from pyte.log import _enc
@@ -48,9 +56,11 @@ def get(oid: str) -> str | int | None:
     """Get an instance value; integer types come back as int."""
     from pyte._shim import ffi, lib
     out = ffi.new("char **")
-    check(lib.pyte_cfg_get_str(_enc(oid), out), f"cfg get {oid}", CfgError)
+    t_out = ffi.new("int *")
+    check(lib.pyte_cfg_get_str(_enc(oid), out, t_out),
+          f"cfg get {oid}", CfgError)
     value = _take_str(out)
-    t = _get_type(oid)
+    t = t_out[0]
     if t == lib.PYTE_CVT_NONE:
         return None
     if any(t == getattr(lib, f"PYTE_CVT_{n}") for n in _INT_TYPES):
@@ -71,14 +81,37 @@ def set(oid: str, value) -> None:  # noqa: A001 - deliberate cfg.set name
 def add(oid: str, value=None) -> CfgNode:
     """Add an instance; value type is derived from the Python type."""
     from pyte._shim import ffi, lib
-    if value is None:
-        t, wire = lib.PYTE_CVT_NONE, b""
-    elif isinstance(value, bool):
-        t, wire = lib.PYTE_CVT_INT32, _enc(str(int(value)))
-    elif isinstance(value, int):
-        t, wire = lib.PYTE_CVT_INT32, _enc(str(value))
+
+    # Try to look up the declared CVT from the object descriptor.  The
+    # object OID has no instance names: strip every ":name" suffix so
+    # "/agent:Agt_A/env:VAR" becomes "/agent:/env:".
+    obj_oid = re.sub(r":[^/]*", ":", oid)
+    t = None
+    try:
+        t = _get_type(obj_oid)
+    except CfgError:
+        pass  # Descriptor unavailable; fall back to the heuristic below.
+
+    if t is not None and t != lib.PYTE_CVT_UNSPECIFIED:
+        # Use the declared type; format value to match what pyte_cfg_put
+        # expects for each CVT.
+        if t == lib.PYTE_CVT_BOOL:
+            wire = _enc("1" if value else "0")
+        elif t == lib.PYTE_CVT_NONE:
+            wire = b""
+        else:
+            wire = _enc(str(value) if value is not None else "")
     else:
-        t, wire = lib.PYTE_CVT_STRING, _enc(str(value))
+        # Heuristic: derive type from the Python value type.
+        if value is None:
+            t, wire = lib.PYTE_CVT_NONE, b""
+        elif isinstance(value, bool):
+            t, wire = lib.PYTE_CVT_INT32, _enc(str(int(value)))
+        elif isinstance(value, int):
+            t, wire = lib.PYTE_CVT_INT32, _enc(str(value))
+        else:
+            t, wire = lib.PYTE_CVT_STRING, _enc(str(value))
+
     handle = ffi.new("cfg_handle *")
     check(lib.pyte_cfg_add_str(_enc(oid), t, wire, handle),
           f"cfg add {oid}={value!r}", CfgError)
