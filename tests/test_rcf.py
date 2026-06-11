@@ -53,6 +53,15 @@ def test_conf_pairs_remote_sudo():
         ("host", "test"), ("port", "21000"), ("sudo", "")]
 
 
+def test_dynamic_agent_repr_shows_backend():
+    """remove() routing depends on the backend; repr must expose it."""
+    from pyte.rcf import DynamicAgent
+
+    assert repr(DynamicAgent("Agt_X", managed=True)) == \
+        "<DynamicAgent Agt_X managed>"
+    assert repr(DynamicAgent("Agt_X")) == "<DynamicAgent Agt_X raw>"
+
+
 def test_add_agent_sudo_requires_managed():
     """sudo rides in the managed conf kvpairs; the raw path is unchanged."""
     from pyte.rcf import add_agent

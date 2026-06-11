@@ -244,6 +244,10 @@ class DynamicAgent(RcfAgent):
                     f"rcf.remove failed during exception unwind: {e}")
         return False
 
+    def __repr__(self):
+        return (f"<DynamicAgent {self.name} "
+                f"{'managed' if self.managed else 'raw'}>")
+
 
 def agent(name: str) -> RcfAgent:
     return RcfAgent(name)
