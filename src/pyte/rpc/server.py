@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Konstantin Ushakov
+"""RPC servers: pythonic rcf_rpc_server handles."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+
+from pyte.errors import RpcError, TestFail, check
+from pyte.log import _enc
+
+
+class RpcServer:
+    """An RPC server (process) on a test agent.
+
+    Operates in awaiting-error mode: failed calls raise RpcError
+    instead of longjmp'ing like the C TAPI does.
+    """
+
+    def __init__(self, handle, ta: str, name: str):
+        self._h = handle
+        self.ta = ta
+        self.name = name
+        self._expected: int | None = None
+        self._expected_hit = False
+
+    @classmethod
+    def create(cls, ta: str, name: str) -> "RpcServer":
+        from pyte._shim import ffi, lib
+        out = ffi.new("rcf_rpc_server **")
+        check(lib.pyte_rpc_server_create(_enc(ta), _enc(name), out),
+              f"rpc_server_create({ta}, {name})", RpcError)
+        return cls(out[0], ta, name)
+
+    def destroy(self) -> None:
+        from pyte._shim import lib
+        if self._h is not None:
+            check(lib.pyte_rpc_server_destroy(self._h),
+                  f"rpc_server_destroy({self.name})", RpcError)
+            self._h = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.destroy()
+        return False
+
+    def __repr__(self):
+        return f"<RpcServer {self.ta}/{self.name}>"
+
+    # -- error plumbing used by all facades ---------------------------
+    def _check_call(self, guard_rc: int, retval, ok, where: str):
+        """guard_rc: trampoline status; ok(retval): success predicate."""
+        from pyte._shim import ffi, lib
+        check(guard_rc, where, RpcError)
+        failed = not ok(retval)
+        if not failed:
+            return retval
+        rpc_errno = lib.pyte_rpc_errno(self._h)
+        if self._expected is not None:
+            if (self._expected == 0 or
+                    lib.pyte_rc_error(rpc_errno) == self._expected):
+                self._expected_hit = True
+                return retval
+        raise RpcError(
+            rpc_errno, where,
+            ffi.string(lib.pyte_rpc_err_msg(self._h)).decode(
+                errors="replace"))
+
+    @contextmanager
+    def expect_error(self, expected_errno: int = 0):
+        """Assert that an RPC call inside the block fails.
+
+        expected_errno: TE error code to require (0 = any error).
+        Raises TestFail if the block completes without a failure.
+        """
+        self._expected = expected_errno
+        self._expected_hit = False
+        try:
+            yield self
+        finally:
+            self._expected = None
+        if not self._expected_hit:
+            raise TestFail("expected an RPC error, but calls succeeded")
+
+    # -- curated calls -------------------------------------------------
+    def getpid(self) -> int:
+        from pyte._shim import ffi, lib
+        out = ffi.new("int *")
+        return self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
+                                lambda v: v >= 0, "getpid()")
+
+    def hostname(self) -> str:
+        from pyte._shim import ffi, lib
+        buf = ffi.new("char[256]")
+        out = ffi.new("int *")
+        self._check_call(lib.pyte_rpc_gethostname(self._h, buf, 256, out),
+                         out[0], lambda v: v == 0, "gethostname()")
+        return ffi.string(buf).decode(errors="replace")
+
+    def sh(self, cmd: str) -> str:
+        """Run a shell command on the agent, return its stdout."""
+        from pyte._shim import ffi, lib
+        pbuf = ffi.new("char **")
+        flag = ffi.new("int *")
+        value = ffi.new("int *")
+        rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
+                                        value)
+        # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED == 0)
+        # with status 0.
+        self._check_call(rc, (flag[0], value[0]),
+                         lambda fv: fv == (0, 0), f"sh({cmd!r})")
+        try:
+            return ffi.string(pbuf[0]).decode(errors="replace")
+        finally:
+            if pbuf[0] != ffi.NULL:
+                lib.pyte_free_string(pbuf[0])
+
+    def socket(self, family="inet", type="stream"):
+        from pyte.rpc.socket import RpcSocket
+        return RpcSocket.open(self, family, type)
+
+    def open(self, path: str, mode: str = "r"):
+        from pyte.rpc.files import open_file
+        return open_file(self, path, mode)
+
+    def unlink(self, path: str) -> None:
+        from pyte.rpc.files import unlink
+        unlink(self, path)
+
+    def job(self, program: str, args: list[str] | None = None,
+            env: dict[str, str] | None = None):
+        from pyte.job import Job
+        return Job.create(self, program, args or [], env)

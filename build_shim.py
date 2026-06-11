@@ -19,6 +19,8 @@ TE_LIBS = [
     "te-confapi", "te-conf_oid", "te-rcfapi", "te-logger_ten", "te-ipc",
     "te-tools", "te-logger_core", "te-asn", "te-ndn", "te-rpc_types",
     "te-rpcxdr",
+    # tarpc.h includes <rpc/rpc.h>; te-rpcxdr.pc does not propagate it
+    "libtirpc",
 ]
 
 
