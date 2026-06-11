@@ -82,6 +82,47 @@ te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
 te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
 void pyte_free_handles(cfg_handle *set);
 
+typedef struct tapi_job_factory_t tapi_job_factory_t;
+typedef struct tapi_job_t tapi_job_t;
+typedef struct tapi_job_channel_t tapi_job_channel_t;
+
+te_errno pyte_job_factory_rpc(rcf_rpc_server *rpcs,
+                              tapi_job_factory_t **out);
+te_errno pyte_job_factory_destroy(tapi_job_factory_t *f);
+te_errno pyte_job_create(tapi_job_factory_t *f, const char *program,
+                         const char **argv, const char **env,
+                         tapi_job_t **out);
+te_errno pyte_job_start(tapi_job_t *job);
+te_errno pyte_job_wait(tapi_job_t *job, int timeout_ms, int *out_type,
+                       int *out_value);
+te_errno pyte_job_stop(tapi_job_t *job, int signo, int term_timeout_ms);
+te_errno pyte_job_kill(tapi_job_t *job, int signo);
+te_errno pyte_job_destroy(tapi_job_t *job, int term_timeout_ms);
+te_errno pyte_job_out_channels(tapi_job_t *job,
+                               tapi_job_channel_t **out_stdout,
+                               tapi_job_channel_t **out_stderr);
+te_errno pyte_job_in_channel(tapi_job_t *job, tapi_job_channel_t **out);
+te_errno pyte_job_attach_filter(tapi_job_channel_t **channels,
+                                unsigned int n, const char *name,
+                                int readable, unsigned int log_level,
+                                tapi_job_channel_t **out);
+te_errno pyte_job_filter_regexp(tapi_job_channel_t *filter, const char *re,
+                                unsigned int extract);
+te_errno pyte_job_filter_add(tapi_job_channel_t *filter,
+                             tapi_job_channel_t **channels, unsigned int n);
+te_errno pyte_job_filter_remove(tapi_job_channel_t *filter,
+                                tapi_job_channel_t **channels,
+                                unsigned int n);
+te_errno pyte_job_receive(tapi_job_channel_t **filters, unsigned int n,
+                          int timeout_ms, int last, char **out_data,
+                          size_t *out_len, int *out_eos,
+                          unsigned int *out_dropped,
+                          tapi_job_channel_t **out_filter);
+te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
+                       size_t len);
+te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
+                       int timeout_ms);
+
 te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,
                            struct sockaddr_storage *ss, socklen_t *len);
 te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
@@ -122,3 +163,13 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define TE_LL_INFO ...
 #define TE_LL_VERB ...
 #define PYTE_ETIMEDOUT ...
+#define PYTE_EINPROGRESS ...
+#define PYTE_JOB_EXITED ...
+#define PYTE_JOB_SIGNALED ...
+#define PYTE_JOB_UNKNOWN ...
+#define PYTE_SIGHUP ...
+#define PYTE_SIGINT ...
+#define PYTE_SIGKILL ...
+#define PYTE_SIGTERM ...
+#define PYTE_SIGUSR1 ...
+#define PYTE_SIGUSR2 ...

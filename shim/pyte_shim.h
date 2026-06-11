@@ -15,8 +15,13 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#include <signal.h>
+
 #include "conf_api.h"
 #include "rcf_rpc.h"
+#include "tapi_job.h"
+#include "tapi_job_factory_rpc.h"
+#include "te_string.h"
 #include "te_rpc_sys_socket.h"
 #include "te_rpc_sys_stat.h"
 #include "te_rpc_fcntl.h"
@@ -27,6 +32,24 @@
 #define PYTE_ETIMEDOUT TE_ETIMEDOUT
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
 #define PYTE_ENOENT TE_ENOENT
+#define PYTE_EINPROGRESS TE_EINPROGRESS
+
+/* Job completion cause passthrough */
+#define PYTE_JOB_EXITED TAPI_JOB_STATUS_EXITED
+#define PYTE_JOB_SIGNALED TAPI_JOB_STATUS_SIGNALED
+#define PYTE_JOB_UNKNOWN TAPI_JOB_STATUS_UNKNOWN
+
+/*
+ * Signal numbers for tapi_job_kill()/tapi_job_stop().  The job TAPI
+ * takes HOST signal numbers and converts them itself (rpc_job.c uses
+ * signum_h2rpc()), so plain <signal.h> values are correct here.
+ */
+#define PYTE_SIGHUP SIGHUP
+#define PYTE_SIGINT SIGINT
+#define PYTE_SIGKILL SIGKILL
+#define PYTE_SIGTERM SIGTERM
+#define PYTE_SIGUSR1 SIGUSR1
+#define PYTE_SIGUSR2 SIGUSR2
 
 /* RPC constant passthrough: cffi-friendly ints with verified values */
 #define PYTE_PF_INET RPC_PF_INET
@@ -141,6 +164,52 @@ extern te_errno pyte_cfg_oid_str(cfg_handle h, char **out);
 extern te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
 extern te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
 extern void pyte_free_handles(cfg_handle *set);
+
+/*
+ * Job wrappers (tapi_job over an RPC factory).  Channel sets cross the
+ * boundary as (array, count) pairs and are repacked into the
+ * NULL-terminated vectors tapi_job expects.  factory_destroy returns
+ * te_errno (always 0) instead of void so it can be guarded.
+ */
+extern te_errno pyte_job_factory_rpc(rcf_rpc_server *rpcs,
+                                     tapi_job_factory_t **out);
+extern te_errno pyte_job_factory_destroy(tapi_job_factory_t *f);
+extern te_errno pyte_job_create(tapi_job_factory_t *f, const char *program,
+                                const char **argv, const char **env,
+                                tapi_job_t **out);
+extern te_errno pyte_job_start(tapi_job_t *job);
+extern te_errno pyte_job_wait(tapi_job_t *job, int timeout_ms,
+                              int *out_type, int *out_value);
+extern te_errno pyte_job_stop(tapi_job_t *job, int signo,
+                              int term_timeout_ms);
+extern te_errno pyte_job_kill(tapi_job_t *job, int signo);
+extern te_errno pyte_job_destroy(tapi_job_t *job, int term_timeout_ms);
+extern te_errno pyte_job_out_channels(tapi_job_t *job,
+                                      tapi_job_channel_t **out_stdout,
+                                      tapi_job_channel_t **out_stderr);
+extern te_errno pyte_job_in_channel(tapi_job_t *job,
+                                    tapi_job_channel_t **out);
+extern te_errno pyte_job_attach_filter(tapi_job_channel_t **channels,
+                                       unsigned int n, const char *name,
+                                       int readable, unsigned int log_level,
+                                       tapi_job_channel_t **out);
+extern te_errno pyte_job_filter_regexp(tapi_job_channel_t *filter,
+                                       const char *re, unsigned int extract);
+extern te_errno pyte_job_filter_add(tapi_job_channel_t *filter,
+                                    tapi_job_channel_t **channels,
+                                    unsigned int n);
+extern te_errno pyte_job_filter_remove(tapi_job_channel_t *filter,
+                                       tapi_job_channel_t **channels,
+                                       unsigned int n);
+extern te_errno pyte_job_receive(tapi_job_channel_t **filters,
+                                 unsigned int n, int timeout_ms, int last,
+                                 char **out_data, size_t *out_len,
+                                 int *out_eos, unsigned int *out_dropped,
+                                 tapi_job_channel_t **out_filter);
+extern te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
+                              size_t len);
+extern te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
+                              int timeout_ms);
 
 /* Local sockaddr helpers (no RPC involved) */
 extern te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,

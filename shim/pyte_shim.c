@@ -663,6 +663,240 @@ pyte_free_handles(cfg_handle *set)
     free(set);
 }
 
+/*
+ * Job section.  tapi_job functions return te_errno and are not
+ * supposed to longjmp, but every call is still guarded.  Channel sets
+ * are repacked from (array, count) into NULL-terminated VLAs; the
+ * _nojmp helpers own all te_string memory so it is freed on every
+ * return path (a longjmp would leak it, but a jump out of a
+ * te_errno-returning tapi_job call means the test is failing anyway).
+ */
+
+te_errno
+pyte_job_factory_rpc(rcf_rpc_server *rpcs, tapi_job_factory_t **out)
+{
+    PYTE_GUARD_RC(tapi_job_factory_rpc_create(rpcs, out));
+    return 0;
+}
+
+te_errno
+pyte_job_factory_destroy(tapi_job_factory_t *f)
+{
+    PYTE_GUARD(tapi_job_factory_destroy(f));
+    return 0;
+}
+
+te_errno
+pyte_job_create(tapi_job_factory_t *f, const char *program,
+                const char **argv, const char **env, tapi_job_t **out)
+{
+    PYTE_GUARD_RC(tapi_job_create(f, NULL, program, argv, env, out));
+    return 0;
+}
+
+te_errno
+pyte_job_start(tapi_job_t *job)
+{
+    PYTE_GUARD_RC(tapi_job_start(job));
+    return 0;
+}
+
+te_errno
+pyte_job_wait(tapi_job_t *job, int timeout_ms, int *out_type,
+              int *out_value)
+{
+    tapi_job_status_t st = { .type = TAPI_JOB_STATUS_UNKNOWN, .value = 0 };
+
+    PYTE_GUARD_RC(tapi_job_wait(job, timeout_ms, &st));
+    *out_type = (int)st.type;
+    *out_value = st.value;
+    return 0;
+}
+
+te_errno
+pyte_job_stop(tapi_job_t *job, int signo, int term_timeout_ms)
+{
+    PYTE_GUARD_RC(tapi_job_stop(job, signo, term_timeout_ms));
+    return 0;
+}
+
+te_errno
+pyte_job_kill(tapi_job_t *job, int signo)
+{
+    PYTE_GUARD_RC(tapi_job_kill(job, signo));
+    return 0;
+}
+
+te_errno
+pyte_job_destroy(tapi_job_t *job, int term_timeout_ms)
+{
+    PYTE_GUARD_RC(tapi_job_destroy(job, term_timeout_ms));
+    return 0;
+}
+
+te_errno
+pyte_job_out_channels(tapi_job_t *job, tapi_job_channel_t **out_stdout,
+                      tapi_job_channel_t **out_stderr)
+{
+    tapi_job_channel_t *ch[2] = { NULL, NULL };
+
+    PYTE_GUARD_RC(tapi_job_alloc_output_channels(job, 2, ch));
+    *out_stdout = ch[0];
+    *out_stderr = ch[1];
+    return 0;
+}
+
+te_errno
+pyte_job_in_channel(tapi_job_t *job, tapi_job_channel_t **out)
+{
+    tapi_job_channel_t *ch[1] = { NULL };
+
+    PYTE_GUARD_RC(tapi_job_alloc_input_channels(job, 1, ch));
+    *out = ch[0];
+    return 0;
+}
+
+te_errno
+pyte_job_attach_filter(tapi_job_channel_t **channels, unsigned int n,
+                       const char *name, int readable,
+                       unsigned int log_level, tapi_job_channel_t **out)
+{
+    tapi_job_channel_t *set[n + 1];
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        set[i] = channels[i];
+    set[n] = NULL;
+    PYTE_GUARD_RC(tapi_job_attach_filter(set, name, readable != 0,
+                                         (te_log_level)log_level, out));
+    return 0;
+}
+
+te_errno
+pyte_job_filter_regexp(tapi_job_channel_t *filter, const char *re,
+                       unsigned int extract)
+{
+    PYTE_GUARD_RC(tapi_job_filter_add_regexp(filter, re, extract));
+    return 0;
+}
+
+te_errno
+pyte_job_filter_add(tapi_job_channel_t *filter,
+                    tapi_job_channel_t **channels, unsigned int n)
+{
+    tapi_job_channel_t *set[n + 1];
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        set[i] = channels[i];
+    set[n] = NULL;
+    PYTE_GUARD_RC(tapi_job_filter_add_channels(filter, set));
+    return 0;
+}
+
+te_errno
+pyte_job_filter_remove(tapi_job_channel_t *filter,
+                       tapi_job_channel_t **channels, unsigned int n)
+{
+    tapi_job_channel_t *set[n + 1];
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        set[i] = channels[i];
+    set[n] = NULL;
+    PYTE_GUARD_RC(tapi_job_filter_remove_channels(filter, set));
+    return 0;
+}
+
+static te_errno
+pyte_job_receive_nojmp(tapi_job_channel_t **filters, unsigned int n,
+                       int timeout_ms, int last, char **out_data,
+                       size_t *out_len, int *out_eos,
+                       unsigned int *out_dropped,
+                       tapi_job_channel_t **out_filter)
+{
+    tapi_job_channel_t *set[n + 1];
+    tapi_job_buffer_t buf = TAPI_JOB_BUFFER_INIT;
+    te_errno rc;
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        set[i] = filters[i];
+    set[n] = NULL;
+
+    rc = last ? tapi_job_receive_last(set, timeout_ms, &buf)
+              : tapi_job_receive(set, timeout_ms, &buf);
+    if (rc != 0)
+    {
+        te_string_free(&buf.data);
+        return rc;
+    }
+
+    *out_len = buf.data.len;
+    *out_data = malloc(buf.data.len + 1);
+    if (*out_data == NULL)
+    {
+        te_string_free(&buf.data);
+        return TE_RC(TE_TAPI, TE_ENOMEM);
+    }
+    if (buf.data.ptr != NULL && buf.data.len > 0)
+        memcpy(*out_data, buf.data.ptr, buf.data.len);
+    (*out_data)[buf.data.len] = '\0';
+    *out_eos = buf.eos ? 1 : 0;
+    *out_dropped = buf.dropped;
+    *out_filter = buf.filter;
+    te_string_free(&buf.data);
+    return 0;
+}
+
+te_errno
+pyte_job_receive(tapi_job_channel_t **filters, unsigned int n,
+                 int timeout_ms, int last, char **out_data,
+                 size_t *out_len, int *out_eos, unsigned int *out_dropped,
+                 tapi_job_channel_t **out_filter)
+{
+    PYTE_GUARD_RC(pyte_job_receive_nojmp(filters, n, timeout_ms, last,
+                                         out_data, out_len, out_eos,
+                                         out_dropped, out_filter));
+    return 0;
+}
+
+static te_errno
+pyte_job_send_nojmp(tapi_job_channel_t *channel, const char *data,
+                    size_t len)
+{
+    te_string str = TE_STRING_INIT;
+    te_errno rc;
+
+    /* te_string_append_buf() is binary-safe (NULs allowed) */
+    rc = te_string_append_buf(&str, data, len);
+    if (rc == 0)
+        rc = tapi_job_send(channel, &str);
+    te_string_free(&str);
+    return rc;
+}
+
+te_errno
+pyte_job_send(tapi_job_channel_t *channel, const char *data, size_t len)
+{
+    PYTE_GUARD_RC(pyte_job_send_nojmp(channel, data, len));
+    return 0;
+}
+
+te_errno
+pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
+              int timeout_ms)
+{
+    tapi_job_channel_t *set[n + 1];
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        set[i] = channels[i];
+    set[n] = NULL;
+    PYTE_GUARD_RC(tapi_job_poll(set, timeout_ms));
+    return 0;
+}
+
 te_errno
 pyte_sockaddr_in4(const char *ip, uint16_t port,
                   struct sockaddr_storage *ss, socklen_t *len)

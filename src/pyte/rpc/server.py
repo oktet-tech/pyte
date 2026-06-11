@@ -138,6 +138,12 @@ class RpcServer:
         from pyte.rpc.socket import RpcSocket
         return RpcSocket.open(self, family, type)
 
+    def job(self, program: str, args: list[str] | None = None,
+            env: dict[str, str] | None = None):
+        """Create a tapi_job running `program` on this RPC server."""
+        from pyte.job import Job
+        return Job.create(self, program, args or [], env)
+
     def open(self, path: str, mode: str = "r"):
         from pyte.rpc.files import open_file
         return open_file(self, path, mode)
