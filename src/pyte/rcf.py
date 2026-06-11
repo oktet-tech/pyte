@@ -217,7 +217,12 @@ class DynamicAgent(RcfAgent):
         self._removed = False
 
     def remove(self) -> None:
-        """Delete the agent via its own backend (idempotent)."""
+        """Delete the agent via its own backend.
+
+        Idempotent w.r.t. repeated remove() calls (guarded by
+        _removed).  An externally-deleted /rcf subtree surfaces as
+        CfgError by design — that is not a repeated remove().
+        """
         from pyte._shim import lib
         if self._removed:
             return
