@@ -12,6 +12,9 @@
  */
 
 #include "pyte_trc.h"
+#include "te_alloc.h"
+#include "tq_string.h"
+#include "te_test_result.h"
 
 te_errno
 pyte_trc_db_open(const char *path, te_trc_db **db)
@@ -227,4 +230,69 @@ const char *
 pyte_trc_verdict_str(const pyte_trc_verdict *v)
 {
     return v->str;
+}
+
+bool
+pyte_trc_walker_step_iter(te_trc_db_walker *walker, unsigned int n_args,
+                          trc_report_argument *args, uint32_t flags)
+{
+    return trc_db_walker_step_iter(walker, n_args, args, flags, 0,
+                                   (func_args_match_ptr)NULL);
+}
+
+trc_test_iter *
+pyte_trc_walker_iter(const te_trc_db_walker *walker)
+{
+    return trc_db_walker_get_iter(walker);
+}
+
+/* Caller owns the allocation and must release it with pyte_tq_strings_free. */
+tqh_strings *
+pyte_tq_strings_new(void)
+{
+    tqh_strings *strs = TE_ALLOC(sizeof(*strs));
+
+    TAILQ_INIT(strs);
+    return strs;
+}
+
+te_errno
+pyte_tq_strings_add(tqh_strings *strs, const char *value)
+{
+    return tq_strings_add_uniq_dup(strs, value);
+}
+
+void
+pyte_tq_strings_free(tqh_strings *strs)
+{
+    tq_strings_free(strs, free);
+    free(strs);
+}
+
+/* Caller owns the allocation and must release it with pyte_test_result_free. */
+te_test_result *
+pyte_test_result_new(int status)
+{
+    te_test_result *result = TE_ALLOC(sizeof(*result));
+
+    te_test_result_init(result);
+    result->status = status;
+    return result;
+}
+
+te_errno
+pyte_test_result_add_verdict(te_test_result *result, const char *text)
+{
+    te_test_verdict *verdict = TE_ALLOC(sizeof(*verdict));
+
+    verdict->str = TE_STRDUP(text);
+    TAILQ_INSERT_TAIL(&result->verdicts, verdict, links);
+    return 0;
+}
+
+void
+pyte_test_result_free(te_test_result *result)
+{
+    te_test_result_clean(result);
+    free(result);
 }

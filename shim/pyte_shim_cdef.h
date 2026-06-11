@@ -316,3 +316,39 @@ const char *pyte_trc_entry_notes(const trc_exp_result_entry *entry);
 pyte_trc_verdict *pyte_trc_entry_first_verdict(trc_exp_result_entry *entry);
 pyte_trc_verdict *pyte_trc_verdict_next(pyte_trc_verdict *verdict);
 const char *pyte_trc_verdict_str(const pyte_trc_verdict *verdict);
+
+typedef struct trc_report_argument {
+    char *name;
+    char *value;
+    bool variable;
+} trc_report_argument;
+
+#define PYTE_STEP_ITER_NO_MATCH_OLD  ...
+#define PYTE_STEP_ITER_NO_MATCH_WILD ...
+#define PYTE_STEP_ITER_NO_MATCH_NEW  ...
+
+te_trc_db_walker *trc_db_new_walker(te_trc_db *trc_db);
+void trc_db_free_walker(te_trc_db_walker *walker);
+void trc_db_walker_go_to_test(te_trc_db_walker *walker, trc_test *test);
+const trc_exp_result *trc_db_iter_get_exp_result(const trc_test_iter *iter,
+                                                 const tqh_strings *tags,
+                                                 bool last_match);
+const trc_exp_result_entry *trc_is_result_expected(
+                                const trc_exp_result *expected,
+                                const te_test_result *obtained);
+te_errno logic_expr_parse(const char *str, logic_expr **expr);
+int logic_expr_match(const logic_expr *re, const tqh_strings *set);
+void logic_expr_free(logic_expr *expr);
+
+bool pyte_trc_walker_step_iter(te_trc_db_walker *walker,
+                               unsigned int n_args,
+                               trc_report_argument *args,
+                               uint32_t flags);
+trc_test_iter *pyte_trc_walker_iter(const te_trc_db_walker *walker);
+tqh_strings *pyte_tq_strings_new(void);
+te_errno pyte_tq_strings_add(tqh_strings *strs, const char *value);
+void pyte_tq_strings_free(tqh_strings *strs);
+te_test_result *pyte_test_result_new(int status);
+te_errno pyte_test_result_add_verdict(te_test_result *result,
+                                      const char *text);
+void pyte_test_result_free(te_test_result *result);

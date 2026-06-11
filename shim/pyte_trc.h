@@ -77,4 +77,19 @@ extern pyte_trc_verdict *pyte_trc_entry_first_verdict(
 extern pyte_trc_verdict *pyte_trc_verdict_next(pyte_trc_verdict *verdict);
 extern const char *pyte_trc_verdict_str(const pyte_trc_verdict *verdict);
 
+extern bool pyte_trc_walker_step_iter(te_trc_db_walker *walker,
+                                      unsigned int n_args,
+                                      trc_report_argument *args,
+                                      uint32_t flags);
+extern trc_test_iter *pyte_trc_walker_iter(const te_trc_db_walker *walker);
+
+extern tqh_strings *pyte_tq_strings_new(void);
+extern te_errno pyte_tq_strings_add(tqh_strings *strs, const char *value);
+extern void pyte_tq_strings_free(tqh_strings *strs);
+
+extern te_test_result *pyte_test_result_new(int status);
+extern te_errno pyte_test_result_add_verdict(te_test_result *result,
+                                             const char *text);
+extern void pyte_test_result_free(te_test_result *result);
+
 #endif /* PYTE_TRC_H */

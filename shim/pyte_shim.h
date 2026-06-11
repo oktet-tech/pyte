@@ -439,6 +439,70 @@ typedef struct trc_exp_result_entry trc_exp_result_entry;
 struct te_test_verdict;
 typedef struct te_test_verdict pyte_trc_verdict;
 
+/*
+ * tq_string.h and logic_expr.h do not pull in te_test_result.h, so they
+ * can be included here without triggering the te_test_verdict name conflict.
+ * They provide tqh_strings and logic_expr used in the SYNC block below.
+ */
+#include "tq_string.h"
+#include "logic_expr.h"
+
+/*
+ * trc_report_argument is defined in te_trc.h (which conflicts via
+ * te_test_result.h).  Replicate the struct here with the same layout so
+ * cffi API mode can verify field offsets when it compiles pyte._shim.c
+ * with pyte_shim.h as the real header.  Must stay in sync with te_trc.h.
+ */
+struct trc_report_argument {
+    char *name;
+    char *value;
+    bool variable;
+};
+typedef struct trc_report_argument trc_report_argument;
+
+/*
+ * step_iter_flags enum values are in te_trc.h which cannot be included
+ * here.  Expose them as PYTE_STEP_ITER_* macros mirroring the PYTE_TE_TEST_*
+ * pattern.
+ *
+ * NOTE: these numeric values are NOT verified against te_trc.h by cffi
+ * (that header is excluded from this compilation unit), so they must be
+ * kept in sync with enum step_iter_flags in te_trc.h by hand.
+ */
+#define PYTE_STEP_ITER_NO_MATCH_OLD  0x1
+#define PYTE_STEP_ITER_NO_MATCH_WILD 0x2
+#define PYTE_STEP_ITER_NO_MATCH_NEW  0x4
+
+/*
+ * Forward-declared opaque types for the TRC walker and te_test_result.
+ * Passed through as pointers only; full definitions live in te_trc.h /
+ * te_test_result.h which cannot be included here (see the te_test_verdict
+ * name-conflict note above).
+ */
+struct te_trc_db_walker;
+typedef struct te_trc_db_walker te_trc_db_walker;
+
+struct te_test_result;
+typedef struct te_test_result te_test_result;
+
+/*
+ * Direct TE TRC library calls exposed to cffi.  These functions are defined
+ * in libtrc/liblogic_expr.  Their signatures only reference types already
+ * forward-declared or included above, so they can be declared here without
+ * pulling in te_trc.h (which would trigger the te_test_verdict conflict).
+ */
+extern te_trc_db_walker *trc_db_new_walker(te_trc_db *trc_db);
+extern void trc_db_free_walker(te_trc_db_walker *walker);
+extern void trc_db_walker_go_to_test(te_trc_db_walker *walker,
+                                     trc_test *test);
+extern const trc_exp_result *trc_db_iter_get_exp_result(
+                                 const trc_test_iter *iter,
+                                 const tqh_strings *tags,
+                                 bool last_match);
+extern const trc_exp_result_entry *trc_is_result_expected(
+                                 const trc_exp_result *expected,
+                                 const te_test_result *obtained);
+
 /* SYNC: declarations below MUST stay in sync with pyte_trc.h, which cannot
  * be included here due to the te_test_verdict name collision with tapi_test_log.h. */
 extern te_errno pyte_trc_db_open(const char *path, te_trc_db **db);
@@ -487,6 +551,21 @@ extern pyte_trc_verdict *pyte_trc_entry_first_verdict(
                                         trc_exp_result_entry *entry);
 extern pyte_trc_verdict *pyte_trc_verdict_next(pyte_trc_verdict *verdict);
 extern const char *pyte_trc_verdict_str(const pyte_trc_verdict *verdict);
+
+extern bool pyte_trc_walker_step_iter(te_trc_db_walker *walker,
+                                      unsigned int n_args,
+                                      trc_report_argument *args,
+                                      uint32_t flags);
+extern trc_test_iter *pyte_trc_walker_iter(const te_trc_db_walker *walker);
+
+extern tqh_strings *pyte_tq_strings_new(void);
+extern te_errno pyte_tq_strings_add(tqh_strings *strs, const char *value);
+extern void pyte_tq_strings_free(tqh_strings *strs);
+
+extern te_test_result *pyte_test_result_new(int status);
+extern te_errno pyte_test_result_add_verdict(te_test_result *result,
+                                             const char *text);
+extern void pyte_test_result_free(te_test_result *result);
 
 /*
  * Trampoline guard: confines any tapi longjmp to this C frame and
