@@ -15,6 +15,7 @@ from typing import Callable
 from pyte import log
 from pyte._params import Params, parse_argv
 from pyte.errors import TestFail, TestSkip
+from pyte.log import _enc
 
 EXIT_SIGINT = 0x2
 EXIT_SKIP = 0x5
@@ -30,20 +31,20 @@ class Test:
     # -- structure ---------------------------------------------------
     def step(self, text: str) -> None:
         from pyte._shim import lib
-        lib.pyte_step(text.encode())
+        lib.pyte_step(_enc(text))
 
     def substep(self, text: str) -> None:
         from pyte._shim import lib
-        lib.pyte_substep(text.encode())
+        lib.pyte_substep(_enc(text))
 
     def verdict(self, text: str, error: bool = False) -> None:
         from pyte._shim import lib
         lvl = lib.TE_LL_ERROR if error else lib.TE_LL_RING
-        lib.pyte_verdict(lvl, text.encode())
+        lib.pyte_verdict(lvl, _enc(text))
 
     def artifact(self, text: str) -> None:
         from pyte._shim import lib
-        lib.pyte_artifact(lib.TE_LL_RING, text.encode())
+        lib.pyte_artifact(lib.TE_LL_RING, _enc(text))
 
     # -- outcome -----------------------------------------------------
     def fail(self, text: str) -> None:
@@ -80,7 +81,8 @@ class Test:
 
 
 def current() -> Test:
-    assert _current is not None, "test.start() not active"
+    if _current is None:
+        raise RuntimeError("test.start() not active")
     return _current
 
 
@@ -98,13 +100,18 @@ def start(name: str | None = None):
         t.step(...)
     """
     global _current
+    if _current is not None:
+        raise RuntimeError("test.start() already active")
     from pyte._shim import lib
 
     entity = name or os.path.basename(sys.argv[0])
     params = Params(parse_argv(sys.argv[1:]))
 
-    lib.pyte_log_init(entity.encode())
-    test_id = int(params.get("te_test_id", "0"))
+    lib.pyte_log_init(_enc(entity))
+    try:
+        test_id = int(params.get("te_test_id", "0"))
+    except ValueError:
+        test_id = 0
     if test_id == 0:
         print("te_test_id parameter not found", file=sys.stderr)
         sys.exit(1)
@@ -124,8 +131,10 @@ def start(name: str | None = None):
 
     # Route everything into the TE Logger: it does its own level
     # filtering, while the stdlib root logger defaults to WARNING.
-    logging.getLogger().setLevel(logging.DEBUG)
-    logging.getLogger().addHandler(log.TeLogHandler())
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not any(isinstance(h, log.TeLogHandler) for h in root.handlers):
+        root.addHandler(log.TeLogHandler())
 
     result = 1
     try:
@@ -138,6 +147,8 @@ def start(name: str | None = None):
     except TestFail as e:
         log.error(f"Test failed: {e}")
         result = 1
+    except SystemExit as e:
+        result = int(e.code or 0)
     except Exception:
         log.error("Unhandled exception:\n" + traceback.format_exc())
         result = 1

@@ -3,6 +3,8 @@
 """TE error model: te_errno -> exceptions."""
 from __future__ import annotations
 
+import builtins
+
 
 class TeError(Exception):
     """A TE API call failed with a te_errno status."""
@@ -32,7 +34,7 @@ class RpcError(TeError):
             self.args = (f"{self.args[0]}: {err_msg}",)
 
 
-class TimeoutError(TeError):
+class TimeoutError(TeError, builtins.TimeoutError):
     """TE_ETIMEDOUT from a TE call (job receive, csap recv, ...)."""
 
 
@@ -45,7 +47,10 @@ class TestSkip(Exception):
 
 
 def check(rc: int, where: str = "", cls: type[TeError] = TeError) -> None:
-    """Raise if a te_errno status is non-zero."""
+    """Raise if a te_errno status is non-zero.
+
+    Timeouts always raise pyte.errors.TimeoutError regardless of cls.
+    """
     if rc != 0:
         from pyte._shim import lib
         if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ETIMEDOUT):

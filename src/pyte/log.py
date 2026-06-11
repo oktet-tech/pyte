@@ -6,6 +6,11 @@ from __future__ import annotations
 import logging
 
 
+def _enc(text: str) -> bytes:
+    """Encode for the C side; never let bad text break logging."""
+    return text.encode("utf-8", "backslashreplace")
+
+
 def _lvl(name: str) -> int:
     from pyte._shim import lib
     return getattr(lib, f"TE_LL_{name}")
@@ -13,7 +18,7 @@ def _lvl(name: str) -> int:
 
 def _emit(level_name: str, user: str, text: str) -> None:
     from pyte._shim import lib
-    lib.pyte_log(_lvl(level_name), user.encode(), text.encode())
+    lib.pyte_log(_lvl(level_name), _enc(user), _enc(text))
 
 
 def error(text: str, user: str = "Self") -> None:
@@ -39,8 +44,11 @@ class TeLogHandler(logging.Handler):
             (logging.INFO, "RING"), (logging.DEBUG, "INFO")]
 
     def emit(self, record: logging.LogRecord) -> None:
-        for threshold, name in self._MAP:
-            if record.levelno >= threshold:
-                _emit(name, record.name, self.format(record))
-                return
-        _emit("VERB", record.name, self.format(record))
+        try:
+            for threshold, name in self._MAP:
+                if record.levelno >= threshold:
+                    _emit(name, record.name, self.format(record))
+                    return
+            _emit("VERB", record.name, self.format(record))
+        except Exception:
+            self.handleError(record)
