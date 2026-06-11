@@ -63,8 +63,6 @@ te_errno pyte_rpc_unlink(rcf_rpc_server *rpcs, const char *path, int *out);
 te_errno pyte_rpc_getpid(rcf_rpc_server *rpcs, int *out);
 te_errno pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf, size_t len,
                               int *out);
-te_errno pyte_rpc_system(rcf_rpc_server *rpcs, const char *cmd,
-                         int *out_flag, int *out_value);
 te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                 const char *cmd, int *out_flag,
                                 int *out_value);

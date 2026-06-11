@@ -8,6 +8,11 @@ from contextlib import contextmanager
 from pyte.errors import RpcError, TestFail, check
 from pyte.log import _enc
 
+#: Returned by facade calls whose failure was swallowed by expect_error().
+SUPPRESSED = object()
+
+_HOSTNAME_MAX = 256
+
 
 class RpcServer:
     """An RPC server (process) on a test agent.
@@ -61,9 +66,9 @@ class RpcServer:
             if (self._expected == 0 or
                     lib.pyte_rc_error(rpc_errno) == self._expected):
                 self._expected_hit = True
-                return retval
+                return SUPPRESSED
         raise RpcError(
-            rpc_errno, where,
+            rpc_errno, f"{where} -> {retval!r}",
             ffi.string(lib.pyte_rpc_err_msg(self._h)).decode(
                 errors="replace"))
 
@@ -73,29 +78,39 @@ class RpcServer:
 
         expected_errno: TE error code to require (0 = any error).
         Raises TestFail if the block completes without a failure.
+        Facade calls whose failure is swallowed return None (or
+        SUPPRESSED for raw _check_call users).
         """
+        prev, prev_hit = self._expected, self._expected_hit
         self._expected = expected_errno
         self._expected_hit = False
         try:
             yield self
+            hit = self._expected_hit
         finally:
-            self._expected = None
-        if not self._expected_hit:
+            self._expected, self._expected_hit = prev, prev_hit
+        if not hit:
             raise TestFail("expected an RPC error, but calls succeeded")
 
     # -- curated calls -------------------------------------------------
-    def getpid(self) -> int:
+    def getpid(self) -> int | None:
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
-        return self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
-                                lambda v: v >= 0, "getpid()")
+        ret = self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
+                               lambda v: v >= 0, "getpid()")
+        if ret is SUPPRESSED:
+            return None
+        return ret
 
-    def hostname(self) -> str:
+    def hostname(self) -> str | None:
         from pyte._shim import ffi, lib
-        buf = ffi.new("char[256]")
+        buf = ffi.new("char[]", _HOSTNAME_MAX)
         out = ffi.new("int *")
-        self._check_call(lib.pyte_rpc_gethostname(self._h, buf, 256, out),
-                         out[0], lambda v: v == 0, "gethostname()")
+        ret = self._check_call(
+            lib.pyte_rpc_gethostname(self._h, buf, _HOSTNAME_MAX - 1, out),
+            out[0], lambda v: v == 0, "gethostname()")
+        if ret is SUPPRESSED:
+            return None
         return ffi.string(buf).decode(errors="replace")
 
     def sh(self, cmd: str) -> str:
@@ -104,13 +119,16 @@ class RpcServer:
         pbuf = ffi.new("char **")
         flag = ffi.new("int *")
         value = ffi.new("int *")
-        rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
-                                        value)
         # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED == 0)
         # with status 0.
-        self._check_call(rc, (flag[0], value[0]),
-                         lambda fv: fv == (0, 0), f"sh({cmd!r})")
+        rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
+                                        value)
         try:
+            ret = self._check_call(rc, (flag[0], value[0]),
+                                   lambda fv: fv == (0, 0),
+                                   f"sh({cmd!r})")
+            if ret is SUPPRESSED or pbuf[0] == ffi.NULL:
+                return ""
             return ffi.string(pbuf[0]).decode(errors="replace")
         finally:
             if pbuf[0] != ffi.NULL:
@@ -127,8 +145,3 @@ class RpcServer:
     def unlink(self, path: str) -> None:
         from pyte.rpc.files import unlink
         unlink(self, path)
-
-    def job(self, program: str, args: list[str] | None = None,
-            env: dict[str, str] | None = None):
-        from pyte.job import Job
-        return Job.create(self, program, args or [], env)

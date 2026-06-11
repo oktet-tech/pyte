@@ -82,6 +82,7 @@ extern te_errno pyte_rpc_recv(rcf_rpc_server *rpcs, int s, uint8_t *buf,
 extern te_errno pyte_rpc_sendto(rcf_rpc_server *rpcs, int s,
                                 const uint8_t *buf, size_t len, int flags,
                                 const struct sockaddr *to, ssize_t *out);
+/* fromlen should be non-NULL; NULL means no room for the peer address */
 extern te_errno pyte_rpc_recvfrom(rcf_rpc_server *rpcs, int s,
                                   uint8_t *buf, size_t len, int flags,
                                   struct sockaddr *from, socklen_t *fromlen,
@@ -101,8 +102,6 @@ extern te_errno pyte_rpc_unlink(rcf_rpc_server *rpcs, const char *path,
 extern te_errno pyte_rpc_getpid(rcf_rpc_server *rpcs, int *out);
 extern te_errno pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf,
                                      size_t len, int *out);
-extern te_errno pyte_rpc_system(rcf_rpc_server *rpcs, const char *cmd,
-                                int *out_flag, int *out_value);
 extern te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                        const char *cmd, int *out_flag,
                                        int *out_value);

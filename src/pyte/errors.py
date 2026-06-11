@@ -46,6 +46,17 @@ class TestSkip(Exception):
     """Raise (or call test.skip()) to mark the test skipped."""
 
 
+_ERRNO_NAMES = {"ECONNREFUSED", "ENOENT"}
+
+
+def __getattr__(name: str):
+    """Expose TE error codes (errors.ECONNREFUSED, ...) lazily."""
+    if name in _ERRNO_NAMES:
+        from pyte._shim import lib
+        return getattr(lib, f"PYTE_{name}")
+    raise AttributeError(name)
+
+
 def check(rc: int, where: str = "", cls: type[TeError] = TeError) -> None:
     """Raise if a te_errno status is non-zero.
 

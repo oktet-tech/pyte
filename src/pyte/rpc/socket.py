@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from pyte.errors import check
 from pyte.log import _enc
+from pyte.rpc.server import SUPPRESSED
 
+# inet6/local need sockaddr helpers not yet implemented (_mk_addr and
+# _parse_addr only handle AF_INET), so only inet is exposed for now.
 _FAMILIES = {
     "inet": "PYTE_PF_INET",
-    "inet6": "PYTE_PF_INET6",
-    "local": "PYTE_PF_LOCAL",
 }
 _TYPES = {
     "stream": "PYTE_SOCK_STREAM",
@@ -97,7 +98,7 @@ class RpcSocket:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"connect({addr})")
 
-    def accept(self) -> "RpcSocket":
+    def accept(self) -> "RpcSocket | None":
         from pyte._shim import ffi, lib
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -106,10 +107,13 @@ class RpcSocket:
         rc = lib.pyte_rpc_accept(self.server._h, self.fd,
                                  ffi.cast("struct sockaddr *", ss),
                                  sslen, out)
-        self.server._check_call(rc, out[0], lambda v: v >= 0, "accept()")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      "accept()")
+        if ret is SUPPRESSED:
+            return None
         return RpcSocket(self.server, out[0])
 
-    def getsockname(self) -> tuple[str, int]:
+    def getsockname(self) -> tuple[str, int] | None:
         from pyte._shim import ffi, lib
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -118,40 +122,50 @@ class RpcSocket:
         out = ffi.new("int *")
         rc = lib.pyte_rpc_getsockname(self.server._h, self.fd, sa, sslen,
                                       out)
-        self.server._check_call(rc, out[0], lambda v: v == 0,
-                                "getsockname()")
+        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+                                      "getsockname()")
+        if ret is SUPPRESSED:
+            return None
         return _parse_addr(ffi, lib, sa)
 
-    def send(self, data: bytes, flags: int = 0) -> int:
+    def send(self, data: bytes, flags: int = 0) -> int | None:
         from pyte._shim import ffi, lib
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_send(self.server._h, self.fd, data, len(data),
                                flags, out)
-        return self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                       f"send({len(data)} bytes)")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"send({len(data)} bytes)")
+        if ret is SUPPRESSED:
+            return None
+        return ret
 
-    def recv(self, size: int, flags: int = 0) -> bytes:
+    def recv(self, size: int, flags: int = 0) -> bytes | None:
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, flags,
                                out)
-        self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                f"recv({size})")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"recv({size})")
+        if ret is SUPPRESSED:
+            return None
         return bytes(ffi.buffer(buf, out[0]))
 
     def sendto(self, data: bytes, addr: tuple[str, int],
-               flags: int = 0) -> int:
+               flags: int = 0) -> int | None:
         from pyte._shim import ffi, lib
         sa, _keep = _mk_addr(ffi, lib, addr)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_sendto(self.server._h, self.fd, data, len(data),
                                  flags, sa, out)
-        return self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                       f"sendto({len(data)} bytes, {addr})")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"sendto({len(data)} bytes, {addr})")
+        if ret is SUPPRESSED:
+            return None
+        return ret
 
     def recvfrom(self, size: int,
-                 flags: int = 0) -> tuple[bytes, tuple[str, int]]:
+                 flags: int = 0) -> tuple[bytes, tuple[str, int]] | None:
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         ss = ffi.new("struct sockaddr_storage *")
@@ -161,6 +175,8 @@ class RpcSocket:
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recvfrom(self.server._h, self.fd, buf, size,
                                    flags, sa, fromlen, out)
-        self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                f"recvfrom({size})")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"recvfrom({size})")
+        if ret is SUPPRESSED:
+            return None
         return bytes(ffi.buffer(buf, out[0])), _parse_addr(ffi, lib, sa)

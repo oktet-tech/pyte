@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pyte.log import _enc
+from pyte.rpc.server import SUPPRESSED
 
 
 class RpcFile:
@@ -34,22 +35,27 @@ class RpcFile:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"close({self.path})")
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes) -> int | None:
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
         rc = lib.pyte_rpc_write(self.server._h, self.fd, data, len(data),
                                 out)
-        return self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                       f"write({self.path}, "
-                                       f"{len(data)} bytes)")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"write({self.path}, "
+                                      f"{len(data)} bytes)")
+        if ret is SUPPRESSED:
+            return None
+        return ret
 
-    def read(self, size: int) -> bytes:
+    def read(self, size: int) -> bytes | None:
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_read(self.server._h, self.fd, buf, size, out)
-        self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                f"read({self.path}, {size})")
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      f"read({self.path}, {size})")
+        if ret is SUPPRESSED:
+            return None
         return bytes(ffi.buffer(buf, out[0]))
 
 

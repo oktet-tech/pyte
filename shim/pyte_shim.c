@@ -177,7 +177,8 @@ pyte_rpc_recvfrom(rcf_rpc_server *rpcs, int s, uint8_t *buf, size_t len,
 {
     RPC_AWAIT_ERROR(rpcs);
     PYTE_GUARD(*out = rpc_recvfrom_gen(rpcs, s, buf, len, flags, from,
-                                       fromlen, len, *fromlen));
+                                       fromlen, len,
+                                       fromlen != NULL ? *fromlen : 0));
     return 0;
 }
 
@@ -246,19 +247,6 @@ pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf, size_t len, int *out)
 {
     RPC_AWAIT_ERROR(rpcs);
     PYTE_GUARD(*out = rpc_gethostname(rpcs, buf, len));
-    return 0;
-}
-
-te_errno
-pyte_rpc_system(rcf_rpc_server *rpcs, const char *cmd, int *out_flag,
-                int *out_value)
-{
-    rpc_wait_status st;
-
-    RPC_AWAIT_ERROR(rpcs);
-    PYTE_GUARD(st = rpc_system(rpcs, cmd));
-    *out_flag = st.flag;
-    *out_value = st.value;
     return 0;
 }
 
