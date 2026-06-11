@@ -135,17 +135,24 @@ Caveats:
   (`TE_EINVAL`) and for agents not marked rebootable (`TE_EPERM`).
   Only a remote agent added with `rebootable=True` (or configured with
   the `rebootable` attribute in the RCF config) can be restarted.
+  `restart()` goes straight to RCF; the Configurator's view of that
+  agent becomes stale (boot-state agent vs. old cfg tree).  TE's
+  supported path for configured agents is `cfg_reboot_ta()`; pyte's
+  `restart()` is intended for DYNAMIC agents that carry no Configurator
+  state.
 - `add_agent(host=None)` passes an empty rcfunix host, which starts
   the agent on the engine host without SSH — the same mechanism the
   localhost rig uses.  Such an agent is *not* restartable (see above).
-  The listen port defaults to a random high port; collisions surface
-  as add errors.
+  The listen port defaults to a random port below the Linux ephemeral
+  range (20000–32000); collisions surface as slow add/connect failures.
 - File operations run in RCF session 0 (the header's "TA session
   or 0"), serialized with other session-0 traffic.
 - `flush_logs()` wraps `log_flush_ten()`, an IPC request that makes
   the Logger pump the TA's accumulated log into the run log.  It does
   NOT call `rcf_ta_get_log()` — that API is Logger-only and would
   divert the log bulk into a private file, losing it from the run log.
+  `flush_logs()` is an IPC to the Logger — it works only inside a test
+  run with the Logger alive; calling it outside a run raises `RcfError`.
 - `remove()`/the `DynamicAgent` context manager deletes the agent
   from RCF; deleting an agent from the static RCF configuration is
   refused (`TE_EPERM`).

@@ -31,22 +31,52 @@ def _split_ta_list(block: bytes) -> list[str]:
 
 
 def _pick_port() -> int:
-    """A high port for a dynamic agent; collisions surface as add errors."""
-    return random.randint(20000, 60000)
+    """A random port for a dynamic agent, below the Linux ephemeral range.
+
+    Picks from 20000–32000 to stay clear of the Linux ephemeral range
+    (32768–60999) and the rigs' RCF ports (50000/51000).  Collisions are
+    still possible and surface as slow add/connect failures; pass an
+    explicit port to control it.
+    """
+    return random.randint(20000, 32000)
+
+
+def _grow_loop(call, initial: int = 4096) -> bytes:
+    """Double-until-fit buffer loop for shim calls that return ESMALLBUF.
+
+    call(size) must return (rc, data_bytes | None): rc == 0 on success
+    (data_bytes contains the result), ESMALLBUF to retry with double size,
+    or any other rc to propagate as an error.  Raises RuntimeError if the
+    buffer grows beyond 1 MiB (RCF misbehaving).
+    """
+    size = initial
+    while True:
+        if size > 1 << 20:
+            raise RuntimeError(
+                "rcf.agents(): TA list exceeds 1 MiB — RCF misbehaving?")
+        rc, data = call(size)
+        if rc == 0:
+            return data
+        if rc == "ESMALLBUF":
+            size *= 2
+        else:
+            raise rc
 
 
 def agents() -> list[str]:
     from pyte._shim import ffi, lib
-    size = 4096
-    while True:
+
+    def _call(size):
         buf = ffi.new("char[]", size)
         ln = ffi.new("size_t *", size)
         rc = lib.pyte_rcf_ta_list(buf, ln)
         if rc == 0:
-            return _split_ta_list(bytes(ffi.buffer(buf, ln[0])))
-        if lib.pyte_rc_error(rc) != lib.pyte_rc_error(lib.PYTE_ESMALLBUF):
-            check(rc, "rcf.agents()", RcfError)
-        size *= 2
+            return 0, bytes(ffi.buffer(buf, ln[0]))
+        if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ESMALLBUF):
+            return "ESMALLBUF", None
+        check(rc, "rcf.agents()", RcfError)
+
+    return _split_ta_list(_grow_loop(_call))
 
 
 @dataclass(frozen=True)
@@ -151,18 +181,32 @@ class RcfAgent:
 class DynamicAgent(RcfAgent):
     """An agent added at runtime; remove() tears it down (also a CM)."""
 
+    def __init__(self, name: str):
+        super().__init__(name)
+        self._removed = False
+
     def remove(self) -> None:
+        """Delete the agent from RCF (idempotent)."""
         from pyte._shim import lib
-        if self.name is not None:
-            check(lib.pyte_rcf_del_ta(_enc(self.name)),
-                  f"del_ta({self.name})", RcfError)
-            self.name = None
+        if self._removed:
+            return
+        check(lib.pyte_rcf_del_ta(_enc(self.name)),
+              f"del_ta({self.name})", RcfError)
+        self._removed = True
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.remove()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.remove()
+        else:
+            try:
+                self.remove()
+            except Exception as e:
+                import pyte.log as _log
+                _log.error(
+                    f"rcf.remove failed during exception unwind: {e}")
         return False
 
 
