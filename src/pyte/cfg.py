@@ -28,6 +28,7 @@ Usage::
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 
 from pyte.errors import CfgError, check
 from pyte.log import _enc
@@ -149,6 +150,58 @@ def synchronize(oid: str, subtree: bool = True) -> None:
     from pyte._shim import lib
     check(lib.pyte_cfg_synchronize(_enc(oid), 1 if subtree else 0),
           f"cfg synchronize {oid}", CfgError)
+
+
+def grab_rsrc(agent: str, name: str, target_oid: str) -> CfgNode:
+    """Grab ``target_oid`` as agent resource ``/agent:X/rsrc:name``.
+
+    Resource locks matter beyond access control: the unix agent lists
+    only objects it holds EXCLUSIVELY (shared-grabbed interfaces stay
+    invisible), and lock names strip the ``/agent:`` prefix, so locks
+    are host-global across agents on the same host.
+    """
+    return add(f"/agent:{agent}/rsrc:{name}", target_oid)
+
+
+def release_rsrc(agent: str, name: str) -> None:
+    """Release agent resource ``/agent:X/rsrc:name`` (set it to "").
+
+    The ``rsrc`` instance stays in place with an empty value; restore
+    the resource by setting the instance back to the target OID.
+    """
+    set(f"/agent:{agent}/rsrc:{name}", "")
+
+
+@contextmanager
+def borrowed_rsrc(name: str, owner_agent: str, borrower_agent: str,
+                  subpath: str):
+    """Temporarily move a host-global resource between same-host agents.
+
+    rsrc lock names strip the ``/agent:`` prefix, so locks are
+    host-global across agents, and the unix agent lists only objects
+    it holds EXCLUSIVELY — two same-host agents cannot both see the
+    same interface: the owner must let go while the borrower uses it.
+
+    Sequence: release owner -> grab borrower -> yield -> release
+    borrower -> restore owner.  Each grab is paired with its own
+    release/restore, nested so that a failure at any point unwinds
+    exactly what was done (e.g. if the borrower grab fails, the owner
+    is still restored).
+
+    ``subpath`` is the per-agent OID tail (e.g. ``"interface:lo"``);
+    the full ``/agent:{X}/{subpath}`` target is built only here.
+    """
+    set(f"/agent:{owner_agent}/rsrc:{name}", "")
+    try:
+        grab_rsrc(borrower_agent, name,
+                  f"/agent:{borrower_agent}/{subpath}")
+        try:
+            yield
+        finally:
+            release_rsrc(borrower_agent, name)
+    finally:
+        set(f"/agent:{owner_agent}/rsrc:{name}",
+            f"/agent:{owner_agent}/{subpath}")
 
 
 def node(oid: str) -> CfgNode:

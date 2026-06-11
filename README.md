@@ -83,6 +83,10 @@ agt.neigh_del("192.0.2.9", "lo")
 
 agt.sysctl("net.ipv4.ip_forward")     # dotted or slashed paths
 old = agt.sysctl_set("net.ipv4.ip_forward", 1)   # returns previous value
+
+lo.grab(); lo.release()               # /agent:X/rsrc: sugar over pyte.cfg
+with net.borrowed_iface("Agt_A", "Agt_MGD", "lo") as lo:
+    ...                               # lo temporarily moved to Agt_MGD
 ```
 
 Caveats:
@@ -91,7 +95,16 @@ Caveats:
   `neigh_add`, `sysctl_set`) need a root agent; on a non-root rig they
   raise `CfgError` (EPERM from the agent).
 - Interfaces are visible only when grabbed as agent resources (the
-  localhost rig grabs just `lo`).
+  localhost rig grabs just `lo`), and only by an EXCLUSIVE holder;
+  rsrc lock names are host-global across agents, so two same-host
+  agents cannot both hold the same interface.  `Iface.grab()` /
+  `Iface.release()` manage the `/agent:X/rsrc:` entry, and
+  `net.borrowed_iface(owner, borrower, name)` temporarily moves an
+  interface between same-host agents with correctly paired unwind
+  (re-syncing the borrower's mirror).  The resource-type-agnostic
+  layer lives in `pyte.cfg`: `grab_rsrc()`, `release_rsrc()` and the
+  `borrowed_rsrc()` context manager (any OID can be a resource —
+  build typed wrappers for PCI etc. on top of it).
 - `sysctl()` tries the int read first and transparently falls back to
   string for non-numeric values (`tapi_cfg_sys` is typed, the kernel
   tree is not); `sysctl_set()` returns the previous value so cleanups

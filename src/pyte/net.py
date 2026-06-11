@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pyte import cfg, log
@@ -134,6 +135,14 @@ class Iface:
 
     def addr_del(self, ip: str) -> None:
         cfg.delete(f"{self.oid}/net_addr:{ip}")
+
+    def grab(self) -> None:
+        """Grab this interface as the agent's rsrc (see cfg.grab_rsrc)."""
+        cfg.grab_rsrc(self.agent, self.name, self.oid)
+
+    def release(self) -> None:
+        """Release this interface's rsrc (see cfg.release_rsrc)."""
+        cfg.release_rsrc(self.agent, self.name)
 
     def __repr__(self):
         return f"<Iface {self.agent}/{self.name}>"
@@ -273,3 +282,22 @@ class AgentNet:
 
 def agent(name: str) -> AgentNet:
     return AgentNet(name)
+
+
+@contextmanager
+def borrowed_iface(owner_agent: str, borrower_agent: str, name: str):
+    """Temporarily move interface ``name`` between same-host agents.
+
+    Typed sugar over ``cfg.borrowed_rsrc`` (see its docstring for the
+    host-global-lock / exclusive-holder rationale and the unwind
+    pairing guarantee).  After the grab the borrower's ``/agent:``
+    mirror is re-synced: it was last synced before the interface was
+    grabbed (e.g. when a managed agent was added), so the
+    ``interface:`` subtree is not in the local DB yet.
+
+    Yields the borrower's :class:`Iface`.
+    """
+    with cfg.borrowed_rsrc(name, owner_agent, borrower_agent,
+                           f"interface:{name}"):
+        cfg.synchronize(f"/agent:{borrower_agent}")
+        yield Iface(borrower_agent, name)
