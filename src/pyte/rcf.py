@@ -222,6 +222,20 @@ class DynamicAgent(RcfAgent):
         if self._removed:
             return
         if self.managed:
+            from pyte import cfg
+            # tapi_cfg_rcf_del_ta alone fails on a RUNNING agent: it
+            # deletes /rcf:/agent:NAME children in DB order, hits a
+            # conf:* leaf first and the Configurator denies any change
+            # but the status leaf while the agent runs (CS-EPERM,
+            # engine/configurator/conf_rcf.c cfg_rcf_agent).  Deleting
+            # the subtree also never STOPS the TA: read_write leaves
+            # like status are skipped (EACCES) and the agent node's
+            # delete hook early-returns.  So stop via status=0 first
+            # (cfg_rcf_set: rcf_del_ta + /agent:NAME sync), then delete
+            # the now-quiet subtree.
+            status_oid = f"/rcf:/agent:{self.name}/status:"
+            if cfg.get(status_oid):
+                cfg.set(status_oid, 0)
             check(lib.pyte_cfg_rcf_del_ta(_enc(self.name)),
                   f"cfg_rcf_del_ta({self.name})", RcfError)
         else:

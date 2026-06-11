@@ -140,8 +140,10 @@ Managed vs raw dynamic agents:
   `/agent:<name>`, so the agent is first-class — visible in
   `cfg.find("/agent:*")`, usable with `RpcServer`, `pyte.job` and
   `pyte.net`.  Needs `cm_rcf.yml` registered in the rig's `cs.conf`.
-  `remove()` deletes the `/rcf:/agent:<name>` instance, which stops
-  the TA and drops it from both views.
+  `remove()` first flips `/rcf:/agent:<name>/status:` to 0 (the only
+  change the Configurator allows on a running `/rcf` agent; it stops
+  the TA and syncs `/agent:<name>` away), then deletes the
+  `/rcf:/agent:<name>` subtree.
 - `managed=False` (default) adds the agent straight into RCF
   (`rcf_add_ta_unix`) — cheap and Configurator-invisible.  Good for
   RCF-level testing only (file ops, restart); anything that goes
