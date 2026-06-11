@@ -24,6 +24,10 @@ class CfgError(TeError):
     """Configurator request failed."""
 
 
+class RcfError(TeError):
+    """RCF request failed."""
+
+
 class RpcError(TeError):
     """RPC call failed; carries the remote errno."""
 

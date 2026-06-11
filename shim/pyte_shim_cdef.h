@@ -175,6 +175,22 @@ te_errno pyte_pkt_payload(void *pkt, uint8_t *buf, size_t *len);
 void pyte_pkt_free(void *pkt);
 void pyte_pkts_free(pyte_pkts *p);
 
+te_errno pyte_rcf_ta_list(char *buf, size_t *len);
+te_errno pyte_rcf_ta_type(const char *ta, char *buf);
+te_errno pyte_rcf_ta_info(const char *ta, char **type, char **rcflib,
+                          char **confstr, unsigned int *flags);
+te_errno pyte_rcf_put_file(const char *ta, const char *lfile,
+                           const char *rfile);
+te_errno pyte_rcf_get_file(const char *ta, const char *rfile,
+                           const char *lfile);
+te_errno pyte_rcf_del_file(const char *ta, const char *rfile);
+te_errno pyte_rcf_ta_restart(const char *ta, const char *boot_params);
+te_errno pyte_rcf_ta_flush_logs(const char *ta);
+te_errno pyte_rcf_add_ta_unix(const char *name, const char *type,
+                              const char *host, uint16_t port,
+                              unsigned int flags);
+te_errno pyte_rcf_del_ta(const char *name);
+
 te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,
                            struct sockaddr_storage *ss, socklen_t *len);
 te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
@@ -217,6 +233,8 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define TE_LL_VERB ...
 #define PYTE_ETIMEDOUT ...
 #define PYTE_ESMALLBUF ...
+#define PYTE_RCF_TA_REBOOTABLE ...
+#define PYTE_RCF_MAX_NAME ...
 #define PYTE_EINPROGRESS ...
 #define PYTE_JOB_EXITED ...
 #define PYTE_JOB_SIGNALED ...

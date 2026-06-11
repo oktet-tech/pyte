@@ -44,6 +44,10 @@
 #define PYTE_EINPROGRESS TE_EINPROGRESS
 #define PYTE_ESMALLBUF TE_ESMALLBUF
 
+/* RCF constant passthrough */
+#define PYTE_RCF_TA_REBOOTABLE RCF_TA_REBOOTABLE
+#define PYTE_RCF_MAX_NAME RCF_MAX_NAME
+
 /* Job completion cause passthrough */
 #define PYTE_JOB_EXITED TAPI_JOB_STATUS_EXITED
 #define PYTE_JOB_SIGNALED TAPI_JOB_STATUS_SIGNALED
@@ -318,6 +322,33 @@ extern te_errno pyte_pkt_payload(void *pkt, uint8_t *buf, size_t *len);
 extern void pyte_pkt_free(void *pkt);
 /* Frees the pkts array only, NOT the packets (Python wraps each) */
 extern void pyte_pkts_free(pyte_pkts *p);
+
+/*
+ * RCF direct API wrappers (rcf_api.h).  File operations use session 0
+ * ("TA session or 0" per the header).  restart() maps to
+ * rcf_ta_reboot(..., RCF_REBOOT_TYPE_AGENT): RCF refuses it for
+ * engine-host TAs (TE_EINVAL) and non-rebootable TAs (TE_EPERM).
+ * flush_logs asks the Logger to pump out the TA log via
+ * log_flush_ten() — rcf_ta_get_log() is Logger-only and would divert
+ * the log bulk away from the run log.
+ */
+extern te_errno pyte_rcf_ta_list(char *buf, size_t *len);
+extern te_errno pyte_rcf_ta_type(const char *ta, char *buf);
+extern te_errno pyte_rcf_ta_info(const char *ta, char **type,
+                                 char **rcflib, char **confstr,
+                                 unsigned int *flags);
+extern te_errno pyte_rcf_put_file(const char *ta, const char *lfile,
+                                  const char *rfile);
+extern te_errno pyte_rcf_get_file(const char *ta, const char *rfile,
+                                  const char *lfile);
+extern te_errno pyte_rcf_del_file(const char *ta, const char *rfile);
+extern te_errno pyte_rcf_ta_restart(const char *ta,
+                                    const char *boot_params);
+extern te_errno pyte_rcf_ta_flush_logs(const char *ta);
+extern te_errno pyte_rcf_add_ta_unix(const char *name, const char *type,
+                                     const char *host, uint16_t port,
+                                     unsigned int flags);
+extern te_errno pyte_rcf_del_ta(const char *name);
 
 /* Local sockaddr helpers (no RPC involved) */
 extern te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,

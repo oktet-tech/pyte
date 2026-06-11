@@ -1378,6 +1378,82 @@ pyte_pkts_free(pyte_pkts *p)
     p->n = 0;
 }
 
+/* See pyte_shim.h: RCF direct API wrappers */
+
+te_errno
+pyte_rcf_ta_list(char *buf, size_t *len)
+{
+    PYTE_GUARD_RC(rcf_get_ta_list(buf, len));
+    return 0;
+}
+
+te_errno
+pyte_rcf_ta_type(const char *ta, char *buf)
+{
+    PYTE_GUARD_RC(rcf_ta_name2type(ta, buf));
+    return 0;
+}
+
+te_errno
+pyte_rcf_ta_info(const char *ta, char **type, char **rcflib,
+                 char **confstr, unsigned int *flags)
+{
+    PYTE_GUARD_RC(rcf_get_ta(ta, type, rcflib, confstr, flags));
+    return 0;
+}
+
+te_errno
+pyte_rcf_put_file(const char *ta, const char *lfile, const char *rfile)
+{
+    PYTE_GUARD_RC(rcf_ta_put_file(ta, 0, lfile, rfile));
+    return 0;
+}
+
+te_errno
+pyte_rcf_get_file(const char *ta, const char *rfile, const char *lfile)
+{
+    PYTE_GUARD_RC(rcf_ta_get_file(ta, 0, rfile, lfile));
+    return 0;
+}
+
+te_errno
+pyte_rcf_del_file(const char *ta, const char *rfile)
+{
+    PYTE_GUARD_RC(rcf_ta_del_file(ta, 0, rfile));
+    return 0;
+}
+
+te_errno
+pyte_rcf_ta_restart(const char *ta, const char *boot_params)
+{
+    PYTE_GUARD_RC(rcf_ta_reboot(ta, boot_params, NULL,
+                                RCF_REBOOT_TYPE_AGENT));
+    return 0;
+}
+
+te_errno
+pyte_rcf_ta_flush_logs(const char *ta)
+{
+    PYTE_GUARD_RC(log_flush_ten(ta));
+    return 0;
+}
+
+te_errno
+pyte_rcf_add_ta_unix(const char *name, const char *type, const char *host,
+                     uint16_t port, unsigned int flags)
+{
+    /* copy/kill timeouts 0 = RCF defaults */
+    PYTE_GUARD_RC(rcf_add_ta_unix(name, type, host, port, 0, 0, flags));
+    return 0;
+}
+
+te_errno
+pyte_rcf_del_ta(const char *name)
+{
+    PYTE_GUARD_RC(rcf_del_ta(name));
+    return 0;
+}
+
 te_errno
 pyte_sockaddr_in4(const char *ip, uint16_t port,
                   struct sockaddr_storage *ss, socklen_t *len)

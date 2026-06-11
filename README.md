@@ -15,7 +15,8 @@ Modules: `pyte.test` (lifecycle), `pyte.log`, `pyte.errors`,
 `pyte.rpc` (RpcServer/RpcSocket/files/sh/expect_error), `pyte.cfg`
 (CfgNode object model), `pyte.net` (interfaces/routes/neighbors/
 sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
-(layer DSL + Csap).
+(layer DSL + Csap), `pyte.rcf` (agent inventory/files/restart/
+dynamic TAs).
 
 ## Architecture
 
@@ -99,6 +100,55 @@ Caveats:
   gw and dev do not participate in matching.  `route_del()` must repeat
   the metric (and tos, if set) used at add time; gw/dev are passed to
   the kernel lookup but do not affect which instance is deleted.
+
+## pyte.rcf — RCF direct API
+
+`pyte.rcf` talks to RCF itself (no RPC server needed): agent
+inventory, engine<->agent file transfer, TA restart, log flush and
+dynamic agent add/remove.
+
+```python
+from pyte import rcf
+
+rcf.agents()                          # ["Agt_A", ...] running agents
+agt = rcf.agent("Agt_A")
+agt.type                              # "linux"
+agt.info                              # AgentInfo(type, rcflib, confstr, flags)
+
+agt.put_file("/local/path", "/remote/path")   # engine -> agent
+agt.get_file("/remote/path", "/local/path")   # agent -> engine
+agt.del_file("/remote/path")
+agt.put_bytes(b"payload", "/remote/path")     # tempfile sugar
+agt.get_bytes("/remote/path")
+
+agt.flush_logs()                      # Logger pumps out the TA log now
+agt.restart()                         # rcf_ta_reboot(RCF_REBOOT_TYPE_AGENT)
+
+with rcf.add_agent("Agt_DYN") as dyn:          # extra agent at runtime
+    dyn.put_bytes(b"x", "/tmp/probe")
+# remove() ran on context exit
+```
+
+Caveats:
+
+- `restart()` is refused by RCF for agents running on the engine host
+  (`TE_EINVAL`) and for agents not marked rebootable (`TE_EPERM`).
+  Only a remote agent added with `rebootable=True` (or configured with
+  the `rebootable` attribute in the RCF config) can be restarted.
+- `add_agent(host=None)` passes an empty rcfunix host, which starts
+  the agent on the engine host without SSH — the same mechanism the
+  localhost rig uses.  Such an agent is *not* restartable (see above).
+  The listen port defaults to a random high port; collisions surface
+  as add errors.
+- File operations run in RCF session 0 (the header's "TA session
+  or 0"), serialized with other session-0 traffic.
+- `flush_logs()` wraps `log_flush_ten()`, an IPC request that makes
+  the Logger pump the TA's accumulated log into the run log.  It does
+  NOT call `rcf_ta_get_log()` — that API is Logger-only and would
+  divert the log bulk into a private file, losing it from the run log.
+- `remove()`/the `DynamicAgent` context manager deletes the agent
+  from RCF; deleting an agent from the static RCF configuration is
+  refused (`TE_EPERM`).
 
 ## Extending pyte (the pattern)
 
