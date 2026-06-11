@@ -25,6 +25,8 @@
 
 #include "conf_api.h"
 #include "tapi_cfg.h"
+#include "tapi_cfg_rcf.h"
+#include "te_kvpair.h"
 #include "tapi_cfg_base.h"
 #include "tapi_cfg_sys.h"
 #include "rcf_rpc.h"
@@ -349,6 +351,22 @@ extern te_errno pyte_rcf_add_ta_unix(const char *name, const char *type,
                                      const char *host, uint16_t port,
                                      unsigned int flags);
 extern te_errno pyte_rcf_del_ta(const char *name);
+
+/*
+ * Configurator-managed dynamic agents (tapi_cfg_rcf.h, /rcf subtree).
+ * kv is a flat array [key0, val0, key1, val1, ...] of n_kv PAIRS
+ * (2 * n_kv strings) repacked into the te_kvpair_h conf list.  The
+ * keys/values become /rcf:/agent:<ta>/conf:<key> instances; the
+ * Configurator turns them into the rcfunix confstr (see
+ * engine/configurator/conf_rcf.c): "port" is mandatory, an empty
+ * "host" value means the engine host, presence-only keys such as
+ * "sudo" must have an empty value.  flags are the same RCF_TA_*
+ * bits as the raw path (REBOOTABLE, NO_SYNC_TIME).
+ */
+extern te_errno pyte_cfg_rcf_add_ta(const char *ta, const char *type,
+                                    const char *rcflib, const char **kv,
+                                    unsigned int n_kv, unsigned int flags);
+extern te_errno pyte_cfg_rcf_del_ta(const char *ta);
 
 /* Local sockaddr helpers (no RPC involved) */
 extern te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,

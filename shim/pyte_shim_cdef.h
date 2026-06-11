@@ -190,6 +190,10 @@ te_errno pyte_rcf_add_ta_unix(const char *name, const char *type,
                               const char *host, uint16_t port,
                               unsigned int flags);
 te_errno pyte_rcf_del_ta(const char *name);
+te_errno pyte_cfg_rcf_add_ta(const char *ta, const char *type,
+                             const char *rcflib, const char **kv,
+                             unsigned int n_kv, unsigned int flags);
+te_errno pyte_cfg_rcf_del_ta(const char *ta);
 
 te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,
                            struct sockaddr_storage *ss, socklen_t *len);

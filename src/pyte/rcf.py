@@ -9,6 +9,13 @@ Usage:
     a.put_bytes(b"data", "/tmp/x")
     with rcf.add_agent("Agt_DYN") as dyn:   # extra agent on the engine host
         dyn.get_bytes("/etc/hostname")
+    with rcf.add_agent("Agt_MGD", managed=True) as dyn:  # cfg-visible
+        ...                               # /agent:Agt_MGD exists: rpc/job/net
+
+add_agent(managed=True) goes through the Configurator's /rcf subtree
+(tapi_cfg_rcf_add_ta), so the agent is first-class: visible in cfg and
+usable by RPC servers, jobs and pyte.net.  The default raw RCF path is
+cfg-invisible and only good for RCF-level operations (files, restart).
 
 restart() works only for agents NOT running on the engine host
 (rcf_ta_reboot returns TE_EINVAL otherwise) that were added/configured
@@ -61,6 +68,24 @@ def _grow_loop(call, initial: int = 4096) -> bytes:
             size *= 2
         else:
             raise rc
+
+
+def _conf_pairs(host: str | None, port: int,
+                sudo: bool = False) -> list[tuple[str, str]]:
+    """rcfunix conf kvpairs for a managed (Configurator-driven) agent.
+
+    Keys are the ones engine/configurator/conf_rcf.c consumes when it
+    builds the rcfunix confstr ("port" is mandatory there).  An empty
+    "host" value means an engine-host local agent without ssh — the
+    same form conf/rcf.conf passes when TE_IUT is unset.  "sudo" is a
+    presence-only key: its value MUST stay empty (conf_rcf.c rejects a
+    non-empty value with EINVAL), mirroring rcf.conf's
+    ``<conf name="sudo" cond=.../>``.
+    """
+    pairs = [("host", host or ""), ("port", str(port))]
+    if sudo:
+        pairs.append(("sudo", ""))
+    return pairs
 
 
 def agents() -> list[str]:
@@ -179,19 +204,29 @@ class RcfAgent:
 
 
 class DynamicAgent(RcfAgent):
-    """An agent added at runtime; remove() tears it down (also a CM)."""
+    """An agent added at runtime; remove() tears it down (also a CM).
 
-    def __init__(self, name: str):
+    The managed attribute records which backend created the agent and
+    routes remove(): Configurator /rcf deletion for managed agents,
+    plain rcf_del_ta for raw ones.
+    """
+
+    def __init__(self, name: str, managed: bool = False):
         super().__init__(name)
+        self.managed = managed
         self._removed = False
 
     def remove(self) -> None:
-        """Delete the agent from RCF (idempotent)."""
+        """Delete the agent via its own backend (idempotent)."""
         from pyte._shim import lib
         if self._removed:
             return
-        check(lib.pyte_rcf_del_ta(_enc(self.name)),
-              f"del_ta({self.name})", RcfError)
+        if self.managed:
+            check(lib.pyte_cfg_rcf_del_ta(_enc(self.name)),
+                  f"cfg_rcf_del_ta({self.name})", RcfError)
+        else:
+            check(lib.pyte_rcf_del_ta(_enc(self.name)),
+                  f"del_ta({self.name})", RcfError)
         self._removed = True
 
     def __enter__(self):
@@ -215,12 +250,36 @@ def agent(name: str) -> RcfAgent:
 
 
 def add_agent(name: str, host: str | None = None, type: str = "linux",
-              port: int = 0, rebootable: bool = False) -> DynamicAgent:
-    """Add a TA at runtime. host=None: start on the engine host (no ssh)."""
-    from pyte._shim import lib
+              port: int = 0, rebootable: bool = False,
+              managed: bool = False, sudo: bool = False) -> DynamicAgent:
+    """Add a TA at runtime. host=None: start on the engine host (no ssh).
+
+    managed=True registers the agent in the Configurator's /rcf subtree
+    (tapi_cfg_rcf_add_ta starts it via the status node and syncs
+    /agent:<name>): the agent is cfg-visible and works with RPC
+    servers, jobs and pyte.net.  The default managed=False path adds
+    the agent straight into RCF — cheap, but invisible to the
+    Configurator, so it only supports RCF-level operations (files,
+    restart); use managed=True for everything else.  sudo starts the
+    agent under sudo and is supported on the managed path only.
+    """
+    if sudo and not managed:
+        raise ValueError("sudo=True requires managed=True "
+                         "(the raw RCF path starts agents unprivileged)")
+    from pyte._shim import ffi, lib
     flags = lib.PYTE_RCF_TA_REBOOTABLE if rebootable else 0
-    check(lib.pyte_rcf_add_ta_unix(_enc(name), _enc(type),
-                                   _enc(host) if host else b"",
-                                   port or _pick_port(), flags),
-          f"add_agent({name})", RcfError)
-    return DynamicAgent(name)
+    if managed:
+        pairs = _conf_pairs(host, port or _pick_port(), sudo)
+        # Keepalive: kv_strs owns the char[] copies for the call's
+        # duration (same pattern as Job.create argv).
+        kv_strs = [ffi.new("char[]", _enc(s)) for kv in pairs for s in kv]
+        kv = ffi.new("const char *[]", kv_strs)
+        check(lib.pyte_cfg_rcf_add_ta(_enc(name), _enc(type), b"rcfunix",
+                                      kv, len(pairs), flags),
+              f"add_agent({name}, managed=True)", RcfError)
+    else:
+        check(lib.pyte_rcf_add_ta_unix(_enc(name), _enc(type),
+                                       _enc(host) if host else b"",
+                                       port or _pick_port(), flags),
+              f"add_agent({name})", RcfError)
+    return DynamicAgent(name, managed=managed)

@@ -4,7 +4,7 @@
 
 import pytest
 
-from pyte.rcf import _grow_loop, _pick_port, _split_ta_list
+from pyte.rcf import _conf_pairs, _grow_loop, _pick_port, _split_ta_list
 
 
 def test_split_ta_list_basic():
@@ -32,6 +32,33 @@ def test_pick_port_range():
 
 def test_pick_port_varies():
     assert len({_pick_port() for _ in range(20)}) > 1
+
+
+# -- _conf_pairs tests ------------------------------------------------------
+#
+# The keys are pinned to what the Configurator consumes when starting a
+# managed agent (engine/configurator/conf_rcf.c, cfg_rcfunix_make_confstr):
+# "port" is mandatory; an empty "host" value means an engine-host local
+# agent (te/lib/rcfunix treats empty host as local, exactly like
+# conf/rcf.conf with TE_IUT unset); "sudo" is a presence-only key whose
+# value MUST be empty -- conf_rcf.c rejects a non-empty value with EINVAL.
+
+def test_conf_pairs_basic():
+    assert _conf_pairs(host=None, port=21000, sudo=False) == [
+        ("host", ""), ("port", "21000")]
+
+
+def test_conf_pairs_remote_sudo():
+    assert _conf_pairs(host="test", port=21000, sudo=True) == [
+        ("host", "test"), ("port", "21000"), ("sudo", "")]
+
+
+def test_add_agent_sudo_requires_managed():
+    """sudo rides in the managed conf kvpairs; the raw path is unchanged."""
+    from pyte.rcf import add_agent
+
+    with pytest.raises(ValueError, match="managed=True"):
+        add_agent("Agt_X", sudo=True)
 
 
 # -- _grow_loop tests -------------------------------------------------------

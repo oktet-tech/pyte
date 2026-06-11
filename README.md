@@ -127,7 +127,31 @@ agt.restart()                         # rcf_ta_reboot(RCF_REBOOT_TYPE_AGENT)
 with rcf.add_agent("Agt_DYN") as dyn:          # extra agent at runtime
     dyn.put_bytes(b"x", "/tmp/probe")
 # remove() ran on context exit
+
+with rcf.add_agent("Agt_MGD", managed=True) as dyn:   # cfg-visible agent
+    ...   # /agent:Agt_MGD exists; RPC servers, jobs and pyte.net work
 ```
+
+Managed vs raw dynamic agents:
+
+- `managed=True` registers the agent in the Configurator's `/rcf`
+  subtree (`tapi_cfg_rcf_add_ta`): the Configurator itself starts the
+  TA when the `status` node goes to 1 and synchronizes
+  `/agent:<name>`, so the agent is first-class — visible in
+  `cfg.find("/agent:*")`, usable with `RpcServer`, `pyte.job` and
+  `pyte.net`.  Needs `cm_rcf.yml` registered in the rig's `cs.conf`.
+  `remove()` deletes the `/rcf:/agent:<name>` instance, which stops
+  the TA and drops it from both views.
+- `managed=False` (default) adds the agent straight into RCF
+  (`rcf_add_ta_unix`) — cheap and Configurator-invisible.  Good for
+  RCF-level testing only (file ops, restart); anything that goes
+  through cfg (RPC server creation reads `/agent:<name>/rpcprovider`)
+  will not see the agent.
+- Connection parameters become `/rcf:/agent:<name>/conf:<key>`
+  instances; the keys mirror `conf/rcf.conf` (`host`, `port`, `user`,
+  `key`, `sudo`, ...; see `engine/configurator/conf_rcf.c`).  An empty
+  `host` means the engine host without SSH; `sudo` is presence-only
+  (its value must be empty) and is accepted only with `managed=True`.
 
 Caveats:
 

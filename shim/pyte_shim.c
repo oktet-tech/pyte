@@ -1454,6 +1454,40 @@ pyte_rcf_del_ta(const char *name)
     return 0;
 }
 
+static te_errno
+pyte_cfg_rcf_add_ta_nojmp(const char *ta, const char *type,
+                          const char *rcflib, const char **kv,
+                          unsigned int n_kv, unsigned int flags)
+{
+    te_kvpair_h conf;
+    te_errno rc = 0;
+    unsigned int i;
+
+    te_kvpair_init(&conf);
+    for (i = 0; i < n_kv && rc == 0; i++)
+        rc = te_kvpair_add(&conf, kv[2 * i], "%s", kv[2 * i + 1]);
+    if (rc == 0)
+        rc = tapi_cfg_rcf_add_ta(ta, type, rcflib, &conf, flags);
+    te_kvpair_fini(&conf);
+    return rc;
+}
+
+te_errno
+pyte_cfg_rcf_add_ta(const char *ta, const char *type, const char *rcflib,
+                    const char **kv, unsigned int n_kv, unsigned int flags)
+{
+    PYTE_GUARD_RC(pyte_cfg_rcf_add_ta_nojmp(ta, type, rcflib, kv, n_kv,
+                                            flags));
+    return 0;
+}
+
+te_errno
+pyte_cfg_rcf_del_ta(const char *ta)
+{
+    PYTE_GUARD_RC(tapi_cfg_rcf_del_ta(ta));
+    return 0;
+}
+
 te_errno
 pyte_sockaddr_in4(const char *ip, uint16_t port,
                   struct sockaddr_storage *ss, socklen_t *len)
