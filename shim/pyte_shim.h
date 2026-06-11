@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#include "conf_api.h"
 #include "rcf_rpc.h"
 #include "te_rpc_sys_socket.h"
 #include "te_rpc_sys_stat.h"
@@ -43,6 +44,22 @@
 /* rpc_open() mode is an RPC bitmap (te_rpc_sys_stat.h), not raw octal */
 #define PYTE_MODE_0644 \
     (RPC_S_IRUSR | RPC_S_IWUSR | RPC_S_IRGRP | RPC_S_IROTH)
+
+/* Configurator value-type passthrough */
+#define PYTE_CVT_NONE CVT_NONE
+#define PYTE_CVT_BOOL CVT_BOOL
+#define PYTE_CVT_INT8 CVT_INT8
+#define PYTE_CVT_UINT8 CVT_UINT8
+#define PYTE_CVT_INT16 CVT_INT16
+#define PYTE_CVT_UINT16 CVT_UINT16
+#define PYTE_CVT_INT32 CVT_INT32
+#define PYTE_CVT_UINT32 CVT_UINT32
+#define PYTE_CVT_INT64 CVT_INT64
+#define PYTE_CVT_UINT64 CVT_UINT64
+#define PYTE_CVT_STRING CVT_STRING
+#define PYTE_CVT_ADDRESS CVT_ADDRESS
+#define PYTE_CVT_DOUBLE CVT_DOUBLE
+#define PYTE_CVT_UNSPECIFIED CVT_UNSPECIFIED
 
 extern void pyte_log_init(const char *entity);
 extern void pyte_log(unsigned int level, const char *user, const char *text);
@@ -105,6 +122,25 @@ extern te_errno pyte_rpc_gethostname(rcf_rpc_server *rpcs, char *buf,
 extern te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                        const char *cmd, int *out_flag,
                                        int *out_value);
+
+/*
+ * Configurator wrappers: everything crosses the boundary as text,
+ * conversion to/from the real instance type happens here.
+ * with_children/with_subtree are int (0/1) for cffi friendliness.
+ */
+extern te_errno pyte_cfg_get_type(const char *oid, int *out_type);
+extern te_errno pyte_cfg_get_str(const char *oid, char **out);
+extern te_errno pyte_cfg_set_str(const char *oid, int type,
+                                 const char *value);
+extern te_errno pyte_cfg_add_str(const char *oid, int type,
+                                 const char *value, cfg_handle *out);
+extern te_errno pyte_cfg_del(const char *oid, int with_children);
+extern te_errno pyte_cfg_find_pattern(const char *pattern, unsigned int *n,
+                                      cfg_handle **set);
+extern te_errno pyte_cfg_oid_str(cfg_handle h, char **out);
+extern te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
+extern te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
+extern void pyte_free_handles(cfg_handle *set);
 
 /* Local sockaddr helpers (no RPC involved) */
 extern te_errno pyte_sockaddr_in4(const char *ip, uint16_t port,
