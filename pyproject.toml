@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Konstantin Ushakov
+[build-system]
+requires = ["setuptools>=68", "cffi>=1.16"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyte"
+version = "0.1.0"
+description = "Python API wrappers for OKTET Labs Test Environment"
+requires-python = ">=3.11"
+dependencies = ["cffi>=1.16"]
