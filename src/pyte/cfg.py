@@ -190,6 +190,10 @@ def borrowed_rsrc(name: str, owner_agent: str, borrower_agent: str,
 
     ``subpath`` is the per-agent OID tail (e.g. ``"interface:lo"``);
     the full ``/agent:{X}/{subpath}`` target is built only here.
+
+    Standard ``finally`` semantics apply: if the body raises AND a
+    release/restore step also raises during unwind, the unwind error
+    replaces the body's exception (kept only as ``__context__``).
     """
     set(f"/agent:{owner_agent}/rsrc:{name}", "")
     try:
