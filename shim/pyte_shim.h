@@ -376,6 +376,119 @@ extern te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
                                     size_t ipbuflen, uint16_t *port);
 
 /*
+ * ---- TRC: read access to lib/trc + lib/logic_expr ----
+ *
+ * TRC headers (te_trc.h → te_test_result.h) define a typedef named
+ * te_test_verdict for the verdict struct.  tapi_test_log.h (pulled in
+ * above via tapi_test.h) declares a function with the same name.
+ * Including both in one translation unit causes a C name-space conflict.
+ *
+ * Solution: TRC accessors live in pyte_trc.c which does NOT include
+ * tapi_test.h.  Here we forward-declare the opaque TRC types and the
+ * accessor functions so the cffi-generated file and pyte_shim.c can
+ * reference them without pulling in the conflicting headers.
+ *
+ * te_test_status values are copied from te_test_result.h as PYTE_TE_TEST_*
+ * macros so the cffi cdef can resolve them without including the header
+ * (which would cause the te_test_verdict name conflict again).
+ */
+
+/* te_test_status passthrough — values copied from te_test_result.h enum */
+#define PYTE_TE_TEST_INCOMPLETE 0
+#define PYTE_TE_TEST_UNSPEC     1
+#define PYTE_TE_TEST_EMPTY      2
+#define PYTE_TE_TEST_SKIPPED    3
+#define PYTE_TE_TEST_FAKED      4
+#define PYTE_TE_TEST_PASSED     5
+#define PYTE_TE_TEST_FAILED     6
+
+/*
+ * Opaque TRC types (defined in te_trc.h / trc_db.h).
+ *
+ * NOTE: te_test_verdict is NOT typedef'd here.  tapi_test_log.h (included
+ * above via tapi_test.h) declares a function named te_test_verdict(); a
+ * typedef for the struct with the same name would be a C name-space conflict.
+ * The struct tag te_test_verdict does NOT conflict with the function name
+ * (struct tags are in a separate tag namespace in C), so we use
+ * "struct te_test_verdict *" for verdict-related function declarations.
+ * cffi sees "typedef ... te_test_verdict;" in the cdef and maps these
+ * through void * at the ABI boundary.
+ */
+struct te_trc_db;
+typedef struct te_trc_db te_trc_db;
+extern void trc_db_close(te_trc_db *trc_db);
+
+struct trc_test;
+typedef struct trc_test trc_test;
+struct trc_test_iter;
+typedef struct trc_test_iter trc_test_iter;
+struct trc_test_iter_arg;
+typedef struct trc_test_iter_arg trc_test_iter_arg;
+struct trc_exp_result;
+typedef struct trc_exp_result trc_exp_result;
+struct trc_exp_result_entry;
+typedef struct trc_exp_result_entry trc_exp_result_entry;
+
+/*
+ * te_test_verdict struct tag exists (defined in te_test_result.h / pyte_trc.c)
+ * but cannot be typedef'd here under the name te_test_verdict: tapi_test_log.h
+ * already declared a function with that same name (ordinary identifier space).
+ * Alias it as pyte_trc_verdict using the struct tag, which lives in the tag
+ * namespace and does not collide.
+ */
+struct te_test_verdict;
+typedef struct te_test_verdict pyte_trc_verdict;
+
+/* SYNC: declarations below MUST stay in sync with pyte_trc.h, which cannot
+ * be included here due to the te_test_verdict name collision with tapi_test_log.h. */
+extern te_errno pyte_trc_db_open(const char *path, te_trc_db **db);
+extern bool pyte_trc_db_last_match(const te_trc_db *db);
+
+extern trc_test *pyte_trc_db_first_test(te_trc_db *db);
+extern trc_test *pyte_trc_test_next(trc_test *test);
+extern trc_test_iter *pyte_trc_test_first_iter(trc_test *test);
+extern trc_test_iter *pyte_trc_iter_next(trc_test_iter *iter);
+extern trc_test *pyte_trc_iter_first_test(trc_test_iter *iter);
+
+extern const char *pyte_trc_test_name(const trc_test *test);
+extern const char *pyte_trc_test_path(const trc_test *test);
+extern int pyte_trc_test_type(const trc_test *test);
+extern bool pyte_trc_test_aux(const trc_test *test);
+extern const char *pyte_trc_test_objective(const trc_test *test);
+extern const char *pyte_trc_test_notes(const trc_test *test);
+extern const char *pyte_trc_test_filename(const trc_test *test);
+extern int pyte_trc_test_file_pos(const trc_test *test);
+
+extern const char *pyte_trc_iter_notes(const trc_test_iter *iter);
+extern const char *pyte_trc_iter_filename(const trc_test_iter *iter);
+extern int pyte_trc_iter_file_pos(const trc_test_iter *iter);
+
+extern trc_test_iter_arg *pyte_trc_iter_first_arg(trc_test_iter *iter);
+extern trc_test_iter_arg *pyte_trc_arg_next(trc_test_iter_arg *arg);
+extern const char *pyte_trc_arg_name(const trc_test_iter_arg *arg);
+extern const char *pyte_trc_arg_value(const trc_test_iter_arg *arg);
+
+extern const trc_exp_result *pyte_trc_iter_default_result(
+                                        const trc_test_iter *iter);
+extern trc_exp_result *pyte_trc_iter_first_result(trc_test_iter *iter);
+extern trc_exp_result *pyte_trc_result_next(trc_exp_result *result);
+extern const char *pyte_trc_result_tags(const trc_exp_result *result);
+extern const char *pyte_trc_result_key(const trc_exp_result *result);
+extern const char *pyte_trc_result_notes(const trc_exp_result *result);
+
+extern trc_exp_result_entry *pyte_trc_result_first_entry(
+                                        trc_exp_result *result);
+extern trc_exp_result_entry *pyte_trc_entry_next(
+                                        trc_exp_result_entry *entry);
+extern int pyte_trc_entry_status(const trc_exp_result_entry *entry);
+extern const char *pyte_trc_entry_key(const trc_exp_result_entry *entry);
+extern const char *pyte_trc_entry_notes(const trc_exp_result_entry *entry);
+extern pyte_trc_verdict *pyte_trc_entry_first_verdict(
+                                        trc_exp_result_entry *entry);
+extern pyte_trc_verdict *pyte_trc_verdict_next(pyte_trc_verdict *verdict);
+extern const char *pyte_trc_verdict_str(const pyte_trc_verdict *verdict);
+
+/*
  * Trampoline guard: confines any tapi longjmp to this C frame and
  * converts it to a te_errno return.
  *

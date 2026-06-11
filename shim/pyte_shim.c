@@ -1528,3 +1528,9 @@ pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
     }
     return TE_RC(TE_TAPI, TE_EAFNOSUPPORT);
 }
+
+/*
+ * TRC accessors are in pyte_trc.c — kept separate to avoid the
+ * te_test_verdict name collision between te_test_result.h (struct typedef)
+ * and tapi_test_log.h (function declaration).
+ */

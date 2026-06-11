@@ -249,3 +249,70 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define PYTE_SIGTERM ...
 #define PYTE_SIGUSR1 ...
 #define PYTE_SIGUSR2 ...
+
+/* ---- TRC ---- */
+typedef ... te_trc_db;
+typedef ... te_trc_db_walker;
+typedef ... trc_test;
+typedef ... trc_test_iter;
+typedef ... trc_test_iter_arg;
+typedef ... trc_exp_result;
+typedef ... trc_exp_result_entry;
+typedef ... te_test_result;
+typedef ... pyte_trc_verdict;
+typedef ... logic_expr;
+typedef ... tqh_strings;
+
+/*
+ * te_test_status enum values.  Exposed as PYTE_TE_TEST_* defines in
+ * pyte_shim.h (numeric literals) to avoid including te_test_result.h in
+ * the main shim — that header's te_test_verdict typedef conflicts with
+ * the void te_test_verdict() function in tapi_test_log.h.
+ * cffi resolves #define NAME ... at compile time from the included headers.
+ */
+#define PYTE_TE_TEST_INCOMPLETE ...
+#define PYTE_TE_TEST_UNSPEC     ...
+#define PYTE_TE_TEST_EMPTY      ...
+#define PYTE_TE_TEST_SKIPPED    ...
+#define PYTE_TE_TEST_FAKED      ...
+#define PYTE_TE_TEST_PASSED     ...
+#define PYTE_TE_TEST_FAILED     ...
+
+void trc_db_close(te_trc_db *trc_db);
+
+te_errno pyte_trc_db_open(const char *path, te_trc_db **db);
+bool pyte_trc_db_last_match(const te_trc_db *db);
+trc_test *pyte_trc_db_first_test(te_trc_db *db);
+trc_test *pyte_trc_test_next(trc_test *test);
+trc_test_iter *pyte_trc_test_first_iter(trc_test *test);
+trc_test_iter *pyte_trc_iter_next(trc_test_iter *iter);
+trc_test *pyte_trc_iter_first_test(trc_test_iter *iter);
+const char *pyte_trc_test_name(const trc_test *test);
+const char *pyte_trc_test_path(const trc_test *test);
+int pyte_trc_test_type(const trc_test *test);
+bool pyte_trc_test_aux(const trc_test *test);
+const char *pyte_trc_test_objective(const trc_test *test);
+const char *pyte_trc_test_notes(const trc_test *test);
+const char *pyte_trc_test_filename(const trc_test *test);
+int pyte_trc_test_file_pos(const trc_test *test);
+const char *pyte_trc_iter_notes(const trc_test_iter *iter);
+const char *pyte_trc_iter_filename(const trc_test_iter *iter);
+int pyte_trc_iter_file_pos(const trc_test_iter *iter);
+trc_test_iter_arg *pyte_trc_iter_first_arg(trc_test_iter *iter);
+trc_test_iter_arg *pyte_trc_arg_next(trc_test_iter_arg *arg);
+const char *pyte_trc_arg_name(const trc_test_iter_arg *arg);
+const char *pyte_trc_arg_value(const trc_test_iter_arg *arg);
+const trc_exp_result *pyte_trc_iter_default_result(const trc_test_iter *iter);
+trc_exp_result *pyte_trc_iter_first_result(trc_test_iter *iter);
+trc_exp_result *pyte_trc_result_next(trc_exp_result *result);
+const char *pyte_trc_result_tags(const trc_exp_result *result);
+const char *pyte_trc_result_key(const trc_exp_result *result);
+const char *pyte_trc_result_notes(const trc_exp_result *result);
+trc_exp_result_entry *pyte_trc_result_first_entry(trc_exp_result *result);
+trc_exp_result_entry *pyte_trc_entry_next(trc_exp_result_entry *entry);
+int pyte_trc_entry_status(const trc_exp_result_entry *entry);
+const char *pyte_trc_entry_key(const trc_exp_result_entry *entry);
+const char *pyte_trc_entry_notes(const trc_exp_result_entry *entry);
+pyte_trc_verdict *pyte_trc_entry_first_verdict(trc_exp_result_entry *entry);
+pyte_trc_verdict *pyte_trc_verdict_next(pyte_trc_verdict *verdict);
+const char *pyte_trc_verdict_str(const pyte_trc_verdict *verdict);

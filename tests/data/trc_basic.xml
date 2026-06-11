@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<trc_db version="1.0">
+  <test name="demo" type="package">
+    <objective>Demo package</objective>
+    <iter result="PASSED">
+      <notes/>
+      <test name="echo" type="script">
+        <objective>Echo test</objective>
+        <iter result="PASSED">
+          <arg name="len">1</arg>
+          <arg name="proto">tcp</arg>
+          <notes/>
+          <results tags="linux&amp;jumbo" key="BUG-1" notes="mtu issue">
+            <result value="FAILED">
+              <verdict>Too big</verdict>
+            </result>
+          </results>
+        </iter>
+        <iter result="PASSED">
+          <arg name="len"/>
+          <arg name="proto">udp</arg>
+          <notes/>
+        </iter>
+      </test>
+    </iter>
+  </test>
+</trc_db>

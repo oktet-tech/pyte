@@ -21,6 +21,9 @@ TE_LIBS = [
     "te-rpcxdr",
     # tarpc.h includes <rpc/rpc.h>; te-rpcxdr.pc does not propagate it
     "libtirpc",
+    "te-trc", "te-logic_expr",
+    # te_trc.h pulls in libxml2 headers; resolve the include path via pkg-config
+    "libxml-2.0",
 ]
 
 
@@ -53,7 +56,8 @@ ffibuilder.cdef(cdef)
 ffibuilder.set_source(
     "pyte._shim",
     '#include "pyte_shim.h"',
-    sources=[str(here / "shim" / "pyte_shim.c")],
+    sources=[str(here / "shim" / "pyte_shim.c"),
+             str(here / "shim" / "pyte_trc.c")],
     include_dirs=[str(here / "shim")],
     extra_compile_args=["-D_GNU_SOURCE", *cflags],
     # --disable-new-dtags: emit DT_RPATH (not DT_RUNPATH) so the path
