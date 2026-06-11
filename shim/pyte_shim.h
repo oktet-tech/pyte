@@ -26,7 +26,13 @@ extern void pyte_free_string(char *p);
 
 /*
  * Trampoline guard: confines any tapi longjmp to this C frame and
- * converts it to a te_errno return. _stmt must not return.
+ * converts it to a te_errno return.
+ *
+ * WARNING: _stmt must not return early (via return/goto/break out of
+ * the macro).  If _stmt returns early, tapi_jmp_pop() is never called,
+ * leaving a stale jump point on the stack.  A later longjmp then lands
+ * in the already-unwound frame — undefined behaviour that typically
+ * manifests as a crash or silent data corruption.
  */
 #define PYTE_GUARD(_stmt) \
     do {                                                              \
@@ -39,6 +45,18 @@ extern void pyte_free_string(char *p);
             return TE_RC(TE_TAPI, pyte_jrc_);                         \
         { _stmt; }                                                    \
         tapi_jmp_pop(__FILE__, __LINE__);                             \
+    } while (0)
+
+/*
+ * Guard a te_errno-returning call: confines longjmp AND propagates the
+ * call's own status. Returns from the enclosing function on error.
+ */
+#define PYTE_GUARD_RC(_call) \
+    do {                                                              \
+        te_errno pyte_call_rc_;                                       \
+        PYTE_GUARD(pyte_call_rc_ = (_call));                          \
+        if (pyte_call_rc_ != 0)                                       \
+            return pyte_call_rc_;                                     \
     } while (0)
 
 #endif /* PYTE_SHIM_H */

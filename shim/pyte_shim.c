@@ -8,7 +8,9 @@
 void
 pyte_log_init(const char *entity)
 {
-    te_log_init(strdup(entity), ten_log_message);
+    const char *e = (entity == NULL) ? NULL : strdup(entity);
+
+    te_log_init(e == NULL ? "pyte" : e, ten_log_message);
 }
 
 void

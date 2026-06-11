@@ -10,12 +10,23 @@ def parse_argv(argv: list[str]) -> dict[str, str]:
         name, sep, value = arg.partition("=")
         if not sep:
             raise ValueError(f"malformed test parameter {arg!r}")
-        params[name.strip()] = value
+        # First occurrence wins, matching TE's C test_find_param behaviour.
+        name = name.strip()
+        if name not in params:
+            params[name] = value
     return params
 
 
 class Params:
-    """Typed access to test parameters."""
+    """Typed access to test parameters.
+
+    Note: the methods int(), float(), and bool() intentionally shadow the
+    built-in types of the same name — this is deliberate for a fluent API
+    (``p.int("n")`` reads naturally).  Code inside this class that needs
+    the real built-in must use ``builtins.int`` / ``builtins.float`` /
+    ``builtins.bool``, or quote the type in annotations
+    (e.g. ``"int"`` rather than ``int``).
+    """
 
     _TRUE = {"true", "yes", "1", "on"}
     _FALSE = {"false", "no", "0", "off"}

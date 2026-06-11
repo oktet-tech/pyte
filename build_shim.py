@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """cffi API-mode builder for pyte._shim. Needs TE_INSTALL in env."""
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -23,9 +24,20 @@ TE_LIBS = [
 
 def pkgconfig(*args: str) -> list[str]:
     env = dict(os.environ, PKG_CONFIG_PATH=PKGCONF)
-    out = subprocess.check_output(["pkg-config", *args, *TE_LIBS],
-                                  env=env, text=True)
-    return out.split()
+    try:
+        out = subprocess.check_output(["pkg-config", *args, *TE_LIBS],
+                                      env=env, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"pkg-config failed for TE libs under {PKGCONF}"
+            f" — is TE built? ({exc})"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"pkg-config failed for TE libs under {PKGCONF}"
+            f" — is TE built? ({exc})"
+        ) from exc
+    return shlex.split(out)
 
 
 cflags = pkgconfig("--cflags")
