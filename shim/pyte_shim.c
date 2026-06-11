@@ -699,6 +699,166 @@ pyte_free_handles(cfg_handle *set)
 }
 
 /*
+ * Network configuration section (tapi_cfg / tapi_cfg_base /
+ * tapi_cfg_sys).  All entry points follow the cfg house pattern:
+ * a _nojmp helper does the work, the public function guards it.
+ *
+ * tapi_cfg_add_route()/tapi_cfg_del_route_tmp() take RAW network
+ * addresses (struct in_addr et al., what te_sockaddr_get_netaddr()
+ * yields), NOT sockaddrs — see their tapi_cfg.h prototypes
+ * (const void *dst_addr).  Unexposed route attributes (src_addr,
+ * flags, tos, mtu, win, irtt) are passed as NULL/0.
+ */
+
+static te_errno
+pyte_cfg_route_op_nojmp(bool add, const char *ta, const char *dst,
+                        int prefix, const char *gw, const char *dev,
+                        int metric)
+{
+    struct in_addr dst_in;
+    struct in_addr gw_in;
+    bool           have_gw = (gw != NULL && gw[0] != '\0');
+    cfg_handle     h = CFG_HANDLE_INVALID;
+
+    if (dst == NULL || inet_pton(AF_INET, dst, &dst_in) != 1)
+        return TE_RC(TE_TAPI, TE_EINVAL);
+    if (have_gw && inet_pton(AF_INET, gw, &gw_in) != 1)
+        return TE_RC(TE_TAPI, TE_EINVAL);
+    if (dev != NULL && dev[0] == '\0')
+        dev = NULL;
+
+    if (add)
+    {
+        /* The handle is discarded: deletion goes by spec */
+        return tapi_cfg_add_route(ta, AF_INET, &dst_in, prefix,
+                                  have_gw ? &gw_in : NULL, dev, NULL,
+                                  0, metric, 0, 0, 0, 0, &h);
+    }
+    return tapi_cfg_del_route_tmp(ta, AF_INET, &dst_in, prefix,
+                                  have_gw ? &gw_in : NULL, dev, NULL,
+                                  0, metric, 0, 0, 0, 0);
+}
+
+te_errno
+pyte_cfg_route_add(const char *ta, const char *dst, int prefix,
+                   const char *gw, const char *dev, int metric)
+{
+    PYTE_GUARD_RC(pyte_cfg_route_op_nojmp(true, ta, dst, prefix, gw,
+                                          dev, metric));
+    return 0;
+}
+
+te_errno
+pyte_cfg_route_del(const char *ta, const char *dst, int prefix,
+                   const char *gw, const char *dev, int metric)
+{
+    PYTE_GUARD_RC(pyte_cfg_route_op_nojmp(false, ta, dst, prefix, gw,
+                                          dev, metric));
+    return 0;
+}
+
+static te_errno
+pyte_cfg_neigh_add_nojmp(const char *ta, const char *ifname,
+                         const char *ip, const uint8_t *mac,
+                         int is_static)
+{
+    struct sockaddr_storage ss;
+    socklen_t               len;
+    te_errno                rc;
+
+    rc = pyte_sockaddr_in4(ip, 0, &ss, &len);
+    if (rc != 0)
+        return rc;
+    return tapi_cfg_add_neigh_entry(ta, ifname, (struct sockaddr *)&ss,
+                                    mac, is_static != 0);
+}
+
+te_errno
+pyte_cfg_neigh_add(const char *ta, const char *ifname, const char *ip,
+                   const uint8_t *mac, int is_static)
+{
+    PYTE_GUARD_RC(pyte_cfg_neigh_add_nojmp(ta, ifname, ip, mac,
+                                           is_static));
+    return 0;
+}
+
+static te_errno
+pyte_cfg_neigh_del_nojmp(const char *ta, const char *ifname,
+                         const char *ip)
+{
+    struct sockaddr_storage ss;
+    socklen_t               len;
+    te_errno                rc;
+
+    rc = pyte_sockaddr_in4(ip, 0, &ss, &len);
+    if (rc != 0)
+        return rc;
+    return tapi_cfg_del_neigh_entry(ta, ifname, (struct sockaddr *)&ss);
+}
+
+te_errno
+pyte_cfg_neigh_del(const char *ta, const char *ifname, const char *ip)
+{
+    PYTE_GUARD_RC(pyte_cfg_neigh_del_nojmp(ta, ifname, ip));
+    return 0;
+}
+
+static te_errno
+pyte_cfg_if_addr_add_nojmp(const char *ta, const char *ifname,
+                           const char *ip, int prefix, int set_bcast)
+{
+    struct sockaddr_storage ss;
+    socklen_t               len;
+    te_errno                rc;
+
+    rc = pyte_sockaddr_in4(ip, 0, &ss, &len);
+    if (rc != 0)
+        return rc;
+    return tapi_cfg_base_if_add_net_addr(ta, ifname,
+                                         (struct sockaddr *)&ss, prefix,
+                                         set_bcast != 0, NULL);
+}
+
+te_errno
+pyte_cfg_if_addr_add(const char *ta, const char *ifname, const char *ip,
+                     int prefix, int set_bcast)
+{
+    PYTE_GUARD_RC(pyte_cfg_if_addr_add_nojmp(ta, ifname, ip, prefix,
+                                             set_bcast));
+    return 0;
+}
+
+te_errno
+pyte_cfg_sys_get_str(const char *ta, const char *path, char **out)
+{
+    PYTE_GUARD_RC(tapi_cfg_sys_get_str(ta, out, "%s", path));
+    return 0;
+}
+
+te_errno
+pyte_cfg_sys_set_str(const char *ta, const char *path, const char *val)
+{
+    /* old_val == NULL: Python reads the previous value itself */
+    PYTE_GUARD_RC(tapi_cfg_sys_set_str(ta, val, NULL, "%s", path));
+    return 0;
+}
+
+te_errno
+pyte_cfg_sys_get_int(const char *ta, const char *path, int *out)
+{
+    PYTE_GUARD_RC(tapi_cfg_sys_get_int(ta, out, "%s", path));
+    return 0;
+}
+
+te_errno
+pyte_cfg_sys_set_int(const char *ta, const char *path, int val,
+                     int *old_val)
+{
+    PYTE_GUARD_RC(tapi_cfg_sys_set_int(ta, val, old_val, "%s", path));
+    return 0;
+}
+
+/*
  * Job section.  tapi_job functions return te_errno and are not
  * supposed to longjmp, but every call is still guarded.  Channel sets
  * are repacked from (array, count) into NULL-terminated VLAs; the

@@ -24,6 +24,9 @@
 #include "tapi_tad.h"
 
 #include "conf_api.h"
+#include "tapi_cfg.h"
+#include "tapi_cfg_base.h"
+#include "tapi_cfg_sys.h"
 #include "rcf_rpc.h"
 #include "tapi_job.h"
 #include "tapi_job_factory_rpc.h"
@@ -180,6 +183,37 @@ extern te_errno pyte_cfg_oid_str(cfg_handle h, char **out);
 extern te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
 extern te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
 extern void pyte_free_handles(cfg_handle *set);
+
+/*
+ * Network configuration wrappers (tapi_cfg / tapi_cfg_base /
+ * tapi_cfg_sys).  IPv4 only; addresses cross the boundary as text.
+ * gw/dev may be NULL or empty meaning "absent".  mac is the raw
+ * 6-byte link-layer address.  sysctl paths are slash-separated
+ * relative to /proc/sys (the shim feeds them to the printf-style
+ * tapi_cfg_sys API via a literal "%s").
+ */
+extern te_errno pyte_cfg_route_add(const char *ta, const char *dst,
+                                   int prefix, const char *gw,
+                                   const char *dev, int metric);
+extern te_errno pyte_cfg_route_del(const char *ta, const char *dst,
+                                   int prefix, const char *gw,
+                                   const char *dev, int metric);
+extern te_errno pyte_cfg_neigh_add(const char *ta, const char *ifname,
+                                   const char *ip, const uint8_t *mac,
+                                   int is_static);
+extern te_errno pyte_cfg_neigh_del(const char *ta, const char *ifname,
+                                   const char *ip);
+extern te_errno pyte_cfg_if_addr_add(const char *ta, const char *ifname,
+                                     const char *ip, int prefix,
+                                     int set_bcast);
+extern te_errno pyte_cfg_sys_get_str(const char *ta, const char *path,
+                                     char **out);
+extern te_errno pyte_cfg_sys_set_str(const char *ta, const char *path,
+                                     const char *val);
+extern te_errno pyte_cfg_sys_get_int(const char *ta, const char *path,
+                                     int *out);
+extern te_errno pyte_cfg_sys_set_int(const char *ta, const char *path,
+                                     int val, int *old_val);
 
 /*
  * Job wrappers (tapi_job over an RPC factory).  Channel sets cross the
