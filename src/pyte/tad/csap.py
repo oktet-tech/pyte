@@ -15,6 +15,36 @@ from pyte.tad.dsl import Layer, Stack, stack
 #: Default receive timeout (seconds).
 DEFAULT_TIMEOUT = 10.0
 
+#: NDN kinds understood by validate() (values match pyte_asn_check()).
+_VALIDATE_KINDS = {"csap": 0, "template": 1, "pattern": 2}
+
+
+def validate(text: str, kind: str) -> None:
+    """Check that NDN ASN.1 text parses as the given kind of value.
+
+    kind is "csap" (CSAP spec), "template" (traffic template) or
+    "pattern" (traffic pattern).  Parsing is local to the engine
+    process — no agent is involved — so this is a cheap checker for
+    text destined for the Csap.from_asn()/send_asn()/listen(str)
+    escape hatches.  Raises ValueError with the failing symbol
+    position on bad text.
+    """
+    from pyte._shim import ffi, lib
+    try:
+        k = _VALIDATE_KINDS[kind]
+    except KeyError:
+        raise ValueError(
+            f"kind must be one of {sorted(_VALIDATE_KINDS)}, "
+            f"got {kind!r}") from None
+    err = ffi.new("char **")
+    rc = lib.pyte_asn_check(_enc(text), k, err)
+    if rc != 0:
+        msg = "parse failed"
+        if err[0] != ffi.NULL:
+            msg = ffi.string(err[0]).decode("utf-8", errors="replace")
+            lib.pyte_free_string(err[0])
+        raise ValueError(f"invalid NDN {kind}: {msg}")
+
 #: Cached RCF session per agent (one session is enough for a suite).
 #: Assumes agents live for the whole run; if an agent restarts the cache
 #: must be cleared manually (or the process restarted).
