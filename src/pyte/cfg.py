@@ -42,6 +42,7 @@ def _take_str(out) -> str:
     from pyte._shim import ffi, lib
     s = ffi.string(out[0]).decode("utf-8", errors="replace")
     lib.pyte_free_string(out[0])
+    out[0] = ffi.NULL
     return s
 
 
@@ -220,6 +221,8 @@ def agent(name: str) -> CfgNode:
 
 def net_all_assign_ip(af: str = "inet") -> None:
     """Assign subnets + node addresses to every /net (needs root TAs)."""
+    if af not in ("inet", "inet6"):
+        raise ValueError(f"af must be 'inet' or 'inet6', got {af!r}")
     from pyte._shim import lib
     check(lib.pyte_cfg_net_all_assign_ip(1 if af == "inet6" else 0),
           f"net_all_assign_ip({af})", CfgError)
@@ -232,6 +235,8 @@ def net_assign_subnet(net: str, af: str = "inet") -> None:
     fake/alien address allocation on rigs whose agents cannot add
     interface addresses.
     """
+    if af not in ("inet", "inet6"):
+        raise ValueError(f"af must be 'inet' or 'inet6', got {af!r}")
     from pyte._shim import lib
     check(lib.pyte_cfg_net_assign_subnet(_enc(net),
                                          1 if af == "inet6" else 0),

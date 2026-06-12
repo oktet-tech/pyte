@@ -17,7 +17,7 @@ tapi_env lists), so a name only has to be unique within its kind;
 'alias'='name' pairs in the env string resolve transparently.
 
 The RpcServer objects returned by pco() are owned by tapi_env (closed
-when the env is freed); close()/destroy() on them is a no-op.
+when the env is freed); destroy() on them is a no-op.
 """
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ def _take_str(out) -> str:
     from pyte._shim import ffi, lib
     s = ffi.string(out[0]).decode("utf-8", errors="replace")
     lib.pyte_free_string(out[0])
+    out[0] = ffi.NULL
     return s
 
 
@@ -91,8 +92,8 @@ class Env:
         """Free the environment (closes env-created RPC servers)."""
         from pyte._shim import lib
         if self._h is not None:
-            check(lib.pyte_env_free(self._h), "env free", EnvError)
-            self._h = None
+            h, self._h = self._h, None   # struct is freed even on error
+            check(lib.pyte_env_free(h), "env free", EnvError)
 
     def __enter__(self) -> "Env":
         return self
@@ -124,7 +125,13 @@ class Env:
         return RpcServer(out[0], _take_str(ta_out), name, owned=False)
 
     def addr(self, name: str, port=None) -> Addr:
-        """The named address; port=RpcServer allocates a fresh port."""
+        """The named address; port=RpcServer allocates a fresh port.
+
+        Each addr(name, port=pco) call allocates a fresh port via the
+        Configurator; the returned Addr is frozen and never writes back
+        into the env (unlike the C TEST_GET_ADDR macro).  For "ether"
+        addresses no port slot exists and port= is silently ignored.
+        """
         from pyte._shim import ffi, lib
         ip_out = ffi.new("char **")
         fam_out = ffi.new("char **")
@@ -133,14 +140,16 @@ class Env:
                                    port_out)
         if rc != 0:
             self._miss("addr", name, rc)
+        # Decode C strings first so they are freed even if port alloc fails.
+        ip = _take_str(ip_out)
+        family = _take_str(fam_out)
         p = port_out[0]
-        if port is not None:
+        if port is not None and family != "ether":
             alloc = ffi.new("unsigned int *")
             check(lib.pyte_allocate_port(port._h, alloc),
                   f"allocate_port for {name!r}", EnvError)
             p = alloc[0]
-        return Addr(ip=_take_str(ip_out), family=_take_str(fam_out),
-                    port=p)
+        return Addr(ip=ip, family=family, port=p)
 
     def iface(self, name: str) -> EnvIface:
         """The named interface: OS name, ifindex, owning agent."""
@@ -150,14 +159,16 @@ class Env:
         rc = lib.pyte_env_get_if(self._h, _enc(name), n_out, idx)
         if rc != 0:
             self._miss("interface", name, rc)
+        ifname = _take_str(n_out)
         ta_out = ffi.new("char **")
         check(lib.pyte_env_get_if_ta(self._h, _enc(name), ta_out),
               f"env if {name!r} ta", EnvError)
-        return EnvIface(name=_take_str(n_out), index=idx[0],
+        return EnvIface(name=ifname, index=idx[0],
                         agent=_take_str(ta_out))
 
     def host(self, name: str = "") -> str:
-        """TA name of the named host ("" = the unnamed host)."""
+        """TA name of the named host ("" = the first host declared in
+        the env string)."""
         from pyte._shim import ffi, lib
         out = ffi.new("char **")
         rc = lib.pyte_env_get_host_ta(self._h, _enc(name), out)
@@ -166,7 +177,12 @@ class Env:
         return _take_str(out)
 
     def net(self, name: str = "") -> EnvNet:
-        """Bound subnets of the named net ("" = the unnamed net)."""
+        """Bound subnets of the named net ("" = the first net declared
+        in the env string).
+
+        ENOENT (net not found) raises EnvError; ENODATA (net found but
+        no subnet of that family) stores None in the result field.
+        """
         from pyte._shim import ffi, lib
         subnets = []
         for v6 in (0, 1):
@@ -178,6 +194,9 @@ class Env:
                 subnets.append(f"{_take_str(s_out)}/{pfx[0]}")
             elif (lib.pyte_rc_error(rc)
                   == lib.pyte_rc_error(lib.PYTE_ENOENT)):
+                self._miss("net", name, rc)
+            elif (lib.pyte_rc_error(rc)
+                  == lib.pyte_rc_error(lib.PYTE_ENODATA)):
                 subnets.append(None)
             else:
                 check(rc, f"env net {name!r}", EnvError)

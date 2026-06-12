@@ -15,8 +15,9 @@ def test_addr_pair():
 
 
 def test_addr_frozen():
+    import dataclasses
     a = env_mod.Addr(ip="::1", family="inet6", port=0)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         a.ip = "other"
 
 
@@ -77,3 +78,59 @@ def test_enverror_is_teerror():
     assert isinstance(e, TeError)
     assert e.rc == 0
     assert "pco" in str(e)
+
+
+def test_env_close_idempotent():
+    """close() on a handle-less Env is a no-op (no shim touched)."""
+    e = env_mod.Env(None, "x")
+    e.close()
+    e.close()   # second call must also be silent
+
+
+def test_env_close_clears_handle_on_error(monkeypatch):
+    """close() clears _h before raising so a second close is a no-op."""
+    import sys
+    import types
+
+    call_count = 0
+
+    class FakeFfi:
+        NULL = None
+
+        def string(self, b):
+            return b if isinstance(b, bytes) else b"unknown"
+
+    class FakeLib:
+        PYTE_ETIMEDOUT = 1
+        PYTE_ENOENT = 2
+
+        def pyte_env_free(self, h):
+            nonlocal call_count
+            call_count += 1
+            return 0xDEAD  # nonzero: simulate failure
+
+        def pyte_rc_module(self, rc):
+            return 0
+
+        def pyte_rc_error(self, rc):
+            return rc
+
+        def te_rc_mod2str(self, rc):
+            return b"TAPI"
+
+        def te_rc_err2str(self, rc):
+            return b"EFAIL"
+
+    fake_shim = types.SimpleNamespace(lib=FakeLib(), ffi=FakeFfi())
+    monkeypatch.setitem(sys.modules, "pyte._shim", fake_shim)
+
+    e = env_mod.Env(object(), "x")
+    with pytest.raises(EnvError):
+        e.close()
+
+    # Handle must be cleared even though close raised.
+    assert e._h is None
+
+    # A second close must be a no-op (shim called exactly once).
+    e.close()
+    assert call_count == 1

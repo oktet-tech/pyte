@@ -1655,7 +1655,10 @@ pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta)
 {
     tapi_env_host *host = NULL;
 
-    PYTE_GUARD(host = tapi_env_get_host(env, name));
+    if (name != NULL && name[0] == '\0')
+        host = SLIST_FIRST(&env->hosts);
+    else
+        PYTE_GUARD(host = tapi_env_get_host(env, name));
     if (host == NULL || host->ta == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
     *ta = strdup(host->ta);
@@ -1672,13 +1675,16 @@ pyte_env_get_net_subnet(tapi_env *env, const char *name, int ipv6,
     uint16_t port_unused = 0;
     te_errno rc;
 
-    PYTE_GUARD(net = tapi_env_get_net(env, name));
+    if (name != NULL && name[0] == '\0')
+        net = SLIST_FIRST(&env->nets);
+    else
+        PYTE_GUARD(net = tapi_env_get_net(env, name));
     if (net == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
 
     sa = ipv6 ? net->ip6addr : net->ip4addr;
     if (sa == NULL)
-        return TE_RC(TE_TAPI, TE_ENOENT);
+        return TE_RC(TE_TAPI, TE_ENODATA);
     rc = pyte_sockaddr_parse(sa, buf, sizeof(buf), &port_unused);
     if (rc == 0)
     {
