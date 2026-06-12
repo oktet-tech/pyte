@@ -24,6 +24,19 @@ class CfgError(TeError):
     """Configurator request failed."""
 
 
+class TrcError(TeError):
+    """TRC database access failure."""
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):  # non-errno path: plain message
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class RcfError(TeError):
     """RCF request failed."""
 

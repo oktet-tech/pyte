@@ -21,7 +21,7 @@ def test_open_walk_close():
 
     db = _open_db(ffi, lib)
     try:
-        assert lib.pyte_trc_db_last_match(db) == False
+        assert not lib.pyte_trc_db_last_match(db)
         top = lib.pyte_trc_db_first_test(db)
         assert top != ffi.NULL
         assert ffi.string(lib.pyte_trc_test_name(top)) == b"demo"
