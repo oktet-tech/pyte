@@ -32,6 +32,7 @@
 #include "rcf_rpc.h"
 #include "tapi_job.h"
 #include "tapi_job_factory_rpc.h"
+#include "te_alloc.h"
 #include "te_string.h"
 #include "te_rpc_sys_socket.h"
 #include "te_rpc_sys_stat.h"
@@ -607,12 +608,12 @@ extern te_errno pyte_env_get_if(tapi_env *env, const char *name,
 extern te_errno pyte_env_get_if_ta(tapi_env *env, const char *name,
                                    char **ta);
 
-/** TA name for a host label ("" = first host); malloc'ed. */
+/** TA name for a host label ("" = the unnamed host); malloc'ed. */
 extern te_errno pyte_env_get_host_ta(tapi_env *env, const char *name,
                                      char **ta);
 
 /**
- * Bound subnet of a net ("" = first net), as "10.38.10.0" + prefix.
+ * Bound subnet of a net ("" = the unnamed net), as "10.38.10.0" + prefix.
  * TE_ENOENT if the net has no subnet of that family.
  */
 extern te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,

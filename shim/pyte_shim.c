@@ -1534,13 +1534,11 @@ pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 te_errno
 pyte_env_new(tapi_env **out)
 {
-    te_errno rc;
     tapi_env *env = TE_ALLOC(sizeof(*env));
 
     PYTE_GUARD_RC(tapi_env_init(env));
-    rc = 0;
     *out = env;
-    return rc;
+    return 0;
 }
 
 te_errno
@@ -1553,9 +1551,11 @@ pyte_env_get(const char *cfg, tapi_env *env)
 te_errno
 pyte_env_free(tapi_env *env)
 {
-    PYTE_GUARD_RC(tapi_env_free(env));
+    te_errno rc = 0;
+
+    PYTE_GUARD(rc = tapi_env_free(env));
     free(env);
-    return 0;
+    return rc;
 }
 
 te_errno
@@ -1611,6 +1611,14 @@ pyte_env_get_addr(tapi_env *env, const char *name, char **addr_str,
         *port = p;
     }
     *addr_str = strdup(buf);
+    if (*family == NULL || *addr_str == NULL)
+    {
+        free(*family);
+        free(*addr_str);
+        *family = NULL;
+        *addr_str = NULL;
+        return TE_RC(TE_TAPI, TE_ENOMEM);
+    }
     return 0;
 }
 
@@ -1624,6 +1632,8 @@ pyte_env_get_if(tapi_env *env, const char *name, char **ifname,
     if (ifi == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
     *ifname = strdup(ifi->if_name);
+    if (*ifname == NULL)
+        return TE_RC(TE_TAPI, TE_ENOMEM);
     *ifindex = ifi->if_index;
     return 0;
 }
@@ -1637,7 +1647,7 @@ pyte_env_get_if_ta(tapi_env *env, const char *name, char **ta)
     if (eif == NULL || eif->host == NULL || eif->host->ta == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
     *ta = strdup(eif->host->ta);
-    return 0;
+    return (*ta == NULL) ? TE_RC(TE_TAPI, TE_ENOMEM) : 0;
 }
 
 te_errno
@@ -1649,7 +1659,7 @@ pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta)
     if (host == NULL || host->ta == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
     *ta = strdup(host->ta);
-    return 0;
+    return (*ta == NULL) ? TE_RC(TE_TAPI, TE_ENOMEM) : 0;
 }
 
 te_errno
@@ -1673,6 +1683,8 @@ pyte_env_get_net_subnet(tapi_env *env, const char *name, int ipv6,
     if (rc == 0)
     {
         *subnet = strdup(buf);
+        if (*subnet == NULL)
+            return TE_RC(TE_TAPI, TE_ENOMEM);
         *prefix = ipv6 ? net->ip6pfx : net->ip4pfx;
     }
     return rc;
@@ -1695,8 +1707,8 @@ pyte_cfg_net_all_assign_ip(int ipv6)
     return 0;
 }
 
-te_errno
-pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
+static te_errno
+pyte_cfg_net_assign_subnet_nojmp(const char *net_name, int ipv6)
 {
     te_errno rc;
     cfg_handle net_handle = CFG_HANDLE_INVALID;
@@ -1722,6 +1734,13 @@ pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
                                     ipv6 ? 6 : 4, (uintmax_t)pool_hndl);
     free(net_addr);
     return rc;
+}
+
+te_errno
+pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
+{
+    PYTE_GUARD_RC(pyte_cfg_net_assign_subnet_nojmp(net_name, ipv6));
+    return 0;
 }
 
 /*
