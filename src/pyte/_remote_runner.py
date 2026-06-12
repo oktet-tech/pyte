@@ -17,6 +17,8 @@ log (stderr filter) instead of corrupting the protocol stream.
 Marshalling: JSON-serializable values cross by value; anything else
 is stored in a per-session table and crosses as
 ``{"__pyte_ref__": handle}``.  The ``__pyte_ref__`` key is reserved.
+Note: tuples cross as lists and non-string dict keys are coerced to
+strings (JSON semantics).
 """
 import importlib
 import json
@@ -37,7 +39,17 @@ class Runner:
 
     # -- marshalling ---------------------------------------------------
     def _encode(self, value):
-        """By value if JSON-serializable, else stash and return a ref."""
+        """By value if JSON-serializable, else stash and return a ref.
+
+        A dict containing the reserved key ``__pyte_ref__`` cannot
+        cross by value (it would be misread as a ref on decode), so
+        it is stashed and returned as a ref too.
+        """
+        if isinstance(value, dict) and REF_KEY in value:
+            handle = self._next_handle
+            self._next_handle += 1
+            self._objects[handle] = value
+            return {REF_KEY: handle}
         try:
             json.dumps(value)
             return value
@@ -85,7 +97,18 @@ class Runner:
             line = line.strip()
             if not line:
                 continue
-            req = json.loads(line)
+            try:
+                req = json.loads(line)
+                if not isinstance(req, dict):
+                    raise ValueError(
+                        "request must be a JSON object, got %s"
+                        % type(req).__name__)
+            except Exception as exc:  # malformed line — respond, keep  # noqa: BLE001
+                self._respond({"id": None, "ok": False,
+                               "type": type(exc).__name__,
+                               "msg": str(exc),
+                               "traceback": traceback.format_exc()})
+                continue
             rid = req.get("id")
             if req.get("op") == "shutdown":
                 self._respond({"id": rid, "ok": True, "value": None})
