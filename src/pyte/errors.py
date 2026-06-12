@@ -51,6 +51,22 @@ class RpcError(TeError):
             self.args = (f"{self.args[0]}: {err_msg}",)
 
 
+class RemotePythonError(TeError):
+    """pyte.remote: the runner died or remote code raised.
+
+    Message-only (no te_errno behind it), like TrcError's string
+    path; ``remote_traceback`` carries the agent-side traceback when
+    the failure was a remote exception.
+    """
+
+    def __init__(self, msg: str, remote_traceback: str = ""):
+        Exception.__init__(self, msg)
+        self.rc = 0
+        self.module = 0
+        self.code = 0
+        self.remote_traceback = remote_traceback
+
+
 class TimeoutError(TeError, builtins.TimeoutError):
     """TE_ETIMEDOUT from a TE call (job receive, csap recv, ...)."""
 
