@@ -20,7 +20,9 @@ sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
 dynamic TAs), `pyte.remote` (run Python on the agent host),
 `pyte.env` (tapi_env binding — host/PCO/address/interface lookup
 from a named env string), `pyte.tester` (runtime requirements and
-TRC tags from the suite prologue).
+TRC tags from the suite prologue), `pyte.fio` (pure-Python fio
+runner over pyte.job; gated by FIO req/prologue probe), `pyte.mi`
+(thin te_mi measurement-logger wrapper).
 
 `pyte.remote` runs arbitrary Python code on the agent host with zero
 installation: `remote.python(pco)` spawns a subprocess via tapi_job
@@ -369,6 +371,94 @@ installed on the agent host, then either records `add_trc_tag("fio")` or
 calls `add_trc_tag("no_fio")` followed by `modify_reqs("!FIO")` so that
 tests carrying `<req id="FIO"/>` are excluded for the rest of the run.
 See `ts/prologue.py` and `ts/tester/` for the full example.
+
+## pyte.fio — run fio from Python tests
+
+`pyte.fio` is **pure Python** over `pyte.job`: it builds fio's argv,
+drives the job, parses the JSON report, and emits MI measurements —
+with zero shim imports and no `tapi_fio` linkage.  fio is resolved
+from the **agent's PATH** (the job program is the string `"fio"`).
+Tests must carry `<req id="FIO"/>` so the prologue probe can exclude
+them on rigs where fio is absent.
+
+The fio JSON report arrives on the job's **stdout** via a readable
+filter.  Diagnostic warnings that fio may print to stdout before the
+JSON object (e.g. iodepth-capped notices) are stripped automatically.
+
+```python
+from pyte import fio
+
+opts = fio.Opts(
+    filename="/tmp/pyte_fio.dat",
+    size="16m",
+    blocksize=4096,
+    rwtype="rand",       # "rand"→randrw, "seq"→rw, or raw fio names
+    rwmixread=50,
+    iodepth=4,
+    runtime=5,
+    ioengine="psync",
+    direct=False,
+)
+
+with fio.run(pco, opts) as f:
+    rep = f.wait(timeout=60.0)          # → Report
+    print(rep.read.iops.mean)           # IoStats.iops.mean
+    print(rep.write.bandwidth.mean)     # IoStats.bandwidth.mean (KiB/s)
+    print(rep.read.clatency.percentiles.p99_00)  # ns
+    f.mi_report()                       # emit via pyte.mi
+```
+
+`Report` is a frozen dataclass: `rep.read` and `rep.write` are
+`IoStats`, each with `bandwidth` (`Bw`), `iops` (`Iops`), `latency`
+(`Lat`) and `clatency` (`Clat`) sub-objects.  `Clat` carries
+`percentiles` (`Percentiles`) with `p99_00`, `p99_50`, `p99_90`,
+`p99_95`.  All bandwidth fields are KiB/s; latency/clatency fields are
+nanoseconds.
+
+`Fio.mi_report(tool="fio")` mirrors `tapi_fio_mi_report`: it emits six
+measurements via `pyte.mi.Logger` — read/write throughput (Mbit/s,
+mean), read/write IOPS (plain, mean) and read/write clat 99th
+percentile (µs, percentile aggr).
+
+Argv mapping mirrors `tapi_fio`'s `fio_binds` order; the docstring in
+`lib/pyte/src/pyte/fio.py` is the authoritative reference.
+
+See `ts/fio/randrw.py` for the showcase test.
+
+## pyte.mi — thin te_mi measurement logger
+
+`pyte.mi` wraps TE's `te_mi` C library through three shim functions
+(`pyte_mi_meas_create`, `pyte_mi_add_meas`, `pyte_mi_destroy`).
+It is intentionally thin and generic — any perf tool can consume it
+from pure Python without any C work.
+
+```python
+from pyte import mi
+
+with mi.Logger("fio") as logger:
+    logger.add("throughput", "Read throughput", "mean", 29.6, "mebi")
+    logger.add("iops",       "Read iops",       "mean", 925550.0, "plain")
+    logger.add("latency",    "Read clat 99.00 percentile",
+               "percentile", 0.668, "micro")
+```
+
+The *tool* string (`"fio"`) keys the MI artifact that TE's Logger
+emits.  `destroy` (called on CM exit or explicit `close()`) flushes
+the artifact; no MI data is written if `add()` is never called.
+`close()` is idempotent.
+
+Recognised names:
+
+| Kind        | Names |
+|-------------|-------|
+| **type**    | `latency`, `throughput`, `iops` |
+| **aggr**    | `single`, `min`, `max`, `mean`, `stdev`, `percentile` |
+| **multiplier** | `nano`, `micro`, `milli`, `plain`, `mebi` |
+
+Unknown names raise `ValueError` with the valid set listed.  `add()`
+on a closed logger raises `RuntimeError`.  The name→int maps are
+resolved lazily from shim constants on first use (same pattern as
+`pyte.rpc.iomux`'s `EVENT_BITS`).
 
 ## Extending pyte (the pattern)
 
