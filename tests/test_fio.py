@@ -337,6 +337,30 @@ def test_lifecycle_bad_json_raises():
             f.wait(timeout=10.0)
 
 
+def test_wait_strips_stdout_prefix():
+    """wait() parses successfully when fio stdout has a diagnostic prefix.
+
+    Pins commit 1904fba's fix: fio may emit iodepth-capped notices to
+    stdout before the JSON object; wait() must strip them and still
+    return a valid Report.
+    """
+    fixture_json = FIXTURE.read_text()
+    prefixed = (
+        "note: both iodepth >= 1 and synchronous I/O engine are selected,"
+        " queue depth will be capped at 1\n"
+        + fixture_json
+    )
+    fake_job = _FakeJob(stdout_text=prefixed, exit_ok=True)
+    fake_pco = _FakePco(fake_job)
+    opts = Opts(filename="/tmp/f")
+
+    with fio.run(fake_pco, opts) as f:
+        rep = f.wait(timeout=10.0)
+
+    assert isinstance(rep, Report)
+    assert abs(rep.read.iops.mean - 1213756.5) < 1.0
+
+
 def test_setup_failure_destroys_job():
     """If filter attach raises during setup, job.destroy() is called."""
     destroy_count = 0

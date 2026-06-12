@@ -125,7 +125,6 @@ calls (unlike direct `rpc_*` wrappers).
 n = tx.sendmsg([b"hello-", b"world"], addr=("127.0.0.1", port))
 
 # Receive with ancillary data space
-from pyte.rpc.socket import RecvMsg
 msg = rx.recvmsg(bufsize=4096, ctrl_space=256)
 # msg.data: bytes  msg.addr: (ip, port)|None  msg.flags: int
 # msg.ancillary: [(level, type, data), ...]

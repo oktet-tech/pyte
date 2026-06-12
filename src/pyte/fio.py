@@ -418,10 +418,10 @@ class Fio:
     arrives on stdout.  No shim imports: pure Python over pyte.job.
     """
 
-    def __init__(self, job, stdout_filter, report: Report | None = None):
+    def __init__(self, job, stdout_filter):
         self._job = job
         self._stdout_filter = stdout_filter
-        self._report: Report | None = report
+        self._report: Report | None = None
         self._closed = False
 
     def wait(self, timeout: float = 120.0) -> Report:
