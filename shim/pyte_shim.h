@@ -116,6 +116,7 @@ extern void pyte_artifact(unsigned int level, const char *text);
 extern unsigned int pyte_rc_module(unsigned int rc);
 extern unsigned int pyte_rc_error(unsigned int rc);
 extern void pyte_free_string(char *p);
+extern void pyte_trc_quiet_logging(void);
 
 /* RPC server lifecycle and error introspection */
 extern te_errno pyte_rpc_server_create(const char *ta, const char *name,

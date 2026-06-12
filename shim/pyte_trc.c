@@ -11,10 +11,31 @@
  * as a function — causing a conflict the C compiler cannot resolve.
  */
 
+#include <stdarg.h>
+
 #include "pyte_trc.h"
 #include "te_alloc.h"
 #include "tq_string.h"
 #include "te_test_result.h"
+#include "logger_defs.h"
+
+/* No-op logging backend: CLI consumers surface their own errors and
+ * must not depend on a running TE Logger. */
+static void
+pyte_trc_log_null(const char *file, unsigned int line,
+                  te_log_ts_sec sec, te_log_ts_usec usec,
+                  unsigned int level, const char *entity,
+                  const char *user, const char *fmt, va_list ap)
+{
+    (void)file; (void)line; (void)sec; (void)usec;
+    (void)level; (void)entity; (void)user; (void)fmt; (void)ap;
+}
+
+void
+pyte_trc_quiet_logging(void)
+{
+    te_log_init("trc", pyte_trc_log_null);
+}
 
 te_errno
 pyte_trc_db_open(const char *path, te_trc_db **db)

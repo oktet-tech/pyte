@@ -82,3 +82,48 @@ def test_tag_expr_helpers():
     assert trc.tag_expr_matches(None, [])
     with pytest.raises(trc.TrcError):
         trc.parse_tag_expr("linux &&& bad")
+
+
+# XML with two overlapping records: one exact iter (a=1) and one
+# wildcard iter (a=<wild>) that both match a=1.  lib/trc emits a
+# "Duplicated iteration" warning on stderr when the walker encounters
+# this; quiet_logging() installs a no-op backend so nothing appears.
+_OVERLAP_XML = """\
+<?xml version="1.0"?>
+<trc_db version="1.0">
+  <test name="pkg" type="package">
+    <objective>Overlap test</objective>
+    <iter result="PASSED">
+      <notes/>
+      <test name="target" type="script">
+        <objective>Overlapping iters</objective>
+        <iter result="PASSED">
+          <arg name="a">1</arg>
+          <notes/>
+        </iter>
+        <iter result="PASSED">
+          <arg name="a"/>
+          <notes/>
+        </iter>
+      </test>
+    </iter>
+  </test>
+</trc_db>
+"""
+
+
+def test_quiet_logging_suppresses_stderr(tmp_path, capfd):
+    """quiet_logging() must suppress lib/trc BUG/Duplicated stderr output."""
+    db_file = tmp_path / "overlap.xml"
+    db_file.write_text(_OVERLAP_XML)
+
+    trc.quiet_logging()
+    with trc.Db.open(db_file) as db:
+        target, = db.find_tests("pkg/target")
+        # Walk all iters to trigger the duplicate-record warning path.
+        for it in target.iters():
+            db.match(target, dict(it.args))
+
+    captured = capfd.readouterr()
+    assert "BUG" not in captured.err
+    assert "Duplicated" not in captured.err

@@ -92,4 +92,6 @@ extern te_errno pyte_test_result_add_verdict(te_test_result *result,
                                              const char *text);
 extern void pyte_test_result_free(te_test_result *result);
 
+extern void pyte_trc_quiet_logging(void);
+
 #endif /* PYTE_TRC_H */

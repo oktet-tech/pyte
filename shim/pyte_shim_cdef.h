@@ -13,6 +13,7 @@ unsigned int pyte_rc_error(unsigned int rc);
 const char *te_rc_mod2str(unsigned int rc);
 const char *te_rc_err2str(unsigned int rc);
 void pyte_free_string(char *p);
+void pyte_trc_quiet_logging(void);
 
 typedef int... te_errno;
 typedef struct rcf_rpc_server rcf_rpc_server;

@@ -34,6 +34,7 @@ __all__ = [
     "Group",
     "Entry",
     "parse_tag_expr",
+    "quiet_logging",
     "tag_expr_matches",
     "status_name",
     "status_value",
@@ -525,6 +526,16 @@ def parse_tag_expr(expr: str) -> None:
     """
     from pyte._shim import lib
     lib.logic_expr_free(_parse_logic_expr(expr))
+
+
+def quiet_logging() -> None:
+    """Install a no-op TE logging backend (for CLI use).
+
+    Suppresses lib/trc warnings like "Duplicated iteration" that
+    otherwise go through an unset/IPC logging backend.
+    """
+    from pyte._shim import lib
+    lib.pyte_trc_quiet_logging()
 
 
 def tag_expr_matches(expr: str | None, tags: Iterable[str]) -> bool:
