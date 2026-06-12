@@ -23,8 +23,8 @@ installation: `remote.python(pco)` spawns a subprocess via tapi_job
 using `python3 -c <runner>`, where the runner is `_remote_runner.py`
 inlined as a `-c` argument and executes on the bare agent python3
 (stdlib only, no pyte).  The main entry points are
-`RemoteSession.call(fn, *args, **kwargs)` to run a function on the
-remote host and `RemoteSession.import_module(name)` to get a
+`RemotePython.call(fn, *args, **kwargs)` to run a function on the
+remote host and `RemotePython.import_module(name)` to get a
 `RemoteObject` proxy for a module.  Attribute access and calls on
 `RemoteObject` are forwarded over the session.  Marshalling is
 JSON-by-value: Python dicts, lists, numbers and strings cross as
