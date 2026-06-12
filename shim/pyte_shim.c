@@ -1936,9 +1936,9 @@ pyte_free_ints(int *p)
  *   msg_controllen = ctrl_space, real_msg_controllen = ctrl_space (this
  *   forces the internal layer to use real_msg_controllen as the true buffer
  *   size), msg_cmsghdr_num = 0 (zero is correct: the layer fills it after
- *   the call).  Leave msg_control_mode = RPC_MSGHDR_FIELD_DEFAULT (0); for
- *   receive calls the default means raw pass-through which brings the
- *   native cmsg buffer back.  After the call:
+ *   the call).  Leave msg_control_mode = RPC_MSGHDR_FIELD_DEFAULT (0);
+ *   the returned buffer is rebuilt from TARPC records by
+ *   msg_control_rpc2h (see the cmsg note below).  After the call:
  *     got_msg_controllen = actual bytes returned by the kernel;
  *     msg_cmsghdr_num    = number of complete cmsghdr records;
  *     msg_controllen     = bytes written into msg_control.
@@ -1965,8 +1965,9 @@ pyte_free_ints(int *p)
  *   round-trip.  Supported levels: SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
  *   IPPROTO_TCP, IPPROTO_UDP (and their known cmsg types, e.g.
  *   IP_PKTINFO, IPV6_PKTINFO, SO_TIMESTAMP).  Unknown values map to
- *   RPC_SOL_UNKNOWN / RPC_SOCKOPT_UNKNOWN and do not survive; the
- *   corresponding cmsg record is silently dropped on the remote side.
+ *   RPC_SOL_UNKNOWN / RPC_SOCKOPT_UNKNOWN and do not survive usefully:
+ *   the remote side rebuilds them with SOL_MAX and logs a WARN
+ *   (socklevel_rpc2h), so the record arrives mangled, not dropped.
  *
  *   On receive: the shim passes a zeroed ctrl buffer (msg_cmsghdr_num=0);
  *   the RPC layer fills it from the TARPC records returned by the agent,
