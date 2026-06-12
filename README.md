@@ -16,7 +16,27 @@ Modules: `pyte.test` (lifecycle), `pyte.log`, `pyte.errors`,
 (CfgNode object model), `pyte.net` (interfaces/routes/neighbors/
 sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
 (layer DSL + Csap), `pyte.rcf` (agent inventory/files/restart/
-dynamic TAs).
+dynamic TAs), `pyte.remote` (run Python on the agent host).
+
+`pyte.remote` runs arbitrary Python code on the agent host with zero
+installation: `remote.python(pco)` spawns a subprocess via tapi_job
+using `python3 -c <runner>`, where the runner is `_remote_runner.py`
+inlined as a `-c` argument and executes on the bare agent python3
+(stdlib only, no pyte).  The main entry points are
+`RemoteSession.call(fn, *args, **kwargs)` to run a function on the
+remote host and `RemoteSession.import_module(name)` to get a
+`RemoteObject` proxy for a module.  Attribute access and calls on
+`RemoteObject` are forwarded over the session.  Marshalling is
+JSON-by-value: Python dicts, lists, numbers and strings cross as
+values (note: tuples come back as lists, dict keys become strings).
+Non-JSON-able objects cross as `RemoteObject` proxies in both
+directions; only attribute access and calls are supported on proxies
+(no indexing, `len`, or iteration).  Shipped functions must be
+self-contained: imports inside the body, no closures, lambdas, or
+async — the engine rejects these before sending.  The protocol is
+implemented in `_remote_runner.py`; subprocess-level tests that
+require no TE live in `lib/pyte/tests/test_remote_runner.py`
+(extend there for new protocol behaviour).
 
 ## Architecture
 
