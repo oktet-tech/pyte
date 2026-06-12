@@ -250,6 +250,28 @@ te_errno pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
 #define PYTE_SIGUSR1 ...
 #define PYTE_SIGUSR2 ...
 
+/* ---- tapi_env ---- */
+typedef ... tapi_env;
+
+te_errno pyte_env_new(tapi_env **out);
+te_errno pyte_env_get(const char *cfg, tapi_env *env);
+te_errno pyte_env_free(tapi_env *env);
+te_errno pyte_env_get_pco(tapi_env *env, const char *name,
+                          rcf_rpc_server **out);
+te_errno pyte_rpc_server_ta_name(rcf_rpc_server *rpcs, char **ta);
+te_errno pyte_env_get_addr(tapi_env *env, const char *name,
+                           char **addr_str, char **family, int *port);
+te_errno pyte_env_get_if(tapi_env *env, const char *name, char **ifname,
+                         unsigned int *ifindex);
+te_errno pyte_env_get_if_ta(tapi_env *env, const char *name, char **ta);
+te_errno pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta);
+te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,
+                                 int ipv6, char **subnet,
+                                 unsigned int *prefix);
+te_errno pyte_allocate_port(rcf_rpc_server *rpcs, unsigned int *port);
+te_errno pyte_cfg_net_all_assign_ip(int ipv6);
+te_errno pyte_cfg_net_assign_subnet(const char *net_name, int ipv6);
+
 /* ---- TRC ---- */
 typedef ... te_trc_db;
 typedef ... te_trc_db_walker;

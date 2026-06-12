@@ -39,6 +39,9 @@
 #include "tapi_rpc_socket.h"
 #include "tapi_rpc_unistd.h"
 #include "tapi_rpc_stdio.h"
+#include "tapi_env.h"
+#include "tapi_cfg_net.h"
+#include "tapi_sockaddr.h"
 
 #define PYTE_ETIMEDOUT TE_ETIMEDOUT
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
@@ -566,6 +569,68 @@ extern te_test_result *pyte_test_result_new(int status);
 extern te_errno pyte_test_result_add_verdict(te_test_result *result,
                                              const char *text);
 extern void pyte_test_result_free(te_test_result *result);
+
+/* -- tapi_env ---------------------------------------------------------- */
+
+/** Allocate and initialize an empty tapi_env. */
+extern te_errno pyte_env_new(tapi_env **out);
+
+/** Parse an environment configuration string and bind it. */
+extern te_errno pyte_env_get(const char *cfg, tapi_env *env);
+
+/** Free a bound environment (closes its RPC servers) and the struct. */
+extern te_errno pyte_env_free(tapi_env *env);
+
+/** Lookup an RPC server by PCO name; TE_ENOENT if missing. */
+extern te_errno pyte_env_get_pco(tapi_env *env, const char *name,
+                                 rcf_rpc_server **out);
+
+/** Name of the TA an RPC server runs on (malloc'ed). */
+extern te_errno pyte_rpc_server_ta_name(rcf_rpc_server *rpcs, char **ta);
+
+/**
+ * Lookup an address by name.
+ *
+ * @param addr_str  IP text, or MAC text for ether addresses (malloc'ed)
+ * @param family    "inet", "inet6" or "ether" (malloc'ed)
+ * @param port      port embedded in the sockaddr (host order; 0 if none)
+ */
+extern te_errno pyte_env_get_addr(tapi_env *env, const char *name,
+                                  char **addr_str, char **family,
+                                  int *port);
+
+/** Lookup an interface by name: OS name + ifindex. */
+extern te_errno pyte_env_get_if(tapi_env *env, const char *name,
+                                char **ifname, unsigned int *ifindex);
+
+/** TA name of the host the named interface belongs to (malloc'ed). */
+extern te_errno pyte_env_get_if_ta(tapi_env *env, const char *name,
+                                   char **ta);
+
+/** TA name for a host label ("" = first host); malloc'ed. */
+extern te_errno pyte_env_get_host_ta(tapi_env *env, const char *name,
+                                     char **ta);
+
+/**
+ * Bound subnet of a net ("" = first net), as "10.38.10.0" + prefix.
+ * TE_ENOENT if the net has no subnet of that family.
+ */
+extern te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,
+                                        int ipv6, char **subnet,
+                                        unsigned int *prefix);
+
+/** Allocate a unique port (host order) via the Configurator. */
+extern te_errno pyte_allocate_port(rcf_rpc_server *rpcs,
+                                   unsigned int *port);
+
+/** tapi_cfg_net_all_assign_ip: subnets + node addresses (needs root). */
+extern te_errno pyte_cfg_net_all_assign_ip(int ipv6);
+
+/**
+ * Attach a subnet from /net_pool to /net:<name> WITHOUT assigning node
+ * addresses (works without root; enough for fake/alien env addresses).
+ */
+extern te_errno pyte_cfg_net_assign_subnet(const char *net_name, int ipv6);
 
 /*
  * Trampoline guard: confines any tapi longjmp to this C frame and

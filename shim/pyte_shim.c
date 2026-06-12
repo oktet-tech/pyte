@@ -1529,6 +1529,201 @@ pyte_sockaddr_parse(const struct sockaddr *sa, char *ipbuf,
     return TE_RC(TE_TAPI, TE_EAFNOSUPPORT);
 }
 
+/* -- tapi_env ---------------------------------------------------------- */
+
+te_errno
+pyte_env_new(tapi_env **out)
+{
+    te_errno rc;
+    tapi_env *env = TE_ALLOC(sizeof(*env));
+
+    PYTE_GUARD_RC(tapi_env_init(env));
+    rc = 0;
+    *out = env;
+    return rc;
+}
+
+te_errno
+pyte_env_get(const char *cfg, tapi_env *env)
+{
+    PYTE_GUARD_RC(tapi_env_get(cfg, env));
+    return 0;
+}
+
+te_errno
+pyte_env_free(tapi_env *env)
+{
+    PYTE_GUARD_RC(tapi_env_free(env));
+    free(env);
+    return 0;
+}
+
+te_errno
+pyte_env_get_pco(tapi_env *env, const char *name, rcf_rpc_server **out)
+{
+    rcf_rpc_server *rpcs = NULL;
+
+    PYTE_GUARD(rpcs = tapi_env_get_pco(env, name));
+    if (rpcs == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    *out = rpcs;
+    return 0;
+}
+
+te_errno
+pyte_rpc_server_ta_name(rcf_rpc_server *rpcs, char **ta)
+{
+    *ta = strdup(rpcs->ta);
+    return (*ta == NULL) ? TE_RC(TE_TAPI, TE_ENOMEM) : 0;
+}
+
+te_errno
+pyte_env_get_addr(tapi_env *env, const char *name, char **addr_str,
+                  char **family, int *port)
+{
+    const struct sockaddr *sa = NULL;
+    socklen_t salen = 0;
+    char buf[128];
+    uint16_t p = 0;
+    te_errno rc;
+
+    PYTE_GUARD(sa = tapi_env_get_addr(env, name, &salen));
+    if (sa == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+
+    if (sa->sa_family == AF_LOCAL)
+    {
+        /* ether address: bytes in sa_data (same convention as the cfg
+         * CVT_ADDRESS rendering) */
+        const uint8_t *m = (const uint8_t *)sa->sa_data;
+
+        snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 m[0], m[1], m[2], m[3], m[4], m[5]);
+        *family = strdup("ether");
+        *port = 0;
+    }
+    else
+    {
+        rc = pyte_sockaddr_parse(sa, buf, sizeof(buf), &p);
+        if (rc != 0)
+            return rc;
+        *family = strdup(sa->sa_family == AF_INET6 ? "inet6" : "inet");
+        *port = p;
+    }
+    *addr_str = strdup(buf);
+    return 0;
+}
+
+te_errno
+pyte_env_get_if(tapi_env *env, const char *name, char **ifname,
+                unsigned int *ifindex)
+{
+    const struct if_nameindex *ifi = NULL;
+
+    PYTE_GUARD(ifi = tapi_env_get_if(env, name));
+    if (ifi == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    *ifname = strdup(ifi->if_name);
+    *ifindex = ifi->if_index;
+    return 0;
+}
+
+te_errno
+pyte_env_get_if_ta(tapi_env *env, const char *name, char **ta)
+{
+    const tapi_env_if *eif = NULL;
+
+    PYTE_GUARD(eif = tapi_env_get_env_if(env, name));
+    if (eif == NULL || eif->host == NULL || eif->host->ta == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    *ta = strdup(eif->host->ta);
+    return 0;
+}
+
+te_errno
+pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta)
+{
+    tapi_env_host *host = NULL;
+
+    PYTE_GUARD(host = tapi_env_get_host(env, name));
+    if (host == NULL || host->ta == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    *ta = strdup(host->ta);
+    return 0;
+}
+
+te_errno
+pyte_env_get_net_subnet(tapi_env *env, const char *name, int ipv6,
+                        char **subnet, unsigned int *prefix)
+{
+    tapi_env_net *net = NULL;
+    const struct sockaddr *sa;
+    char buf[64];
+    uint16_t port_unused = 0;
+    te_errno rc;
+
+    PYTE_GUARD(net = tapi_env_get_net(env, name));
+    if (net == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+
+    sa = ipv6 ? net->ip6addr : net->ip4addr;
+    if (sa == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    rc = pyte_sockaddr_parse(sa, buf, sizeof(buf), &port_unused);
+    if (rc == 0)
+    {
+        *subnet = strdup(buf);
+        *prefix = ipv6 ? net->ip6pfx : net->ip4pfx;
+    }
+    return rc;
+}
+
+te_errno
+pyte_allocate_port(rcf_rpc_server *rpcs, unsigned int *port)
+{
+    uint16_t p = 0;
+
+    PYTE_GUARD_RC(tapi_allocate_port(rpcs, &p));
+    *port = p;
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_all_assign_ip(int ipv6)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_all_assign_ip(ipv6 ? AF_INET6 : AF_INET));
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
+{
+    te_errno rc;
+    cfg_handle net_handle = CFG_HANDLE_INVALID;
+    cfg_handle pool_hndl = CFG_HANDLE_INVALID;
+    struct sockaddr *net_addr = NULL;
+
+    /* The subnet-attach half of tapi_cfg_net_assign_ip(): allocate a
+     * pool entry and add it as /net:<name>/ipN_subnet:<handle>.  Node
+     * addresses are deliberately NOT assigned (that needs root). */
+    rc = cfg_find_fmt(&net_handle, "/net:%s", net_name);
+    if (rc != 0)
+        return rc;
+    rc = tapi_cfg_alloc_entry(ipv6 ? "/net_pool:ip6" : "/net_pool:ip4",
+                              &pool_hndl);
+    if (rc != 0)
+        return rc;
+    rc = cfg_get_inst_name_type(pool_hndl, CVT_ADDRESS,
+                                CFG_IVP(&net_addr));
+    if (rc != 0)
+        return rc;
+    rc = cfg_add_instance_child_fmt(NULL, CVT_ADDRESS, net_addr,
+                                    net_handle, "/ip%u_subnet:0x%jx",
+                                    ipv6 ? 6 : 4, (uintmax_t)pool_hndl);
+    free(net_addr);
+    return rc;
+}
+
 /*
  * TRC accessors are in pyte_trc.c — kept separate to avoid the
  * te_test_verdict name collision between te_test_result.h (struct typedef)

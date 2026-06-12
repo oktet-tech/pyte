@@ -15,7 +15,7 @@ if not TE_INSTALL:
 PKGCONF = str(Path(TE_INSTALL) / "default/lib/pkgconfig")
 LIBDIR = str(Path(TE_INSTALL) / "default/lib")
 TE_LIBS = [
-    "te-tapi", "te-tapi_rpc", "te-tapi_job", "te-tapi_tad", "te-rcfrpc",
+    "te-tapi", "te-tapi_env", "te-tapi_rpc", "te-tapi_job", "te-tapi_tad", "te-rcfrpc",
     "te-confapi", "te-conf_oid", "te-rcfapi", "te-logger_ten", "te-ipc",
     "te-tools", "te-logger_core", "te-asn", "te-ndn", "te-rpc_types",
     "te-rpcxdr",
