@@ -2,9 +2,15 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """Read-only access to TRC (expected results) databases via TE lib/trc.
 
-All matching semantics (wildcards, exact-beats-wildcard, tag logic
-expressions, result selection) come from the C library through the
-shim and are never reimplemented here.
+All matching semantics (wildcards, tag logic expressions, result
+selection) come from the C library through the shim and are never
+reimplemented here.
+
+Iteration matching (``Db.match``): with the default flags=0 the C
+walker (``trc_db_walker_step_iter``) returns the LAST matching
+``<iter>`` record in document order, whether that record is exact or
+wildcard.  "Exact beats wildcard" priority only applies when
+``STEP_ITER_NO_MATCH_*`` flags are used to exclude categories.
 
 Memory notes:
     Group, Iter, Test and Entry hold borrowed C pointers owned by the Db
@@ -447,8 +453,14 @@ class Db:
               allow_wild: bool = True) -> Iter | None:
         """Find the iteration record matching the given arguments.
 
-        Uses the canonical lib/trc walker: exact matches win over
-        wildcard records; allow_wild=False rejects wildcard fallback.
+        Delegates to the canonical lib/trc walker with flags=0
+        (allow_wild=True) or PYTE_STEP_ITER_NO_MATCH_WILD
+        (allow_wild=False).
+
+        With allow_wild=True the walker returns the LAST matching
+        ``<iter>`` record in document order — exact or wildcard.
+        With allow_wild=False only exact (non-wildcard) records are
+        considered, and None is returned if no exact record matches.
         """
         from pyte._shim import ffi, lib
         walker = lib.trc_db_new_walker(self._h)

@@ -49,6 +49,11 @@ def test_iter_args_and_groups(db):
 
 
 def test_match_exact_beats_wildcard(db):
+    # The fixture has no overlapping records: the exact iter (len=1,
+    # proto=tcp) and the wildcard iter (len=*, proto=udp) cover
+    # disjoint argument sets, so only one record ever matches any
+    # given call.  The test name reflects the allow_wild=False /
+    # allow_wild=True distinction rather than a within-match priority.
     echo, = db.find_tests("demo/echo")
     it = db.match(echo, {"len": "1", "proto": "tcp"})
     assert it is not None and it.args_dict()["len"] == "1"
