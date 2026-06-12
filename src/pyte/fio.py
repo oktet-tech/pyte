@@ -443,6 +443,12 @@ class Fio:
         if not status.ok:
             raise FioError(
                 f"fio exited with {status}; stdout={raw[:200]!r}")
+        # fio may emit diagnostic lines (e.g. iodepth capped warnings)
+        # to stdout before the JSON block.  Strip any prefix up to the
+        # first '{' so json.loads sees only the JSON object.
+        json_start = raw.find("{")
+        if json_start > 0:
+            raw = raw[json_start:]
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError as exc:
