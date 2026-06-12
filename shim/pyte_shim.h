@@ -46,6 +46,7 @@
 #include "tapi_reqs.h"
 #include "tapi_tags.h"
 #include "tapi_iomux.h"
+#include "te_mi_log.h"
 
 #define PYTE_ETIMEDOUT TE_ETIMEDOUT
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
@@ -577,6 +578,63 @@ extern te_test_result *pyte_test_result_new(int status);
 extern te_errno pyte_test_result_add_verdict(te_test_result *result,
                                              const char *text);
 extern void pyte_test_result_free(te_test_result *result);
+
+/*
+ * ---- te_mi: thin measurement-logging wrappers -------------------------
+ *
+ * te_mi lives in te-tools and is already linked.  We expose three thin
+ * wrappers (create / add-measurement / destroy) plus passthrough defines
+ * for the enum constants that pyte.fio's MI reporting needs.
+ *
+ * Meas types (subset used by fio MI report: LATENCY, THROUGHPUT, IOPS):
+ */
+#define PYTE_MI_MEAS_LATENCY    TE_MI_MEAS_LATENCY
+#define PYTE_MI_MEAS_THROUGHPUT TE_MI_MEAS_THROUGHPUT
+#define PYTE_MI_MEAS_IOPS       TE_MI_MEAS_IOPS
+
+/*
+ * Aggr constants (SINGLE through PERCENTILE, covering all fio aggrs plus
+ * the generic SINGLE that the plan explicitly requires):
+ */
+#define PYTE_MI_AGGR_SINGLE     TE_MI_MEAS_AGGR_SINGLE
+#define PYTE_MI_AGGR_MIN        TE_MI_MEAS_AGGR_MIN
+#define PYTE_MI_AGGR_MAX        TE_MI_MEAS_AGGR_MAX
+#define PYTE_MI_AGGR_MEAN       TE_MI_MEAS_AGGR_MEAN
+#define PYTE_MI_AGGR_STDEV      TE_MI_MEAS_AGGR_STDEV
+#define PYTE_MI_AGGR_PERCENTILE TE_MI_MEAS_AGGR_PERCENTILE
+
+/*
+ * Multiplier constants (NANO for nanosecond latencies; MICRO for fio clat
+ * percentiles; PLAIN for iops; MEBI for throughput in mebibits/s;
+ * MILLI for completeness):
+ */
+#define PYTE_MI_MULT_NANO  TE_MI_MEAS_MULTIPLIER_NANO
+#define PYTE_MI_MULT_MICRO TE_MI_MEAS_MULTIPLIER_MICRO
+#define PYTE_MI_MULT_MILLI TE_MI_MEAS_MULTIPLIER_MILLI
+#define PYTE_MI_MULT_PLAIN TE_MI_MEAS_MULTIPLIER_PLAIN
+#define PYTE_MI_MULT_MEBI  TE_MI_MEAS_MULTIPLIER_MEBI
+
+/**
+ * Create a te_mi measurements logger for the named tool.
+ * Wraps te_mi_logger_meas_create().
+ */
+extern te_errno pyte_mi_meas_create(const char *tool, te_mi_logger **out);
+
+/**
+ * Add one measurement to an existing logger.
+ *
+ * te_mi_logger_add_meas() reports errors via the retval out-pointer; this
+ * wrapper captures that value and returns it so Python can raise TeError.
+ */
+extern te_errno pyte_mi_add_meas(te_mi_logger *logger, int type,
+                                 const char *name, int aggr, double val,
+                                 int multiplier);
+
+/**
+ * Flush and free the logger (calls te_mi_logger_destroy()).
+ * Returns te_errno (always 0 currently; included for uniformity).
+ */
+extern te_errno pyte_mi_destroy(te_mi_logger *logger);
 
 /* -- tapi_reqs / tapi_tags -------------------------------------------- */
 

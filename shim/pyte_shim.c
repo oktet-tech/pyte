@@ -2359,3 +2359,31 @@ pyte_free_cmsgs(int *levels, int *types, uint8_t **datas,
     free(datas);
     free(lens);
 }
+
+/* ---- te_mi thin wrappers ---- */
+
+te_errno
+pyte_mi_meas_create(const char *tool, te_mi_logger **out)
+{
+    return te_mi_logger_meas_create(tool, out);
+}
+
+te_errno
+pyte_mi_add_meas(te_mi_logger *logger, int type, const char *name,
+                 int aggr, double val, int multiplier)
+{
+    te_errno retval = 0;
+
+    te_mi_logger_add_meas(logger, &retval,
+                          (te_mi_meas_type)type, name,
+                          (te_mi_meas_aggr)aggr, val,
+                          (te_mi_meas_multiplier)multiplier);
+    return retval;
+}
+
+te_errno
+pyte_mi_destroy(te_mi_logger *logger)
+{
+    te_mi_logger_destroy(logger);
+    return 0;
+}
