@@ -45,6 +45,7 @@
 #include "tapi_sockaddr.h"
 #include "tapi_reqs.h"
 #include "tapi_tags.h"
+#include "tapi_iomux.h"
 
 #define PYTE_ETIMEDOUT TE_ETIMEDOUT
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
@@ -639,6 +640,59 @@ extern te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,
 /** Allocate a unique port (host order) via the Configurator. */
 extern te_errno pyte_allocate_port(rcf_rpc_server *rpcs,
                                    unsigned int *port);
+
+/*
+ * iomux (tapi_iomux) wrappers.
+ *
+ * tapi_iomux functions longjmp via TEST_FAIL/TEST_VERDICT on errors, so
+ * every body is wrapped in PYTE_GUARD.  The TAPI manages RPC_AWAIT_IUT_ERROR
+ * internally (it arms and disarms it itself before each underlying rpc_*
+ * call); pyte must NOT re-arm it around these calls.
+ *
+ * tapi_iomux_handle is kept opaque: cffi uses "typedef ... tapi_iomux_handle"
+ * and manipulates it as a pointer only.
+ *
+ * pyte_iomux_call: n_out==0 means timeout (not an error).  On n_out>0,
+ * *revts_out points to a single malloc'ed int[2*n] array interleaving
+ * fd and revents values: [fd0, evt0, fd1, evt1, ...].  Python unpacks
+ * fds as revts[0::2] and evts as revts[1::2], then calls pyte_free_ints()
+ * once to release the single allocation.
+ */
+
+/* iomux type constants (cffi-resolved via dotdotdot) */
+#define PYTE_IOMUX_SELECT       TAPI_IOMUX_SELECT
+#define PYTE_IOMUX_PSELECT      TAPI_IOMUX_PSELECT
+#define PYTE_IOMUX_POLL         TAPI_IOMUX_POLL
+#define PYTE_IOMUX_PPOLL        TAPI_IOMUX_PPOLL
+#define PYTE_IOMUX_EPOLL        TAPI_IOMUX_EPOLL
+#define PYTE_IOMUX_EPOLL_PWAIT  TAPI_IOMUX_EPOLL_PWAIT
+#define PYTE_IOMUX_EPOLL_PWAIT2 TAPI_IOMUX_EPOLL_PWAIT2
+
+/* iomux event bit constants (cffi-resolved via dotdotdot) */
+#define PYTE_IOMUX_EVT_RD      EVT_RD
+#define PYTE_IOMUX_EVT_PRI     EVT_PRI
+#define PYTE_IOMUX_EVT_WR      EVT_WR
+#define PYTE_IOMUX_EVT_EXC     EVT_EXC
+#define PYTE_IOMUX_EVT_ERR     EVT_ERR
+#define PYTE_IOMUX_EVT_HUP     EVT_HUP
+#define PYTE_IOMUX_EVT_RDHUP   EVT_RDHUP
+#define PYTE_IOMUX_EVT_ET      EVT_ET
+#define PYTE_IOMUX_EVT_ONESHOT EVT_ONESHOT
+#define PYTE_IOMUX_EVT_NVAL    EVT_NVAL
+
+extern te_errno pyte_iomux_create(rcf_rpc_server *rpcs, int type,
+                                  tapi_iomux_handle **out);
+extern te_errno pyte_iomux_add(tapi_iomux_handle *h, int fd, int evt);
+extern te_errno pyte_iomux_mod(tapi_iomux_handle *h, int fd, int evt);
+extern te_errno pyte_iomux_del(tapi_iomux_handle *h, int fd);
+/*
+ * n_out=0 on timeout; *revts_out is a malloc'ed int[2*n] with
+ * interleaved [fd0, evt0, fd1, evt1, ...], freed by pyte_free_ints().
+ */
+extern te_errno pyte_iomux_call(tapi_iomux_handle *h, int timeout_ms,
+                                int *n_out, int **revts_out);
+extern te_errno pyte_iomux_destroy(tapi_iomux_handle *h);
+extern void pyte_free_ints(int *p);
 
 /** tapi_cfg_net_all_assign_ip: subnets + node addresses (needs root). */
 extern te_errno pyte_cfg_net_all_assign_ip(int ipv6);

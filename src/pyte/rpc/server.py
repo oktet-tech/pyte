@@ -191,6 +191,16 @@ class RpcServer:
         from pyte.rpc.socket import RpcSocket
         return RpcSocket.open(self, family, type)
 
+    def iomux(self, kind: str = "epoll"):
+        """Create a remote I/O multiplexer of the given *kind*.
+
+        Returns an ``IoMux`` context manager that calls ``close()`` on exit.
+        Supported kinds: ``"select"``, ``"pselect"``, ``"poll"``,
+        ``"ppoll"``, ``"epoll"``, ``"epoll_pwait"``, ``"epoll_pwait2"``.
+        """
+        from pyte.rpc.iomux import IoMux
+        return IoMux.create(self, kind)
+
     def job(self, program: str, args: list[str] | None = None,
             env: dict[str, str] | None = None):
         """Create a tapi_job running `program` on this RPC server."""

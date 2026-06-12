@@ -1796,3 +1796,117 @@ pyte_tags_add_tag(const char *tag, const char *value)
  * te_test_verdict name collision between te_test_result.h (struct typedef)
  * and tapi_test_log.h (function declaration).
  */
+
+/*
+ * iomux section (tapi_iomux wrappers).
+ *
+ * tapi_iomux functions longjmp via TEST_FAIL/TEST_VERDICT on errors, so
+ * every body is wrapped in PYTE_GUARD.  The TAPI manages RPC_AWAIT_IUT_ERROR
+ * internally (see tapi_iomux_epoll_create/add/mod/del in tapi_iomux.c); we
+ * must NOT re-arm RPC_AWAIT_ERROR around these calls — doing so would
+ * interfere with the TAPI's own error-handling logic.
+ *
+ * tapi_iomux_call returns the number of ready events (0 = timeout, -1 =
+ * error).  The TAPI raises a verdict on -1 before returning, so inside
+ * PYTE_GUARD a negative return from tapi_iomux_call means the test is
+ * already failing.  We treat n < 0 after a clean guard as a programming
+ * error and return TE_EFAIL; in practice this code path is unreachable.
+ *
+ * The revts array is owned by the iomux handle and is valid until the next
+ * call or destroy.  We copy the two fields we need (fd and revents) into
+ * separate malloc'ed int[] arrays so Python can read them after returning
+ * from the C frame.  The arrays are freed with pyte_free_ints().
+ */
+
+te_errno
+pyte_iomux_create(rcf_rpc_server *rpcs, int type,
+                  tapi_iomux_handle **out)
+{
+    tapi_iomux_handle *h;
+
+    PYTE_GUARD(h = tapi_iomux_create(rpcs, (tapi_iomux_type)type));
+    if (h == NULL)
+        return TE_RC(TE_TAPI, TE_EFAIL);
+    *out = h;
+    return 0;
+}
+
+te_errno
+pyte_iomux_add(tapi_iomux_handle *h, int fd, int evt)
+{
+    PYTE_GUARD(tapi_iomux_add(h, fd, (tapi_iomux_evt)evt));
+    return 0;
+}
+
+te_errno
+pyte_iomux_mod(tapi_iomux_handle *h, int fd, int evt)
+{
+    PYTE_GUARD(tapi_iomux_mod(h, fd, (tapi_iomux_evt)evt));
+    return 0;
+}
+
+te_errno
+pyte_iomux_del(tapi_iomux_handle *h, int fd)
+{
+    PYTE_GUARD(tapi_iomux_del(h, fd));
+    return 0;
+}
+
+static te_errno
+pyte_iomux_call_nojmp(tapi_iomux_handle *h, int timeout_ms,
+                      int *n_out, int **revts_out)
+{
+    tapi_iomux_evt_fd *revts = NULL;
+    int                n;
+    int               *buf = NULL;
+    int                i;
+
+    n = tapi_iomux_call(h, timeout_ms, &revts);
+    if (n < 0)
+        return TE_RC(TE_TAPI, TE_EFAIL);
+
+    *n_out = n;
+    *revts_out = NULL;
+
+    if (n == 0)
+        return 0;
+
+    /*
+     * Pack [fd0, evt0, fd1, evt1, ...] into a single int[2*n] array.
+     * Python unpacks fds as buf[0::2] and evts as buf[1::2], then calls
+     * pyte_free_ints() once to release it.
+     */
+    buf = malloc(2 * (size_t)n * sizeof(*buf));
+    if (buf == NULL)
+        return TE_RC(TE_TAPI, TE_ENOMEM);
+
+    for (i = 0; i < n; i++)
+    {
+        buf[2 * i]     = revts[i].fd;
+        buf[2 * i + 1] = (int)revts[i].revents;
+    }
+
+    *revts_out = buf;
+    return 0;
+}
+
+te_errno
+pyte_iomux_call(tapi_iomux_handle *h, int timeout_ms,
+                int *n_out, int **revts_out)
+{
+    PYTE_GUARD_RC(pyte_iomux_call_nojmp(h, timeout_ms, n_out, revts_out));
+    return 0;
+}
+
+te_errno
+pyte_iomux_destroy(tapi_iomux_handle *h)
+{
+    PYTE_GUARD(tapi_iomux_destroy(h));
+    return 0;
+}
+
+void
+pyte_free_ints(int *p)
+{
+    free(p);
+}
