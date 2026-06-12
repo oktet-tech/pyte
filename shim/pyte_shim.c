@@ -1768,6 +1768,30 @@ pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
 }
 
 /*
+ * Tester section: runtime requirement filtering and TRC tags.
+ * Both calls are intended for the root prologue; TE itself enforces
+ * the restriction via EPERM for tapi_tags_add_tag.
+ */
+
+te_errno
+pyte_reqs_modify(const char *reqs)
+{
+    te_errno rc = 0;
+
+    PYTE_GUARD(rc = tapi_reqs_modify(reqs));
+    return rc;
+}
+
+te_errno
+pyte_tags_add_tag(const char *tag, const char *value)
+{
+    te_errno rc = 0;
+
+    PYTE_GUARD(rc = tapi_tags_add_tag(tag, value));
+    return rc;
+}
+
+/*
  * TRC accessors are in pyte_trc.c — kept separate to avoid the
  * te_test_verdict name collision between te_test_result.h (struct typedef)
  * and tapi_test_log.h (function declaration).

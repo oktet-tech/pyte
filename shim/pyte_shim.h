@@ -43,6 +43,8 @@
 #include "tapi_env.h"
 #include "tapi_cfg_net.h"
 #include "tapi_sockaddr.h"
+#include "tapi_reqs.h"
+#include "tapi_tags.h"
 
 #define PYTE_ETIMEDOUT TE_ETIMEDOUT
 #define PYTE_ECONNREFUSED TE_ECONNREFUSED
@@ -50,6 +52,7 @@
 #define PYTE_ENODATA TE_ENODATA
 #define PYTE_EINPROGRESS TE_EINPROGRESS
 #define PYTE_ESMALLBUF TE_ESMALLBUF
+#define PYTE_EPERM TE_EPERM
 
 /* RCF constant passthrough */
 #define PYTE_RCF_TA_REBOOTABLE RCF_TA_REBOOTABLE
@@ -572,6 +575,14 @@ extern te_test_result *pyte_test_result_new(int status);
 extern te_errno pyte_test_result_add_verdict(te_test_result *result,
                                              const char *text);
 extern void pyte_test_result_free(te_test_result *result);
+
+/* -- tapi_reqs / tapi_tags -------------------------------------------- */
+
+/** AND a requirement expression into the session filter (prologue). */
+extern te_errno pyte_reqs_modify(const char *reqs);
+
+/** Add a runtime TRC tag (root prologue only; TE enforces EPERM). */
+extern te_errno pyte_tags_add_tag(const char *tag, const char *value);
 
 /* -- tapi_env ---------------------------------------------------------- */
 
