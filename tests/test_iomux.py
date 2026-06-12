@@ -7,6 +7,7 @@ import types
 import pytest
 
 import pyte.rpc.iomux as _iomux_mod
+from pyte.errors import RpcError
 from pyte.rpc.iomux import EVENT_BITS, IoMux, _evt_bits, _evt_names
 
 
@@ -41,6 +42,7 @@ class FakeLib:
         self.calls = []
         # (n, interleaved): n events; interleaved = [fd0,evt0,fd1,evt1,...]
         self.call_result = (0, [])
+        self.add_rc = 0
 
     def pyte_iomux_create(self, rpcs, kind, out):
         self.calls.append(("create", kind))
@@ -49,7 +51,7 @@ class FakeLib:
 
     def pyte_iomux_add(self, h, fd, evt):
         self.calls.append(("add", fd, evt))
-        return 0
+        return self.add_rc
 
     def pyte_iomux_mod(self, h, fd, evt):
         self.calls.append(("mod", fd, evt))
@@ -72,6 +74,19 @@ class FakeLib:
 
     def pyte_free_ints(self, p):
         self.calls.append(("free",))
+
+    # TeError construction path (used by pyte.errors.check)
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def pyte_rc_error(self, rc):
+        return rc
+
+    def te_rc_mod2str(self, rc):
+        return b"TAPI"
+
+    def te_rc_err2str(self, rc):
+        return b"ENOENT"
 
 
 class FakeFfi:
@@ -158,3 +173,25 @@ def test_iomux_close_idempotent(monkeypatch):
     mux.close()
     mux.close()
     assert [c for c in lib.calls if c[0] == "destroy"] == [("destroy",)]
+
+
+def test_iomux_errors_are_rpcerror(monkeypatch):
+    """A nonzero rc from the shim must raise RpcError, not a generic TeError."""
+    lib = FakeLib()
+    lib.add_rc = 42  # any nonzero te_errno value
+    _fake_shim(monkeypatch, lib)
+    mux = IoMux.create(FakeServer(), "epoll")
+    with pytest.raises(RpcError):
+        mux.add(5, "in")
+
+
+def test_iomux_use_after_close_raises(monkeypatch):
+    """Methods that touch the remote handle must raise RuntimeError after close."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    mux = IoMux.create(FakeServer(), "epoll")
+    mux.close()
+    with pytest.raises(RuntimeError, match="IoMux is closed"):
+        mux.add(5, "in")
+    with pytest.raises(RuntimeError, match="IoMux is closed"):
+        mux.wait(1.0)

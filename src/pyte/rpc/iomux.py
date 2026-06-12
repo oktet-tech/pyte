@@ -3,7 +3,7 @@
 """Multiplexed waiting on remote sockets (tapi_iomux)."""
 from __future__ import annotations
 
-from pyte.errors import check
+from pyte.errors import RpcError, check
 
 #: Ordered event names (human-friendly aliases for tapi_iomux_evt bits).
 _EVENT_NAMES = ("in", "pri", "out", "exc", "err", "hup", "rdhup",
@@ -105,7 +105,7 @@ class IoMux:
                 f"valid kinds: {sorted(_KINDS)}") from None
         out = ffi.new("tapi_iomux_handle **")
         check(lib.pyte_iomux_create(server._h, kind_const, out),
-              f"iomux_create({kind})")
+              f"iomux_create({kind})", RpcError)
         return cls(server, out[0])
 
     # -- fd helpers -------------------------------------------------------
@@ -122,7 +122,7 @@ class IoMux:
             return
         from pyte._shim import lib
         check(lib.pyte_iomux_destroy(self._h),
-              f"iomux_destroy on {self._server!r}")
+              f"iomux_destroy on {self._server!r}", RpcError)
         self._h = None
 
     def __enter__(self) -> "IoMux":
@@ -136,26 +136,32 @@ class IoMux:
 
     def add(self, sock_or_fd, events: str) -> None:
         """Add *sock_or_fd* to the multiplexer watching *events*."""
+        if self._h is None:
+            raise RuntimeError("IoMux is closed")
         from pyte._shim import lib
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
         check(lib.pyte_iomux_add(self._h, fd, bits),
-              f"iomux_add(fd={fd}, events={events!r})")
+              f"iomux_add(fd={fd}, events={events!r})", RpcError)
 
     def mod(self, sock_or_fd, events: str) -> None:
         """Modify the watched *events* for *sock_or_fd*."""
+        if self._h is None:
+            raise RuntimeError("IoMux is closed")
         from pyte._shim import lib
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
         check(lib.pyte_iomux_mod(self._h, fd, bits),
-              f"iomux_mod(fd={fd}, events={events!r})")
+              f"iomux_mod(fd={fd}, events={events!r})", RpcError)
 
     def delete(self, sock_or_fd) -> None:
         """Remove *sock_or_fd* from the multiplexer."""
+        if self._h is None:
+            raise RuntimeError("IoMux is closed")
         from pyte._shim import lib
         fd = self._fd(sock_or_fd)
         check(lib.pyte_iomux_del(self._h, fd),
-              f"iomux_del(fd={fd})")
+              f"iomux_del(fd={fd})", RpcError)
 
     # -- waiting ----------------------------------------------------------
 
@@ -172,12 +178,14 @@ class IoMux:
         and evts from odd indices, then free the array with one pyte_free_ints
         call.
         """
+        if self._h is None:
+            raise RuntimeError("IoMux is closed")
         from pyte._shim import ffi, lib
         timeout_ms = -1 if timeout < 0 else int(timeout * 1000)
         n_out = ffi.new("int *")
         revts_p = ffi.new("int **")
         check(lib.pyte_iomux_call(self._h, timeout_ms, n_out, revts_p),
-              f"iomux_call(timeout={timeout}s)")
+              f"iomux_call(timeout={timeout}s)", RpcError)
         n = n_out[0]
         if n == 0:
             return []
