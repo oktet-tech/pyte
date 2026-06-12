@@ -56,6 +56,28 @@ require no TE live in `lib/pyte/tests/test_remote_runner.py`
   facade (`RpcServer._check_call`) inspects the return value and the
   remote errno and raises `pyte.errors.RpcError` instead.
 
+- **Errors**: Python checks every `te_errno` with
+  `pyte.errors.check()`, raising `TeError`/`CfgError`/`RpcError`
+  (`TimeoutError` for `TE_ETIMEDOUT`).
+- **Lazy `_shim` imports rule**: Python modules import the extension
+  with `from pyte._shim import ffi, lib` *inside* functions, never at
+  module top level.  This keeps pure-Python parts (`pyte.tad.dsl`,
+  `pyte._params`) importable and unit-testable without a built shim
+  or a TE installation.
+- **Configurator values cross as text**: the shim converts to/from
+  the real `CVT_*` instance type; `pyte.cfg.get()` turns integer
+  types back into `int`.
+- **TAD**: `pyte.tad.dsl` is a Scapy-style layer DSL that compiles to
+  NDN ASN.1 *text*; the shim parses it against the proper `ndn_*`
+  type.  The exact text shapes were calibrated against TE's
+  `asn_parse_value_text()` and are pinned by unit tests
+  (`tests/test_tad_dsl.py`); use `pyte.tad.validate()` to check
+  hand-written NDN text.
+- **Packet ownership**: TE's receive callback hands each parsed
+  packet (asn_value) to the callback owner, so the shim stores the
+  pointer without copying and Python's `Packet` frees it via
+  `pyte_pkt_free()` (explicitly or in `__del__`).
+
 ## pyte.rpc — RPC sockets, iomux and scatter/gather I/O
 
 `pyte.rpc.RpcServer` creates and owns remote socket file descriptors
@@ -121,27 +143,6 @@ IPPROTO_UDP) and their known cmsg types survive.  Unknown level/type
 values arrive mangled with SOL_MAX and a WARN in the TE log.  Engine
 and agent must share the same OS ABI for ancillary payloads to be
 meaningful.
-- **Errors**: Python checks every `te_errno` with
-  `pyte.errors.check()`, raising `TeError`/`CfgError`/`RpcError`
-  (`TimeoutError` for `TE_ETIMEDOUT`).
-- **Lazy `_shim` imports rule**: Python modules import the extension
-  with `from pyte._shim import ffi, lib` *inside* functions, never at
-  module top level.  This keeps pure-Python parts (`pyte.tad.dsl`,
-  `pyte._params`) importable and unit-testable without a built shim
-  or a TE installation.
-- **Configurator values cross as text**: the shim converts to/from
-  the real `CVT_*` instance type; `pyte.cfg.get()` turns integer
-  types back into `int`.
-- **TAD**: `pyte.tad.dsl` is a Scapy-style layer DSL that compiles to
-  NDN ASN.1 *text*; the shim parses it against the proper `ndn_*`
-  type.  The exact text shapes were calibrated against TE's
-  `asn_parse_value_text()` and are pinned by unit tests
-  (`tests/test_tad_dsl.py`); use `pyte.tad.validate()` to check
-  hand-written NDN text.
-- **Packet ownership**: TE's receive callback hands each parsed
-  packet (asn_value) to the callback owner, so the shim stores the
-  pointer without copying and Python's `Packet` frees it via
-  `pyte_pkt_free()` (explicitly or in `__del__`).
 
 ## pyte.net — network configuration
 

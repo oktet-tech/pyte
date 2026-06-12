@@ -19,7 +19,8 @@ class RecvMsg:
     ``IP_PKTINFO``) and ``data`` is a :class:`bytes` payload.  Only
     TE-known socket levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
     IPPROTO_TCP, IPPROTO_UDP) and their known cmsg types survive the RPC
-    conversion; unknown level/type values are dropped silently.
+    conversion; unknown level/type values arrive mangled (rebuilt with
+    SOL_MAX plus a WARN in the TE log).
     ``addr`` is ``(ip, port)`` when the kernel returned a source name,
     or ``None`` on a connected socket that reported no name.
     """
@@ -328,7 +329,7 @@ class RpcSocket:
         Ancillary data level/type values are host-native integers, but only
         TE-known socket levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
         IPPROTO_TCP, IPPROTO_UDP) and their known cmsg types survive the
-        RPC conversion; unknown values are dropped silently by the RPC layer.
+        RPC conversion; unknown values arrive mangled (SOL_MAX + WARN).
         """
         from pyte._shim import ffi, lib
 
