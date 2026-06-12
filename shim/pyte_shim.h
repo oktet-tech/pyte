@@ -610,12 +610,14 @@ extern te_errno pyte_env_get_if(tapi_env *env, const char *name,
 extern te_errno pyte_env_get_if_ta(tapi_env *env, const char *name,
                                    char **ta);
 
-/** TA name for a host label ("" = the first host); malloc'ed. */
+/** TA name for a host label ("" = the first host declared in the env
+ *  string); malloc'ed. */
 extern te_errno pyte_env_get_host_ta(tapi_env *env, const char *name,
                                      char **ta);
 
 /**
- * Bound subnet of a net ("" = the first net), as "10.38.10.0" + prefix.
+ * Bound subnet of a net ("" = the first net declared in the env string),
+ * as "10.38.10.0" + prefix.
  * TE_RC(TE_TAPI, TE_ENOENT) if the net itself is missing;
  * TE_RC(TE_TAPI, TE_ENODATA) if the net has no subnet of that family.
  */

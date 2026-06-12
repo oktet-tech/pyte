@@ -1656,9 +1656,18 @@ pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta)
     tapi_env_host *host = NULL;
 
     if (name != NULL && name[0] == '\0')
-        host = SLIST_FIRST(&env->hosts);
+    {
+        /* env_gram.y inserts with SLIST_INSERT_HEAD, so the tail is
+         * the first-declared entity */
+        tapi_env_host *iter;
+
+        SLIST_FOREACH(iter, &env->hosts, links)
+            host = iter;
+    }
     else
+    {
         PYTE_GUARD(host = tapi_env_get_host(env, name));
+    }
     if (host == NULL || host->ta == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
     *ta = strdup(host->ta);
@@ -1676,9 +1685,18 @@ pyte_env_get_net_subnet(tapi_env *env, const char *name, int ipv6,
     te_errno rc;
 
     if (name != NULL && name[0] == '\0')
-        net = SLIST_FIRST(&env->nets);
+    {
+        /* env_gram.y inserts with SLIST_INSERT_HEAD, so the tail is
+         * the first-declared entity */
+        tapi_env_net *iter;
+
+        SLIST_FOREACH(iter, &env->nets, links)
+            net = iter;
+    }
     else
+    {
         PYTE_GUARD(net = tapi_env_get_net(env, name));
+    }
     if (net == NULL)
         return TE_RC(TE_TAPI, TE_ENOENT);
 
