@@ -19,6 +19,9 @@ def _resolve_var(value: str) -> str:
     ``.`` with ``__``, prepend ``TE_TEST_VAR_``.
 
     Example: ``VAR.env.iut_only`` → ``TE_TEST_VAR_env__iut_only``.
+
+    Raises:
+        ValueError: if the variable is not found in the environment.
     """
     if not value.startswith(_VAR_PREFIX):
         return value
@@ -26,7 +29,7 @@ def _resolve_var(value: str) -> str:
     env_name = _ENV_PREFIX + inner.replace(".", "__")
     resolved = os.environ.get(env_name)
     if resolved is None:
-        raise KeyError(
+        raise ValueError(
             f"tester variable {value!r} not found in environment "
             f"(looked for {env_name!r})")
     return resolved

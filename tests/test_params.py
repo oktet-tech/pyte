@@ -62,3 +62,19 @@ def test_params_contains():
     p = Params({"a": "1"})
     assert "a" in p
     assert "b" not in p
+
+
+def test_var_reference_resolved(monkeypatch):
+    monkeypatch.setenv("TE_TEST_VAR_env__iut_only", "'net':IUT{}")
+    p = parse_argv(["env=VAR.env.iut_only"])
+    assert p["env"] == "'net':IUT{}"
+
+
+def test_var_prefix_must_match_exactly():
+    assert parse_argv(["a=VARIANT1"])["a"] == "VARIANT1"
+    assert parse_argv(["a=VAR"])["a"] == "VAR"
+
+
+def test_var_reference_missing_raises():
+    with pytest.raises(ValueError, match="TE_TEST_VAR_no__such"):
+        parse_argv(["env=VAR.no.such"])
