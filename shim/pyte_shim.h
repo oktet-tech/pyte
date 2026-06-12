@@ -694,6 +694,47 @@ extern te_errno pyte_iomux_call(tapi_iomux_handle *h, int timeout_ms,
 extern te_errno pyte_iomux_destroy(tapi_iomux_handle *h);
 extern void pyte_free_ints(int *p);
 
+/*
+ * sendmsg / recvmsg wrappers.  See the large comment block above
+ * pyte_rpc_sendmsg_nojmp() in pyte_shim.c for the full rpc_msghdr
+ * conventions that govern field usage.
+ *
+ * pyte_rpc_sendmsg: sends n_iov scatter buffers to the optional addr/port
+ * with n_cmsg native control messages (level/type/data triplets).
+ *
+ * pyte_rpc_recvmsg: receives up to bufsize data bytes with up to ctrl_space
+ * bytes of ancillary data.  Outputs are malloc'ed:
+ *   *data    freed with pyte_free_string (it is a plain malloc buffer);
+ *   *from_addr freed with pyte_free_string;
+ *   cmsg parallel arrays freed with pyte_free_cmsgs().
+ * *from_addr is "" when no source address was returned.
+ *
+ * pyte_free_cmsgs: releases the four parallel cmsg arrays allocated by
+ * pyte_rpc_recvmsg (call only when n_cmsg > 0).
+ */
+extern te_errno pyte_rpc_sendmsg(rcf_rpc_server *rpcs, int s,
+                                 const uint8_t **iov_bufs,
+                                 const size_t *iov_lens,
+                                 unsigned int n_iov,
+                                 const char *addr, int port,
+                                 const int *cmsg_levels,
+                                 const int *cmsg_types,
+                                 const uint8_t **cmsg_datas,
+                                 const size_t *cmsg_lens,
+                                 unsigned int n_cmsg,
+                                 int flags, ssize_t *sent);
+extern te_errno pyte_rpc_recvmsg(rcf_rpc_server *rpcs, int s,
+                                 size_t bufsize, size_t ctrl_space,
+                                 int flags,
+                                 uint8_t **data, size_t *data_len,
+                                 char **from_addr, int *from_port,
+                                 int **cmsg_levels, int **cmsg_types,
+                                 uint8_t ***cmsg_datas, size_t **cmsg_lens,
+                                 unsigned int *n_cmsg, int *msg_flags,
+                                 ssize_t *received);
+extern void pyte_free_cmsgs(int *levels, int *types, uint8_t **datas,
+                            size_t *lens, unsigned int n);
+
 /** tapi_cfg_net_all_assign_ip: subnets + node addresses (needs root). */
 extern te_errno pyte_cfg_net_all_assign_ip(int ipv6);
 

@@ -1910,3 +1910,417 @@ pyte_free_ints(int *p)
 {
     free(p);
 }
+
+/*
+ * sendmsg / recvmsg section.
+ *
+ * rpc_msghdr conventions (verified against tapi_rpc_socket.h and
+ * tapi_rpc_internal.c):
+ *
+ * Scatter SEND (no cmsgs):
+ *   Set msg_iov[i].{iov_base,iov_len,iov_rlen}, msg_iovlen, msg_riovlen.
+ *   Leave msg_control=NULL, msg_controllen=0.  msg_name/msg_namelen only
+ *   when sending to an unconnected address.
+ *
+ * Send WITH cmsgs:
+ *   Additionally set msg_control = native cmsg buffer built with
+ *   CMSG_SPACE/CMSG_FIRSTHDR/CMSG_NXTHDR/CMSG_DATA, msg_controllen =
+ *   total buffer size, msg_cmsghdr_num = number of cmsgs.  Leave
+ *   msg_control_mode at RPC_MSGHDR_FIELD_DEFAULT (0): for send calls the
+ *   internal layer converts the buffer regardless.
+ *   real_msg_controllen is NOT needed on send (it is only used to override
+ *   msg_controllen on receive).
+ *
+ * RECV with control space:
+ *   Allocate a buffer of ctrl_space bytes, set msg_control = buffer,
+ *   msg_controllen = ctrl_space, real_msg_controllen = ctrl_space (this
+ *   forces the internal layer to use real_msg_controllen as the true buffer
+ *   size), msg_cmsghdr_num = 0 (zero is correct: the layer fills it after
+ *   the call).  Leave msg_control_mode = RPC_MSGHDR_FIELD_DEFAULT (0); for
+ *   receive calls the default means raw pass-through which brings the
+ *   native cmsg buffer back.  After the call:
+ *     got_msg_controllen = actual bytes returned by the kernel;
+ *     msg_cmsghdr_num    = number of complete cmsghdr records;
+ *     msg_controllen     = bytes written into msg_control.
+ *   Parse msg_control with CMSG_FIRSTHDR/CMSG_NXTHDR over msg_controllen
+ *   (not got_msg_controllen).
+ *
+ * struct rpc_iovec fields:
+ *   iov_base — pointer to data buffer
+ *   iov_len  — advertised length (the value the remote sees)
+ *   iov_rlen — real number of bytes to copy across the RPC boundary;
+ *              for send: iov_rlen == iov_len; for recv: iov_rlen = buffer
+ *              capacity so the RPC layer can fill it.
+ *
+ * Native cmsg buffer note:
+ *   msg_control crosses the RPC boundary as a NATIVE struct cmsghdr buffer.
+ *   The internal layer (tapi_rpc_internal.c: msghdr_rpc2tarpc /
+ *   msghdr_tarpc2rpc) converts between the native buffer and the TARPC wire
+ *   format using msg_control_h2rpc / msg_control_rpc2h.  This conversion
+ *   works correctly only when the engine host and the agent share the same
+ *   struct cmsghdr ABI — which is guaranteed on our single-machine rigs
+ *   (loopback) and on homogeneous clusters.  The shim is therefore correct
+ *   to build/parse native buffers with CMSG_SPACE/CMSG_DATA etc.
+ *
+ * RPC_AWAIT_ERROR:
+ *   Re-armed before each rpc_* call (TE resets the await flag after every
+ *   call; re-arming is mandatory for direct rpc_ wrappers — same pattern
+ *   as pyte_rpc_sendto and all other pyte RPC wrappers).  This is
+ *   intentionally different from the iomux section where PYTE_GUARD replaces
+ *   the TAPI's internal await logic.
+ */
+
+#include <sys/socket.h>
+
+static te_errno
+pyte_rpc_sendmsg_nojmp(rcf_rpc_server *rpcs, int s,
+                        const uint8_t **iov_bufs, const size_t *iov_lens,
+                        unsigned int n_iov,
+                        const char *addr, int port,
+                        const int *cmsg_levels, const int *cmsg_types,
+                        const uint8_t **cmsg_datas, const size_t *cmsg_lens,
+                        unsigned int n_cmsg, int flags, ssize_t *sent)
+{
+    rpc_iovec  *iov = NULL;
+    rpc_msghdr  msg;
+    uint8_t    *ctrl = NULL;
+    struct sockaddr_storage ss;
+    socklen_t   sslen = 0;
+    ssize_t     rc_send;
+    unsigned int i;
+    te_errno    rc = 0;
+
+    memset(&msg, 0, sizeof(msg));
+
+    /* --- scatter-gather buffers --- */
+    if (n_iov > 0)
+    {
+        iov = calloc(n_iov, sizeof(*iov));
+        if (iov == NULL)
+            return TE_RC(TE_TAPI, TE_ENOMEM);
+        for (i = 0; i < n_iov; i++)
+        {
+            iov[i].iov_base = (void *)(uintptr_t)iov_bufs[i];
+            iov[i].iov_len  = iov_lens[i];
+            iov[i].iov_rlen = iov_lens[i];
+        }
+    }
+    msg.msg_iov    = iov;
+    msg.msg_iovlen = n_iov;
+    msg.msg_riovlen = n_iov;
+
+    /* --- destination address --- */
+    if (addr != NULL && addr[0] != '\0')
+    {
+        rc = pyte_sockaddr_in4(addr, (uint16_t)port, &ss, &sslen);
+        if (rc != 0)
+        {
+            free(iov);
+            return rc;
+        }
+        msg.msg_name    = &ss;
+        msg.msg_namelen = sslen;
+    }
+
+    /* --- ancillary (control) data --- */
+    if (n_cmsg > 0)
+    {
+        /* Calculate total buffer size */
+        size_t ctrl_size = 0;
+
+        for (i = 0; i < n_cmsg; i++)
+            ctrl_size += CMSG_SPACE(cmsg_lens[i]);
+
+        ctrl = calloc(1, ctrl_size);
+        if (ctrl == NULL)
+        {
+            free(iov);
+            return TE_RC(TE_TAPI, TE_ENOMEM);
+        }
+
+        /* Fill native cmsg buffer */
+        struct msghdr tmp = { .msg_control = ctrl,
+                              .msg_controllen = ctrl_size };
+        struct cmsghdr *c = CMSG_FIRSTHDR(&tmp);
+
+        for (i = 0; i < n_cmsg; i++)
+        {
+            if (c == NULL)
+            {
+                free(ctrl);
+                free(iov);
+                return TE_RC(TE_TAPI, TE_EINVAL);
+            }
+            c->cmsg_level = cmsg_levels[i];
+            c->cmsg_type  = cmsg_types[i];
+            c->cmsg_len   = CMSG_LEN(cmsg_lens[i]);
+            memcpy(CMSG_DATA(c), cmsg_datas[i], cmsg_lens[i]);
+            c = CMSG_NXTHDR(&tmp, c);
+        }
+
+        msg.msg_control    = ctrl;
+        msg.msg_controllen = ctrl_size;
+        msg.msg_cmsghdr_num = (int)n_cmsg;
+        /* msg_control_mode stays RPC_MSGHDR_FIELD_DEFAULT (0):
+         * the internal layer converts send control buffers by default */
+    }
+
+    RPC_AWAIT_ERROR(rpcs);
+    rc_send = rpc_sendmsg(rpcs, s, &msg, (rpc_send_recv_flags)flags);
+
+    free(ctrl);
+    free(iov);
+
+    if (rc_send < 0)
+        return TE_RC(TE_TAPI, TE_EFAIL);
+
+    *sent = rc_send;
+    return 0;
+}
+
+te_errno
+pyte_rpc_sendmsg(rcf_rpc_server *rpcs, int s,
+                 const uint8_t **iov_bufs, const size_t *iov_lens,
+                 unsigned int n_iov,
+                 const char *addr, int port,
+                 const int *cmsg_levels, const int *cmsg_types,
+                 const uint8_t **cmsg_datas, const size_t *cmsg_lens,
+                 unsigned int n_cmsg, int flags, ssize_t *sent)
+{
+    PYTE_GUARD_RC(pyte_rpc_sendmsg_nojmp(rpcs, s, iov_bufs, iov_lens, n_iov,
+                                          addr, port, cmsg_levels, cmsg_types,
+                                          cmsg_datas, cmsg_lens, n_cmsg,
+                                          flags, sent));
+    return 0;
+}
+
+static te_errno
+pyte_rpc_recvmsg_nojmp(rcf_rpc_server *rpcs, int s, size_t bufsize,
+                        size_t ctrl_space, int flags,
+                        uint8_t **data, size_t *data_len,
+                        char **from_addr, int *from_port,
+                        int **cmsg_levels, int **cmsg_types,
+                        uint8_t ***cmsg_datas, size_t **cmsg_lens,
+                        unsigned int *n_cmsg, int *msg_flags,
+                        ssize_t *received)
+{
+    rpc_iovec  iov;
+    rpc_msghdr msg;
+    uint8_t   *databuf = NULL;
+    uint8_t   *ctrl = NULL;
+    struct sockaddr_storage ss;
+    ssize_t    rc_recv;
+    unsigned int nc;
+    unsigned int i;
+    char       addrbuf[64];
+    uint16_t   port = 0;
+    te_errno   rc = 0;
+
+    memset(&msg, 0, sizeof(msg));
+    memset(&iov, 0, sizeof(iov));
+    memset(&ss, 0, sizeof(ss));
+
+    /* --- single receive buffer --- */
+    databuf = malloc(bufsize);
+    if (databuf == NULL)
+        return TE_RC(TE_TAPI, TE_ENOMEM);
+    memset(databuf, 0, bufsize);
+
+    iov.iov_base = databuf;
+    iov.iov_len  = bufsize;
+    iov.iov_rlen = bufsize;
+
+    msg.msg_iov    = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_riovlen = 1;
+
+    /* --- source address buffer --- */
+    msg.msg_name    = &ss;
+    msg.msg_namelen = sizeof(ss);
+    msg.msg_rnamelen = sizeof(ss);
+
+    /* --- control buffer --- */
+    if (ctrl_space > 0)
+    {
+        ctrl = calloc(1, ctrl_space);
+        if (ctrl == NULL)
+        {
+            free(databuf);
+            return TE_RC(TE_TAPI, TE_ENOMEM);
+        }
+        msg.msg_control             = ctrl;
+        msg.msg_controllen          = ctrl_space;
+        msg.real_msg_controllen     = ctrl_space;
+        /* msg_cmsghdr_num stays 0: filled after the call */
+        /* msg_control_mode stays DEFAULT: raw pass-through on recv */
+    }
+
+    msg.msg_flags_mode = RPC_MSG_FLAGS_NO_CHECK;
+
+    RPC_AWAIT_ERROR(rpcs);
+    rc_recv = rpc_recvmsg(rpcs, s, &msg, (rpc_send_recv_flags)flags);
+
+    if (rc_recv < 0)
+    {
+        free(ctrl);
+        free(databuf);
+        return TE_RC(TE_TAPI, TE_EFAIL);
+    }
+
+    /* --- hand off data buffer to caller --- */
+    *data     = databuf;
+    *data_len = (size_t)rc_recv;
+    *received = rc_recv;
+
+    /* --- source address --- */
+    if (msg.msg_namelen > 0 &&
+        ((struct sockaddr *)&ss)->sa_family != AF_UNSPEC)
+    {
+        rc = pyte_sockaddr_parse((struct sockaddr *)&ss,
+                                 addrbuf, sizeof(addrbuf), &port);
+        if (rc != 0)
+        {
+            free(ctrl);
+            free(databuf);
+            return rc;
+        }
+        *from_addr = strdup(addrbuf);
+        if (*from_addr == NULL)
+        {
+            free(ctrl);
+            free(databuf);
+            return TE_RC(TE_TAPI, TE_ENOMEM);
+        }
+        *from_port = port;
+    }
+    else
+    {
+        *from_addr = strdup("");
+        if (*from_addr == NULL)
+        {
+            free(ctrl);
+            free(databuf);
+            return TE_RC(TE_TAPI, TE_ENOMEM);
+        }
+        *from_port = 0;
+    }
+
+    /* --- parse ancillary data --- */
+    nc = 0;
+    *cmsg_levels = NULL;
+    *cmsg_types  = NULL;
+    *cmsg_datas  = NULL;
+    *cmsg_lens   = NULL;
+    *n_cmsg      = 0;
+    *msg_flags   = (int)msg.msg_flags;
+
+    if (ctrl != NULL && msg.msg_controllen > 0)
+    {
+        struct msghdr tmp = { .msg_control = ctrl,
+                              .msg_controllen = msg.msg_controllen };
+        struct cmsghdr *c;
+        int           *lvls = NULL;
+        int           *typs = NULL;
+        uint8_t      **datas_arr = NULL;
+        size_t        *lens_arr = NULL;
+
+        /* first pass: count */
+        for (c = CMSG_FIRSTHDR(&tmp); c != NULL; c = CMSG_NXTHDR(&tmp, c))
+            nc++;
+
+        if (nc > 0)
+        {
+            lvls      = malloc(nc * sizeof(*lvls));
+            typs      = malloc(nc * sizeof(*typs));
+            datas_arr = malloc(nc * sizeof(*datas_arr));
+            lens_arr  = malloc(nc * sizeof(*lens_arr));
+
+            if (lvls == NULL || typs == NULL ||
+                datas_arr == NULL || lens_arr == NULL)
+            {
+                free(lvls);
+                free(typs);
+                free(datas_arr);
+                free(lens_arr);
+                free(ctrl);
+                free(databuf);
+                free(*from_addr);
+                *from_addr = NULL;
+                return TE_RC(TE_TAPI, TE_ENOMEM);
+            }
+
+            /* second pass: fill */
+            i = 0;
+            for (c = CMSG_FIRSTHDR(&tmp); c != NULL;
+                 c = CMSG_NXTHDR(&tmp, c), i++)
+            {
+                size_t dlen = c->cmsg_len -
+                              ((uint8_t *)CMSG_DATA(c) - (uint8_t *)c);
+
+                lvls[i]      = c->cmsg_level;
+                typs[i]      = c->cmsg_type;
+                lens_arr[i]  = dlen;
+                datas_arr[i] = malloc(dlen);
+                if (datas_arr[i] == NULL)
+                {
+                    /* free already-allocated data buffers */
+                    unsigned int j;
+
+                    for (j = 0; j < i; j++)
+                        free(datas_arr[j]);
+                    free(lvls);
+                    free(typs);
+                    free(datas_arr);
+                    free(lens_arr);
+                    free(ctrl);
+                    free(databuf);
+                    free(*from_addr);
+                    *from_addr = NULL;
+                    return TE_RC(TE_TAPI, TE_ENOMEM);
+                }
+                memcpy(datas_arr[i], CMSG_DATA(c), dlen);
+            }
+
+            *cmsg_levels = lvls;
+            *cmsg_types  = typs;
+            *cmsg_datas  = datas_arr;
+            *cmsg_lens   = lens_arr;
+        }
+    }
+
+    *n_cmsg = nc;
+    free(ctrl);
+    return 0;
+}
+
+te_errno
+pyte_rpc_recvmsg(rcf_rpc_server *rpcs, int s, size_t bufsize,
+                 size_t ctrl_space, int flags,
+                 uint8_t **data, size_t *data_len,
+                 char **from_addr, int *from_port,
+                 int **cmsg_levels, int **cmsg_types,
+                 uint8_t ***cmsg_datas, size_t **cmsg_lens,
+                 unsigned int *n_cmsg, int *msg_flags,
+                 ssize_t *received)
+{
+    PYTE_GUARD_RC(pyte_rpc_recvmsg_nojmp(rpcs, s, bufsize, ctrl_space, flags,
+                                          data, data_len, from_addr, from_port,
+                                          cmsg_levels, cmsg_types, cmsg_datas,
+                                          cmsg_lens, n_cmsg, msg_flags,
+                                          received));
+    return 0;
+}
+
+void
+pyte_free_cmsgs(int *levels, int *types, uint8_t **datas,
+                size_t *lens, unsigned int n)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        free(datas[i]);
+    free(levels);
+    free(types);
+    free(datas);
+    free(lens);
+}

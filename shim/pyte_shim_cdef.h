@@ -278,6 +278,25 @@ te_errno pyte_allocate_port(rcf_rpc_server *rpcs, unsigned int *port);
 te_errno pyte_cfg_net_all_assign_ip(int ipv6);
 te_errno pyte_cfg_net_assign_subnet(const char *net_name, int ipv6);
 
+/* ---- sendmsg / recvmsg ---- */
+te_errno pyte_rpc_sendmsg(rcf_rpc_server *rpcs, int s,
+                          const uint8_t **iov_bufs, const size_t *iov_lens,
+                          unsigned int n_iov,
+                          const char *addr, int port,
+                          const int *cmsg_levels, const int *cmsg_types,
+                          const uint8_t **cmsg_datas, const size_t *cmsg_lens,
+                          unsigned int n_cmsg, int flags, ssize_t *sent);
+te_errno pyte_rpc_recvmsg(rcf_rpc_server *rpcs, int s, size_t bufsize,
+                          size_t ctrl_space, int flags,
+                          uint8_t **data, size_t *data_len,
+                          char **from_addr, int *from_port,
+                          int **cmsg_levels, int **cmsg_types,
+                          uint8_t ***cmsg_datas, size_t **cmsg_lens,
+                          unsigned int *n_cmsg, int *msg_flags,
+                          ssize_t *received);
+void pyte_free_cmsgs(int *levels, int *types, uint8_t **datas,
+                     size_t *lens, unsigned int n);
+
 /* ---- iomux ---- */
 typedef ... tapi_iomux_handle;
 
