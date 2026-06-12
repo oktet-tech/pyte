@@ -16,7 +16,9 @@ Modules: `pyte.test` (lifecycle), `pyte.log`, `pyte.errors`,
 (CfgNode object model), `pyte.net` (interfaces/routes/neighbors/
 sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
 (layer DSL + Csap), `pyte.rcf` (agent inventory/files/restart/
-dynamic TAs), `pyte.remote` (run Python on the agent host).
+dynamic TAs), `pyte.remote` (run Python on the agent host),
+`pyte.env` (tapi_env binding — host/PCO/address/interface lookup
+from a named env string).
 
 `pyte.remote` runs arbitrary Python code on the agent host with zero
 installation: `remote.python(pco)` spawns a subprocess via tapi_job
@@ -215,6 +217,53 @@ Caveats:
 - `remove()`/the `DynamicAgent` context manager deletes the agent
   from RCF; deleting an agent from the static RCF configuration is
   refused (`TE_EPERM`).
+
+## pyte.env — tapi_env binding
+
+`pyte.env` wraps `tapi_env`, TE's environment binding layer: it reads
+a named environment string (e.g. `"IUT:Agt_A net: IUT:Agt_B"`),
+looks up the matching hosts, interfaces, addresses and RPC servers in
+the `/net` Configurator tree, and gives tests stable per-kind names
+(`IUT`, `Tst`) instead of raw agent names.
+
+```python
+from pyte import env
+
+# t.env is a lazy binding — nothing happens until first attribute access
+e = t.env("IUT:Agt_A net: IUT:Agt_B net2:Agt_B")
+
+host = e.host("IUT")        # agent name string, e.g. "Agt_A"
+pco  = e.pco("IUT")        # RpcServer owned by the env (non-owning wrapper)
+addr = e.addr("IUT")       # address string assigned to the IUT node
+iface = e.iface("IUT")     # interface name on the IUT node
+
+e.close()                  # unbind; or use as context manager
+```
+
+`t.env` is a lazy binding: the `Env` object is created the first time
+it is accessed from the `t` handle and is closed automatically at test
+teardown.  Tests typically call `t.env(env_str)` once and keep the
+result; calling it again with the same string returns the same object.
+
+Pco wrappers returned by `e.pco()` are **non-owning**: `destroy()` on
+them is a no-op, and the underlying `rcf_rpc_server` lives until
+`e.close()`.  Use them exactly like any other `RpcServer`.
+
+Requirements:
+
+- The `/net:net1` subtree with address pools must exist in `cs.conf`
+  (provided by `conf/cs.conf`).
+- The rig's prologue must attach addresses to the net before tests
+  run: two-agent rigs (the `test` rig) call `cfg.net_all_assign_ip`
+  after building the veth pair; single-agent rigs attach a loopback
+  subnet.  Unicast env addresses are therefore only reliably reachable
+  on the `test` rig.
+- `/local:/ip4_alien:` must be set to a routable-but-unreachable
+  address (see `cs.conf`); tapi_env uses it for the `alien` address
+  kind.  Without it the alien address binds as 0.0.0.0.
+
+See `ts/env/` for end-to-end examples: `basic.py` (host/pco), `addrs.py`
+(addr/iface kinds), `peer2peer.py` (two-agent TCP and UDP exchange).
 
 ## Extending pyte (the pattern)
 
