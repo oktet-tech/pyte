@@ -64,6 +64,10 @@ def _extract_source(fn) -> tuple[str, str]:
     if fn.__name__ == "<lambda>":
         raise ValueError("remote.call cannot ship a lambda: define a "
                          "named function instead")
+    if inspect.iscoroutinefunction(fn):
+        raise ValueError(
+            f"remote.call cannot ship {fn.__name__}(): async functions "
+            f"are not supported; use a regular function instead")
     if fn.__closure__:
         raise ValueError(
             f"remote.call cannot ship {fn.__name__}(): closure over "
@@ -82,6 +86,11 @@ class RemoteObject:
     Attribute access and calls round-trip to the agent; values come
     back by the marshalling rule (JSON-able -> value, else another
     proxy).  Underscore-prefixed attributes are not proxied.
+
+    Only attribute access and calls are proxied — indexing, len(),
+    iteration, and comparisons are NOT and fail or misbehave
+    engine-side; fetch values and operate locally, or do it inside a
+    shipped function.
     """
 
     def __init__(self, session: "RemotePython", handle: int):
@@ -161,6 +170,10 @@ class RemotePython:
         if isinstance(value, (list, tuple)):
             return [self._encode(v) for v in value]
         if isinstance(value, dict):
+            if REF_KEY in value:
+                raise ValueError(
+                    f"dict contains the reserved key {REF_KEY!r}; "
+                    f"rename the key or ship the dict inside a function")
             return {k: self._encode(v) for k, v in value.items()}
         json.dumps(value)  # raises TypeError if not shippable
         return value
@@ -201,6 +214,10 @@ class RemotePython:
         The function source is extracted with inspect.getsource():
         imports go inside the body, no closures/globals; arguments
         and the result follow the marshalling rule.
+
+        After a per-call timeout the session is out of sync (the late
+        reply is still in flight) and should be abandoned rather than
+        reused.
         """
         src, fname = _extract_source(fn)
         return self._request({"op": "call", "src": src, "fname": fname,

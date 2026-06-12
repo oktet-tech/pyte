@@ -5,6 +5,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,7 +61,7 @@ def test_import_module_returns_proxy():
 def test_proxy_getattr_and_call_roundtrip():
     s = FakeSession()
     obj = remote.RemoteObject(s, 3)
-    _reply_to(s, {"__pyte_ref__": 4})   # getattr -> bound method proxy
+    _reply_to(s, {"__pyte_ref__": 4})   # getattr -> method ref
     _reply_to(s, "[1]")                 # callobj -> value
     assert obj.dumps([1]) == "[1]"
     assert s.sent[0] == {"id": 1, "op": "getattr", "obj": 3,
@@ -138,6 +139,68 @@ def test_value_attribute_roundtrips_immediately():
     _reply_to(s, 3.14159)
     assert obj.pi == 3.14159
     assert s.sent[0]["op"] == "getattr" and s.sent[0]["name"] == "pi"
+
+
+def test_reserved_key_dict_rejected():
+    s = FakeSession()
+    with pytest.raises(ValueError, match="__pyte_ref__"):
+        s.call(outer, {"__pyte_ref__": 1})
+
+
+async def _async_fn():
+    return 42
+
+
+def test_async_function_rejected():
+    s = FakeSession()
+    with pytest.raises(ValueError, match="async"):
+        s.call(_async_fn)
+
+
+# ---------------------------------------------------------------------------
+# _StubFilter: drive the REAL _recv without TE infrastructure
+# ---------------------------------------------------------------------------
+
+class _StubFilter:
+    """Feeds scripted JobMessage-shaped chunks to the real _recv."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def next(self, timeout):
+        data = self._chunks.pop(0)
+        if data is None:
+            return SimpleNamespace(data="", eos=True, dropped=0,
+                                   filter=self)
+        return SimpleNamespace(data=data, eos=False, dropped=0,
+                               filter=self)
+
+
+def test_recv_reassembles_split_line():
+    flt = _StubFilter(['{"id": 1, ', '"ok": true, "value": 7}\n'])
+    s = remote.RemotePython(job=None, flt=flt, timeout=5.0)
+    result = s._recv(5.0)
+    assert result == {"id": 1, "ok": True, "value": 7}
+
+
+def test_recv_two_lines_one_chunk():
+    chunk = ('{"id": 1, "ok": true, "value": 1}\n'
+             '{"id": 2, "ok": true, "value": 2}\n')
+    flt = _StubFilter([chunk])
+    s = remote.RemotePython(job=None, flt=flt, timeout=5.0)
+    first = s._recv(5.0)
+    assert first == {"id": 1, "ok": True, "value": 1}
+    # Second _recv must NOT call the filter again (list is now empty —
+    # popping would raise IndexError, proving the buffer was used).
+    second = s._recv(5.0)
+    assert second == {"id": 2, "ok": True, "value": 2}
+
+
+def test_recv_eos_raises_runner_died():
+    flt = _StubFilter([None])
+    s = remote.RemotePython(job=None, flt=flt, timeout=5.0)
+    with pytest.raises(RemotePythonError, match="died"):
+        s._recv(5.0)
 
 
 class BridgeSession(remote.RemotePython):
