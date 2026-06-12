@@ -44,6 +44,11 @@ _TYPES = {
 # here; rpc_setsockopt_int() derives the level from the option itself.
 _SOCKOPTS = {
     "SO_REUSEADDR": "PYTE_SO_REUSEADDR",
+    # IP_PKTINFO: enable receiving the destination address and incoming
+    # interface index as ancillary data (IPPROTO_IP / IP_PKTINFO cmsg).
+    # rpc_sockopt2level() derives the SOL_IP / IPPROTO_IP level from the
+    # RPC option constant, so no explicit level is needed here.
+    "IP_PKTINFO":   "PYTE_IP_PKTINFO",
 }
 
 

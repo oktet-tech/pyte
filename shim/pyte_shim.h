@@ -94,6 +94,7 @@
     (RPC_S_IRUSR | RPC_S_IWUSR | RPC_S_IRGRP | RPC_S_IROTH)
 /* Socket options for pyte_rpc_setsockopt_int() (rpc_sockopt values) */
 #define PYTE_SO_REUSEADDR RPC_SO_REUSEADDR
+#define PYTE_IP_PKTINFO   RPC_IP_PKTINFO
 
 /* Configurator value-type passthrough */
 #define PYTE_CVT_NONE CVT_NONE
