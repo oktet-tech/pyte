@@ -28,6 +28,7 @@ class Test:
     def __init__(self, params: Params):
         self.params = params
         self._cleanups: list[tuple[Callable, tuple, dict]] = []
+        self._env = None
 
     # -- structure ---------------------------------------------------
     def step(self, text: str) -> None:
@@ -85,6 +86,22 @@ class Test:
                 log.error("cleanup failed:\n" + traceback.format_exc())
                 ok = False
         return ok
+
+    @property
+    def env(self):
+        """The bound tapi_env environment (lazy; needs an env param).
+
+        Bound from the test's ``env`` parameter on first access and
+        freed automatically at test end.
+        """
+        if self._env is None:
+            from pyte.env import Env
+            from pyte.errors import EnvError
+            cfg = self.params.get("env")
+            if cfg is None:
+                raise EnvError("test has no 'env' parameter to bind")
+            self._env = Env.bind(cfg)
+        return self._env
 
 
 def current() -> Test:
@@ -174,5 +191,13 @@ def start(name: str | None = None):
     finally:
         if not t._run_cleanups() and result == 0:
             result = 1
+        if t._env is not None:
+            try:
+                t._env.close()
+            except Exception:
+                log.error("env close failed:\n" + traceback.format_exc())
+                if result == 0:
+                    result = 1
+            t._env = None
         _current = None
     sys.exit(result)

@@ -21,10 +21,11 @@ class RpcServer:
     instead of longjmp'ing like the C TAPI does.
     """
 
-    def __init__(self, handle, ta: str, name: str):
+    def __init__(self, handle, ta: str, name: str, owned: bool = True):
         self._h = handle
         self.ta = ta
         self.name = name
+        self._owned = owned
         self._expected: int | None = None
         self._expected_hit = False
 
@@ -37,6 +38,15 @@ class RpcServer:
         return cls(out[0], ta, name)
 
     def destroy(self) -> None:
+        """Destroy the RPC server.
+
+        Env-provided PCOs are owned by tapi_env (tapi_env_free destroys
+        them); the wrapper must not call pyte_rpc_server_destroy for them.
+        When ``owned=False`` this method returns immediately without
+        touching the shim or clearing the handle.
+        """
+        if not self._owned:
+            return
         from pyte._shim import lib
         if self._h is not None:
             check(lib.pyte_rpc_server_destroy(self._h),

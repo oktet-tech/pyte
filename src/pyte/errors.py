@@ -37,6 +37,23 @@ class TrcError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class EnvError(TeError):
+    """tapi_env binding or lookup failed.
+
+    Message-only when raised for a lookup miss (rc 0), or carries the
+    te_errno of a failed bind (TrcError-style dual path).
+    """
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class RcfError(TeError):
     """RCF request failed."""
 

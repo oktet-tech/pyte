@@ -218,6 +218,26 @@ def agent(name: str) -> CfgNode:
     return CfgNode(f"/agent:{name}")
 
 
+def net_all_assign_ip(af: str = "inet") -> None:
+    """Assign subnets + node addresses to every /net (needs root TAs)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_all_assign_ip(1 if af == "inet6" else 0),
+          f"net_all_assign_ip({af})", CfgError)
+
+
+def net_assign_subnet(net: str, af: str = "inet") -> None:
+    """Attach a /net_pool subnet to /net:{net} without touching nodes.
+
+    Root-free half of net_all_assign_ip(): enough for tapi_env
+    fake/alien address allocation on rigs whose agents cannot add
+    interface addresses.
+    """
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_assign_subnet(_enc(net),
+                                         1 if af == "inet6" else 0),
+          f"net_assign_subnet({net}, {af})", CfgError)
+
+
 class CfgNode:
     """A single configuration instance identified by its OID."""
 

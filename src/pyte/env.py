@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Konstantin Ushakov
+"""tapi_env binding: named PCOs, addresses and interfaces.
+
+Environments are declared in package.xml (the ``env`` parameter, TE's
+DSL) and bound at runtime against the Configurator /net: tree.  Tests
+normally use the lazily bound ``t.env``::
+
+    with test.start() as t:
+        iut = t.env.pco("pco_iut")          # RpcServer (env-owned)
+        tst = t.env.pco("pco_tst")
+        iut_if = t.env.iface("iut_if")      # .name/.index/.agent
+        a = t.env.addr("iut_addr", port=iut)  # Addr with fresh port
+
+Lookups are namespaced per kind (pco/addr/iface/net/host are separate
+tapi_env lists), so a name only has to be unique within its kind;
+'alias'='name' pairs in the env string resolve transparently.
+
+The RpcServer objects returned by pco() are owned by tapi_env (closed
+when the env is freed); close()/destroy() on them is a no-op.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from pyte.errors import EnvError, check
+from pyte.log import _enc
+
+
+def _take_str(out) -> str:
+    """Decode and free a C-allocated char* held in a char** out-param."""
+    from pyte._shim import ffi, lib
+    s = ffi.string(out[0]).decode("utf-8", errors="replace")
+    lib.pyte_free_string(out[0])
+    return s
+
+
+@dataclass(frozen=True)
+class Addr:
+    """A named environment address."""
+    ip: str          # IP text, or MAC text for ether addresses
+    family: str      # "inet" | "inet6" | "ether"
+    port: int        # 0 unless allocated via addr(..., port=pco)
+
+    @property
+    def pair(self) -> tuple[str, int]:
+        """(ip, port) for the pyte.rpc socket API."""
+        return (self.ip, self.port)
+
+
+@dataclass(frozen=True)
+class EnvIface:
+    """A named environment interface."""
+    name: str        # OS interface name
+    index: int       # ifindex
+    agent: str       # TA it lives on
+
+    def cfg_iface(self):
+        """Bridge to a configurator-backed pyte.net.Iface."""
+        import pyte.net
+        return pyte.net.Iface(self.agent, self.name)
+
+
+@dataclass(frozen=True)
+class EnvNet:
+    """Bound subnet information of an environment net."""
+    ip4_subnet: str | None   # "10.38.10.0/24" or None
+    ip6_subnet: str | None
+
+
+class Env:
+    """A bound tapi_env environment; create with Env.bind()."""
+
+    def __init__(self, handle, cfg: str):
+        self._h = handle
+        self._cfg = cfg
+
+    @classmethod
+    def bind(cls, cfg: str) -> "Env":
+        """Parse + bind an environment configuration string."""
+        from pyte._shim import ffi, lib
+        out = ffi.new("tapi_env **")
+        check(lib.pyte_env_new(out), "env new", EnvError)
+        rc = lib.pyte_env_get(_enc(cfg), out[0])
+        if rc != 0:
+            lib.pyte_env_free(out[0])
+            raise EnvError(rc, f"env bind {cfg!r}")
+        return cls(out[0], cfg)
+
+    def close(self) -> None:
+        """Free the environment (closes env-created RPC servers)."""
+        from pyte._shim import lib
+        if self._h is not None:
+            check(lib.pyte_env_free(self._h), "env free", EnvError)
+            self._h = None
+
+    def __enter__(self) -> "Env":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.close()
+        return False
+
+    # -- lookups -------------------------------------------------------
+    def _miss(self, kind: str, name: str, rc: int):
+        """Raise for a failed lookup: friendly ENOENT, else check()."""
+        from pyte._shim import lib
+        if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ENOENT):
+            raise EnvError(f"env has no {kind} {name!r} "
+                           f"(env: {self._cfg})")
+        check(rc, f"env {kind} {name!r}", EnvError)
+
+    def pco(self, name: str):
+        """The named RPC server (created by the env; env-owned)."""
+        from pyte._shim import ffi, lib
+        from pyte.rpc.server import RpcServer
+        out = ffi.new("rcf_rpc_server **")
+        rc = lib.pyte_env_get_pco(self._h, _enc(name), out)
+        if rc != 0:
+            self._miss("pco", name, rc)
+        ta_out = ffi.new("char **")
+        check(lib.pyte_rpc_server_ta_name(out[0], ta_out),
+              f"pco {name!r} ta", EnvError)
+        return RpcServer(out[0], _take_str(ta_out), name, owned=False)
+
+    def addr(self, name: str, port=None) -> Addr:
+        """The named address; port=RpcServer allocates a fresh port."""
+        from pyte._shim import ffi, lib
+        ip_out = ffi.new("char **")
+        fam_out = ffi.new("char **")
+        port_out = ffi.new("int *")
+        rc = lib.pyte_env_get_addr(self._h, _enc(name), ip_out, fam_out,
+                                   port_out)
+        if rc != 0:
+            self._miss("addr", name, rc)
+        p = port_out[0]
+        if port is not None:
+            alloc = ffi.new("unsigned int *")
+            check(lib.pyte_allocate_port(port._h, alloc),
+                  f"allocate_port for {name!r}", EnvError)
+            p = alloc[0]
+        return Addr(ip=_take_str(ip_out), family=_take_str(fam_out),
+                    port=p)
+
+    def iface(self, name: str) -> EnvIface:
+        """The named interface: OS name, ifindex, owning agent."""
+        from pyte._shim import ffi, lib
+        n_out = ffi.new("char **")
+        idx = ffi.new("unsigned int *")
+        rc = lib.pyte_env_get_if(self._h, _enc(name), n_out, idx)
+        if rc != 0:
+            self._miss("interface", name, rc)
+        ta_out = ffi.new("char **")
+        check(lib.pyte_env_get_if_ta(self._h, _enc(name), ta_out),
+              f"env if {name!r} ta", EnvError)
+        return EnvIface(name=_take_str(n_out), index=idx[0],
+                        agent=_take_str(ta_out))
+
+    def host(self, name: str = "") -> str:
+        """TA name of the named host ("" = the unnamed host)."""
+        from pyte._shim import ffi, lib
+        out = ffi.new("char **")
+        rc = lib.pyte_env_get_host_ta(self._h, _enc(name), out)
+        if rc != 0:
+            self._miss("host", name, rc)
+        return _take_str(out)
+
+    def net(self, name: str = "") -> EnvNet:
+        """Bound subnets of the named net ("" = the unnamed net)."""
+        from pyte._shim import ffi, lib
+        subnets = []
+        for v6 in (0, 1):
+            s_out = ffi.new("char **")
+            pfx = ffi.new("unsigned int *")
+            rc = lib.pyte_env_get_net_subnet(self._h, _enc(name), v6,
+                                             s_out, pfx)
+            if rc == 0:
+                subnets.append(f"{_take_str(s_out)}/{pfx[0]}")
+            elif (lib.pyte_rc_error(rc)
+                  == lib.pyte_rc_error(lib.PYTE_ENOENT)):
+                subnets.append(None)
+            else:
+                check(rc, f"env net {name!r}", EnvError)
+        return EnvNet(ip4_subnet=subnets[0], ip6_subnet=subnets[1])
+
+    def __repr__(self) -> str:
+        return f"<Env {self._cfg!r}>"
