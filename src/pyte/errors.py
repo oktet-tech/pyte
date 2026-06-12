@@ -54,6 +54,23 @@ class EnvError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class FioError(TeError):
+    """fio subprocess failed or produced unreadable output.
+
+    Message-only when raised for a failed exit or parse error (no
+    te_errno behind it), like TrcError's string path.
+    """
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):  # non-errno path: plain message
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class RcfError(TeError):
     """RCF request failed."""
 

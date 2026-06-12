@@ -2,9 +2,11 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.fio unit tests.
 
-Pure Python: no shim needed anywhere in fio.py, so these tests run
-without a compiled extension.  Fake pco/job objects are defined inline.
-MI tests reuse the fake-shim pattern from test_mi.py.
+Pure Python: no shim imports anywhere in fio.py.  The FioError
+message-only path (``FioError(str)``) constructs without the shim,
+so error-path tests work without a compiled extension.  Fake pco/job
+objects are defined inline.  MI tests reuse the fake-shim pattern
+from test_mi.py.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from pyte import fio
+from pyte.errors import FioError
 from pyte.fio import (
     Opts,
     Report,
@@ -48,6 +51,26 @@ def test_opts_size_parsing():
     assert fio._parse_size(None) is None
 
 
+def test_parse_size_fractional_rejected():
+    """_parse_size rejects fractional sizes like '1.5g'."""
+    with pytest.raises(ValueError, match="unparsable numeric"):
+        fio._parse_size("1.5g")
+    with pytest.raises(ValueError, match="unparsable numeric"):
+        fio._parse_size("2.0m")
+
+
+def test_parse_size_non_positive_rejected():
+    """_parse_size rejects zero and negative sizes."""
+    with pytest.raises(ValueError, match="positive"):
+        fio._parse_size("-4k")
+    with pytest.raises(ValueError, match="positive"):
+        fio._parse_size("0")
+    with pytest.raises(ValueError, match="positive"):
+        fio._parse_size(0)
+    with pytest.raises(ValueError, match="positive"):
+        fio._parse_size(-1)
+
+
 # ---------------------------------------------------------------------------
 # Test 2: Opts validation
 # ---------------------------------------------------------------------------
@@ -68,6 +91,12 @@ def test_opts_ioengine_validation():
     """Unknown ioengine raises ValueError."""
     with pytest.raises(ValueError, match="unknown ioengine"):
         Opts(filename="/tmp/f", ioengine="notanengine")
+
+
+def test_opts_ioengine_rbd_rejected():
+    """rbd is not an accepted ioengine (its extra options are out of scope)."""
+    with pytest.raises(ValueError, match="unknown ioengine"):
+        Opts(filename="/tmp/f", ioengine="rbd")
 
 
 # ---------------------------------------------------------------------------
@@ -268,25 +297,75 @@ def test_lifecycle_wait_and_close(tmp_path):
 
 
 def test_lifecycle_close_idempotent():
-    """close() is safe to call multiple times."""
-    fake_job = _FakeJob(stdout_text="{}", exit_ok=True)
+    """close() is safe to call multiple times; destroy is called exactly once."""
+    destroy_count = 0
 
+    class _CountingJob(_FakeJob):
+        def destroy(self, timeout: float = 10.0) -> None:
+            nonlocal destroy_count
+            destroy_count += 1
+            super().destroy()
+
+    fake_job = _CountingJob(stdout_text="{}", exit_ok=True)
     f_obj = fio.Fio(fake_job, fake_job.stdout.attach_filter())
     f_obj.close()
     f_obj.close()  # must not raise or double-destroy
-    # destroy called exactly once because close is idempotent
     assert fake_job.destroyed
+    assert destroy_count == 1, f"destroy called {destroy_count} times, expected 1"
 
 
 def test_lifecycle_nonzero_exit_raises():
-    """wait() raises TeError when fio exits with non-zero status."""
-    from pyte.errors import TeError
-
+    """wait() raises FioError (message-only, no shim) when fio exits non-zero."""
     fixture_json = FIXTURE.read_text()
     fake_job = _FakeJob(stdout_text=fixture_json, exit_ok=False)
     fake_pco = _FakePco(fake_job)
     opts = Opts(filename="/tmp/f")
 
-    with pytest.raises(TeError):
+    with pytest.raises(FioError, match="fio exited with"):
         with fio.run(fake_pco, opts) as f:
             f.wait(timeout=10.0)
+
+
+def test_lifecycle_bad_json_raises():
+    """wait() raises FioError (message-only, no shim) on unparsable JSON."""
+    fake_job = _FakeJob(stdout_text="NOT JSON {{{{", exit_ok=True)
+    fake_pco = _FakePco(fake_job)
+    opts = Opts(filename="/tmp/f")
+
+    with pytest.raises(FioError, match="cannot parse fio JSON output"):
+        with fio.run(fake_pco, opts) as f:
+            f.wait(timeout=10.0)
+
+
+def test_setup_failure_destroys_job():
+    """If filter attach raises during setup, job.destroy() is called."""
+    destroy_count = 0
+
+    class _BrokenChannel:
+        def attach_filter(self, **kwargs):
+            raise RuntimeError("filter attach failed")
+
+        def log(self, level=None):
+            pass
+
+    class _BrokenJob(_FakeJob):
+        @property
+        def stdout(self):
+            return _BrokenChannel()
+
+        def destroy(self, timeout: float = 10.0) -> None:
+            nonlocal destroy_count
+            destroy_count += 1
+            super().destroy()
+
+    fake_job = _BrokenJob()
+    fake_pco = _FakePco(fake_job)
+    opts = Opts(filename="/tmp/f")
+
+    with pytest.raises(RuntimeError, match="filter attach failed"):
+        with fio.run(fake_pco, opts):
+            pass  # should not reach here
+
+    assert destroy_count == 1, (
+        f"job.destroy should be called once on setup failure, got {destroy_count}"
+    )

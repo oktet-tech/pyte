@@ -15,7 +15,9 @@ Pinned mappings (derived from te/lib/tapi_fio/fio.c + fio_internal.c)
     --filename=<filename>
     --blocksize=<blocksize>
     --iodepth=<iodepth>
-    --runtime=<N>s  --time_based     (only when runtime > 0; from runtime_argument())
+    --runtime=<N>s  --time_based     (only when runtime > 0; C emits --runtime=0s
+                                     --time_based by default, pyte deliberately
+                                     omits both when runtime <= 0)
     --rwmixread=<rwmixread>
     --output-format=json
     --group_reporting
@@ -31,7 +33,7 @@ Pinned mappings (derived from te/lib/tapi_fio/fio.c + fio_internal.c)
         rwtype "randtrim"  → "randtrim"
         rwtype "trimwrite" → "trimwrite"
     --ioengine=<ioengine>
-        Accepted: sync, psync, vsync, pvsync, pvsync2, libaio, posixaio, rbd
+        Accepted: sync, psync, vsync, pvsync, pvsync2, libaio, posixaio
     --numjobs=<numjobs>
     --thread
     <extra_args>  (raw, space-split, from user_argument() logic)
@@ -60,6 +62,10 @@ Pinned mappings (derived from te/lib/tapi_fio/fio.c + fio_internal.c)
     jobs[0].read.clat_ns.percentile."99.900000"  → read.clatency.percentiles.p99_90
     jobs[0].read.clat_ns.percentile."99.950000"  → read.clatency.percentiles.p99_95
     (same for write.*)
+    Note: TE's C code truncates the percentile key lookup via ``int / 1000``
+    whereas pyte keeps the fraction (deliberate improvement); values may
+    differ from C runs when fio's JSON key layout does not align with an
+    exact integer boundary.
 
 **MI mapping** (from tapi_fio_mi_report, tapi_fio.c:266-283):
 
@@ -98,10 +104,11 @@ if TYPE_CHECKING:
 # Opts
 # ---------------------------------------------------------------------------
 
-#: Valid ioengine names (mirrors tapi_fio_ioengine_mapping in fio_internal.c)
+#: Valid ioengine names (subset of tapi_fio_ioengine_mapping; rbd omitted
+#: because its extra options are out of scope here).
 _VALID_IOENGINES = frozenset({
     "sync", "psync", "vsync", "pvsync", "pvsync2",
-    "libaio", "posixaio", "rbd",
+    "libaio", "posixaio",
 })
 
 #: rwtype → fio --readwrite= value (mirrors tapi_fio_rwtype_mapping)
@@ -125,27 +132,42 @@ def _parse_size(size: str | int | None) -> int | None:
 
     Accepts integers (pass through) or strings with optional suffix:
     k/K → ×1024, m/M → ×1024², g/G → ×1024³.  No suffix means bytes.
-    Raises ValueError on unrecognised suffix.
+    Raises ValueError on unrecognised suffix, on unparsable numeric
+    parts (e.g. "1.5g"), or on non-positive values.
 
     Returns None when size is None (unset).
     """
     if size is None:
         return None
     if isinstance(size, int):
+        if size <= 0:
+            raise ValueError(
+                f"size must be positive, got {size!r}")
         return size
     s = size.strip()
     suffix = s[-1].lower() if s else ""
-    if suffix in ("k",):
-        return int(s[:-1]) * 1024
-    if suffix in ("m",):
-        return int(s[:-1]) * 1024 * 1024
-    if suffix in ("g",):
-        return int(s[:-1]) * 1024 * 1024 * 1024
-    if s.isdigit():
-        return int(s)
-    raise ValueError(
-        f"unrecognised size {size!r}; "
-        "use an integer or a string like '4k', '16m', '1g'")
+    multiplier = 1
+    body = s
+    if suffix in ("k", "m", "g"):
+        body = s[:-1]
+        multiplier = {"k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024}[suffix]
+    elif not s:
+        raise ValueError(
+            f"unrecognised size {size!r}; "
+            "use an integer or a string like '4k', '16m', '1g'")
+    elif not s[-1].isdigit():
+        raise ValueError(
+            f"unrecognised size {size!r}; "
+            "use an integer or a string like '4k', '16m', '1g'")
+    if not body.lstrip("-").isdigit():
+        raise ValueError(
+            f"unparsable numeric in size {size!r}; "
+            "only whole-number sizes are supported (e.g. '4k', '16m', '1g')")
+    result = int(body) * multiplier
+    if result <= 0:
+        raise ValueError(
+            f"size must be positive, got {size!r}")
+    return result
 
 
 @dataclass(frozen=True)
@@ -175,7 +197,8 @@ class Opts:
         Maps to fio's ``--readwrite=`` value via _RWTYPE_MAP.
     ioengine:
         I/O engine; one of: sync, psync, vsync, pvsync, pvsync2,
-        libaio, posixaio, rbd.
+        libaio, posixaio.  (rbd is excluded: its extra options are
+        out of scope.)
     direct:
         Use O_DIRECT (default False).
     size:
@@ -405,27 +428,27 @@ class Fio:
         """Wait for fio to finish, parse JSON, return :class:`Report`.
 
         Caches the report; subsequent calls return the cached value.
-        Raises :exc:`pyte.errors.TeError` on non-zero exit or JSON
+        Raises :exc:`pyte.errors.FioError` on non-zero exit or JSON
         parse failure.
         """
         if self._report is not None:
             return self._report
 
-        from pyte.errors import TeError
+        from pyte.errors import FioError
         from pyte.job import JobStatus
 
         status: JobStatus = self._job.wait(timeout=timeout)
         raw = self._stdout_filter.read_all(timeout=timeout)
 
         if not status.ok:
-            raise TeError(0,
-                          f"fio exited with {status}; stdout={raw[:200]!r}")
+            raise FioError(
+                f"fio exited with {status}; stdout={raw[:200]!r}")
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise TeError(0,
-                          f"fio JSON parse error: {exc}; "
-                          f"stdout={raw[:200]!r}") from exc
+            raise FioError(
+                f"cannot parse fio JSON output: {exc}; "
+                f"stdout={raw[:200]!r}") from exc
         self._report = _parse_report(obj)
         return self._report
 
@@ -486,12 +509,19 @@ def run(pco: "RpcServer", opts: Opts):
             print(rep.read.iops.mean)
     """
     job = pco.job("fio", opts.to_argv())
-    # Attach a readable stdout filter for JSON collection;
-    # stderr goes to the TE log (not readable: mirrors fio_internal.c).
-    stdout_filter = job.stdout.attach_filter(
-        name="fio_stdout", readable=True)
-    job.stderr.log(level="ERROR")
-    job.start()
+    try:
+        # Attach a readable stdout filter for JSON collection.
+        # fio writes the JSON report to stdout; stderr carries human-readable
+        # progress and is forwarded to the TE log unread.  (C's fio_internal.c
+        # reads stderr and logs stdout; pyte inverts this because the JSON
+        # output arrives on stdout, not stderr.)
+        stdout_filter = job.stdout.attach_filter(
+            name="fio_stdout", readable=True)
+        job.stderr.log(level="ERROR")
+        job.start()
+    except Exception:
+        job.destroy()
+        raise
     fio_obj = Fio(job, stdout_filter)
     try:
         yield fio_obj
