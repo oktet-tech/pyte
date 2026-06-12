@@ -1952,15 +1952,27 @@ pyte_free_ints(int *p)
  *              for send: iov_rlen == iov_len; for recv: iov_rlen = buffer
  *              capacity so the RPC layer can fill it.
  *
- * Native cmsg buffer note:
- *   msg_control crosses the RPC boundary as a NATIVE struct cmsghdr buffer.
- *   The internal layer (tapi_rpc_internal.c: msghdr_rpc2tarpc /
- *   msghdr_tarpc2rpc) converts between the native buffer and the TARPC wire
- *   format using msg_control_h2rpc / msg_control_rpc2h.  This conversion
- *   works correctly only when the engine host and the agent share the same
- *   struct cmsghdr ABI — which is guaranteed on our single-machine rigs
- *   (loopback) and on homogeneous clusters.  The shim is therefore correct
- *   to build/parse native buffers with CMSG_SPACE/CMSG_DATA etc.
+ * Ancillary data / cmsg note:
+ *   msg_control does NOT cross the RPC as a raw native cmsghdr buffer.
+ *   The engine-side helpers (lib/rpc_types/sys_socket.c.rpch:
+ *   msg_control_h2rpc / msg_control_rpc2h) decompose each cmsghdr into
+ *   host-independent TARPC records — cmsg_level via socklevel_h2rpc,
+ *   cmsg_type via cmsg_type_h2rpc, data via cmsg_data_h2rpc — and
+ *   reconstruct a native buffer on each side from those records.  No
+ *   shared ABI between engine and agent is required.
+ *
+ *   Caveat: only TE-known socket levels and cmsg types survive the
+ *   round-trip.  Supported levels: SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
+ *   IPPROTO_TCP, IPPROTO_UDP (and their known cmsg types, e.g.
+ *   IP_PKTINFO, IPV6_PKTINFO, SO_TIMESTAMP).  Unknown values map to
+ *   RPC_SOL_UNKNOWN / RPC_SOCKOPT_UNKNOWN and do not survive; the
+ *   corresponding cmsg record is silently dropped on the remote side.
+ *
+ *   On receive: the shim passes a zeroed ctrl buffer (msg_cmsghdr_num=0);
+ *   the RPC layer fills it from the TARPC records returned by the agent,
+ *   rebuilding a native cmsghdr chain.  The shim then parses that chain
+ *   with CMSG_FIRSTHDR / CMSG_NXTHDR.  Only records with TE-known
+ *   level/type are present; all others are absent from the rebuilt chain.
  *
  * RPC_AWAIT_ERROR:
  *   Re-armed before each rpc_* call (TE resets the await flag after every
@@ -2071,9 +2083,12 @@ pyte_rpc_sendmsg_nojmp(rcf_rpc_server *rpcs, int s,
     free(ctrl);
     free(iov);
 
-    if (rc_send < 0)
-        return TE_RC(TE_TAPI, TE_EFAIL);
-
+    /*
+     * Store the raw retval (negative on failure) and return 0 so that
+     * the Python _check_call(rc, sent[0], ok=lambda v: v >= 0) can
+     * surface the remote errno or suppress it under expect_error().
+     * Mirror pyte_rpc_sendto: do NOT convert a failed call to TE_EFAIL.
+     */
     *sent = rc_send;
     return 0;
 }
@@ -2151,8 +2166,9 @@ pyte_rpc_recvmsg_nojmp(rcf_rpc_server *rpcs, int s, size_t bufsize,
         msg.msg_control             = ctrl;
         msg.msg_controllen          = ctrl_space;
         msg.real_msg_controllen     = ctrl_space;
-        /* msg_cmsghdr_num stays 0: filled after the call */
-        /* msg_control_mode stays DEFAULT: raw pass-through on recv */
+        /* msg_cmsghdr_num stays 0: the RPC layer fills it after the call */
+        /* msg_control_mode stays RPC_MSGHDR_FIELD_DEFAULT (0): the RPC
+         * layer rebuilds the returned cmsghdr chain from TARPC records */
     }
 
     msg.msg_flags_mode = RPC_MSG_FLAGS_NO_CHECK;
@@ -2162,9 +2178,27 @@ pyte_rpc_recvmsg_nojmp(rcf_rpc_server *rpcs, int s, size_t bufsize,
 
     if (rc_recv < 0)
     {
+        /*
+         * Store the raw retval and NULL all out-pointers so the Python
+         * facade can safely skip unpacking.  Return 0 so that
+         * _check_call(rc, received[0], ok=lambda v: v >= 0) surfaces the
+         * remote errno or suppresses it under expect_error().
+         * Mirror pyte_rpc_sendto: do NOT convert to TE_EFAIL.
+         */
         free(ctrl);
         free(databuf);
-        return TE_RC(TE_TAPI, TE_EFAIL);
+        *data       = NULL;
+        *data_len   = 0;
+        *from_addr  = NULL;
+        *from_port  = 0;
+        *cmsg_levels = NULL;
+        *cmsg_types  = NULL;
+        *cmsg_datas  = NULL;
+        *cmsg_lens   = NULL;
+        *n_cmsg      = 0;
+        *msg_flags   = 0;
+        *received    = rc_recv;
+        return 0;
     }
 
     /* --- hand off data buffer to caller --- */

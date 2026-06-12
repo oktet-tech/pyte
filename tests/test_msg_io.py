@@ -246,6 +246,15 @@ class FakeLib:
     def pyte_rc_error(self, rc):
         return 0
 
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def te_rc_mod2str(self, rc):
+        return b"TAPI\x00"
+
+    def te_rc_err2str(self, rc):
+        return b"EFAIL\x00"
+
 
 def _install_fake(monkeypatch, lib):
     monkeypatch.setitem(
@@ -255,19 +264,24 @@ def _install_fake(monkeypatch, lib):
 
 
 class FakeServer:
+    """Minimal server stub whose _check_call mirrors the real contract.
+
+    When guard_rc != 0 or ok(retval) is False: raise RpcError (the
+    expect_error() / SUPPRESSED path is not exercised here — tests that
+    need suppression use a subclass or set _expected directly).
+    """
+
     _h = object()
     name = "pco"
-    _expected = None
-    _expected_hit = False
 
     def _check_call(self, guard_rc, retval, ok, where):
-        from pyte.rpc.server import SUPPRESSED
+        from pyte.errors import RpcError
         if guard_rc != 0:
-            from pyte.errors import RpcError
             raise RpcError(guard_rc, where, "")
         if ok(retval):
             return retval
-        return SUPPRESSED
+        # Mirror real _check_call: failed call with no expect_error → raise.
+        raise RpcError(0, f"{where} -> {retval!r}", "remote errno 0")
 
     def __repr__(self):
         return "<FakeServer>"
@@ -331,6 +345,10 @@ def test_recvmsg_basic(monkeypatch):
     lvl, typ, dat = msg.ancillary[0]
     assert (lvl, typ) == (0, 8)
     assert dat == b"pktinfo_bytes"
+    # Memory ownership: pyte_free_cmsgs must be called exactly once with n=1
+    free_calls = [c for c in lib.calls if c[0] == "free_cmsgs"]
+    assert len(free_calls) == 1
+    assert free_calls[0][1] == 1
 
 
 def test_recvmsg_no_cmsg(monkeypatch):
@@ -367,3 +385,66 @@ def test_sendmsg_bad_ancillary_raises(monkeypatch):
     # data not bytes
     with pytest.raises(ValueError, match="ancillary"):
         sock.sendmsg([b"x"], ancillary=[(0, 1, "string")])
+
+
+def test_recvmsg_multi_cmsg(monkeypatch):
+    """recvmsg with two cmsg records returns both triplets in order."""
+    lib = FakeLib()
+    lib._recv_levels = [1, 41]   # SOL_SOCKET=1, IPPROTO_IPV6=41
+    lib._recv_types = [8, 50]    # SO_TIMESTAMP=8, IPV6_PKTINFO=50
+    lib._recv_datas = [b"ts_data", b"v6info"]
+    _install_fake(monkeypatch, lib)
+    sock = RpcSocket(FakeServer(), 7)
+
+    msg = sock.recvmsg(64, ctrl_space=512)
+
+    assert isinstance(msg, RecvMsg)
+    assert len(msg.ancillary) == 2
+    assert msg.ancillary[0] == (1, 8, b"ts_data")
+    assert msg.ancillary[1] == (41, 50, b"v6info")
+    # pyte_free_cmsgs called once with n=2
+    free_calls = [c for c in lib.calls if c[0] == "free_cmsgs"]
+    assert len(free_calls) == 1
+    assert free_calls[0][1] == 2
+
+
+def test_sendmsg_negative_retval_returns_via_check_call(monkeypatch):
+    """sendmsg with retval -1 and guard rc 0 causes RpcError via _check_call.
+
+    The shim now stores the raw retval in *sent and returns 0 (guard_rc=0).
+    _check_call sees retval=-1, ok(retval) is False, and raises RpcError.
+    This verifies the sendto-style passthrough (not TE_EFAIL conversion).
+    """
+    from pyte.errors import RpcError
+
+    class FailLib(FakeLib):
+        def pyte_rpc_sendmsg(self, rpcs, s,
+                             iov_bufs, iov_lens, n_iov,
+                             addr, port,
+                             cmsg_levels, cmsg_types, cmsg_datas, cmsg_lens,
+                             n_cmsg, flags, sent):
+            self.calls.append(("sendmsg", {}))
+            sent[0] = -1   # negative retval, like a failed remote syscall
+            return 0       # guard rc 0: no longjmp, remote errno is in rpcs
+
+    lib = FailLib()
+    _install_fake(monkeypatch, lib)
+    sock = RpcSocket(FakeServer(), 7)
+
+    with pytest.raises(RpcError):
+        sock.sendmsg([b"data"])
+
+
+def test_ancillary_level_type_must_be_int(monkeypatch):
+    """sendmsg raises ValueError when level or type is not an int."""
+    lib = FakeLib()
+    _install_fake(monkeypatch, lib)
+    sock = RpcSocket(FakeServer(), 7)
+
+    # level is a string instead of int
+    with pytest.raises(ValueError, match="level"):
+        sock.sendmsg([b"x"], ancillary=[("IPPROTO_IP", 2, b"\x40")])
+
+    # type is a float instead of int
+    with pytest.raises(ValueError, match="type"):
+        sock.sendmsg([b"x"], ancillary=[(0, 2.0, b"\x40")])

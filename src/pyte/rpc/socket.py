@@ -15,15 +15,18 @@ class RecvMsg:
     """Result of :meth:`RpcSocket.recvmsg`.
 
     ``ancillary`` is a list of ``(level, type, data)`` tuples where
-    ``level`` and ``type`` are native integers (e.g. ``IPPROTO_IP``,
-    ``IP_PKTINFO``) and ``data`` is a :class:`bytes` payload.
+    ``level`` and ``type`` are host-native integers (e.g. ``IPPROTO_IP``,
+    ``IP_PKTINFO``) and ``data`` is a :class:`bytes` payload.  Only
+    TE-known socket levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
+    IPPROTO_TCP, IPPROTO_UDP) and their known cmsg types survive the RPC
+    conversion; unknown level/type values are dropped silently.
     ``addr`` is ``(ip, port)`` when the kernel returned a source name,
     or ``None`` on a connected socket that reported no name.
     """
 
     data: bytes
-    ancillary: list
-    addr: tuple | None
+    ancillary: list[tuple[int, int, bytes]]
+    addr: tuple[str, int] | None
     flags: int
 
 # inet6/local need sockaddr helpers not yet implemented (_mk_addr and
@@ -234,8 +237,12 @@ class RpcSocket:
         :param addr:      ``(ip, port)`` destination, or ``None`` for a
                           connected socket.
         :param ancillary: iterable of ``(level, type, data)`` cmsg triplets
-                          where *level* and *type* are native ints and *data*
-                          is :class:`bytes`.
+                          where *level* and *type* are host-native ints and
+                          *data* is :class:`bytes`.  Only TE-known socket
+                          levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
+                          IPPROTO_TCP, IPPROTO_UDP) and their known cmsg
+                          types are forwarded; unknown values are silently
+                          dropped by the RPC layer.
         :param flags:     send flags (native int).
         :returns:         bytes sent, or ``None`` when error was suppressed.
         """
@@ -247,12 +254,20 @@ class RpcSocket:
                 "sendmsg requires a non-empty list of buffers")
 
         ancillary = list(ancillary)
-        for item in ancillary:
+        for idx, item in enumerate(ancillary):
             if (not isinstance(item, (tuple, list)) or len(item) != 3
                     or not isinstance(item[2], (bytes, bytearray))):
                 raise ValueError(
                     "ancillary items must be (int, int, bytes) triplets; "
                     f"got {item!r}")
+            if not isinstance(item[0], int):
+                raise ValueError(
+                    f"ancillary[{idx}] level must be int, "
+                    f"got {type(item[0]).__name__!r}")
+            if not isinstance(item[1], int):
+                raise ValueError(
+                    f"ancillary[{idx}] type must be int, "
+                    f"got {type(item[1]).__name__!r}")
 
         n_iov = len(buffers)
         # cffi array of pointers to iov data and corresponding lengths
@@ -304,6 +319,11 @@ class RpcSocket:
         :param ctrl_space: bytes reserved for ancillary data (0 = none).
         :param flags:      receive flags (native int).
         :returns:          :class:`RecvMsg` or ``None`` when suppressed.
+
+        Ancillary data level/type values are host-native integers, but only
+        TE-known socket levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
+        IPPROTO_TCP, IPPROTO_UDP) and their known cmsg types survive the
+        RPC conversion; unknown values are dropped silently by the RPC layer.
         """
         from pyte._shim import ffi, lib
 
