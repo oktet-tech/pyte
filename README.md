@@ -18,7 +18,8 @@ sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
 (layer DSL + Csap), `pyte.rcf` (agent inventory/files/restart/
 dynamic TAs), `pyte.remote` (run Python on the agent host),
 `pyte.env` (tapi_env binding — host/PCO/address/interface lookup
-from a named env string).
+from a named env string), `pyte.tester` (runtime requirements and
+TRC tags from the suite prologue).
 
 `pyte.remote` runs arbitrary Python code on the agent host with zero
 installation: `remote.python(pco)` spawns a subprocess via tapi_job
@@ -283,6 +284,23 @@ Infrastructure:
 See `ts/env/` for end-to-end examples: `basic.py` (pco/iface/alias/miss),
 `addrs.py` (loopback/fake/alien + port allocation), `peer2peer.py`
 (TCP and UDP exchange between two agents; ROOT-gated).
+
+## pyte.tester — runtime requirements and TRC tags
+
+`pyte.tester` exposes two functions meant for the suite's root prologue:
+`add_trc_tag(name, value=None)` records a runtime TRC tag (visible in
+`/local:/trc_tags:` and attached to the run's TRC report); TE enforces
+that tags can only be added before the TRC snapshot — calls from tests
+raise `TeError(TE_EPERM)`.  `modify_reqs(expr)` ANDs a requirement
+expression into the Tester's session filter (same syntax as
+`--tester-req`); the Tester applies the new expression when the calling
+prologue exits, so it cannot affect the prologue itself.
+
+A typical use is fio gating: the prologue probes whether fio is
+installed on the agent host, then either records `add_trc_tag("fio")` or
+calls `add_trc_tag("no_fio")` followed by `modify_reqs("!FIO")` so that
+tests carrying `<req id="FIO"/>` are excluded for the rest of the run.
+See `ts/prologue.py` and `ts/tester/` for the full example.
 
 ## Extending pyte (the pattern)
 
