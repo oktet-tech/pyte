@@ -76,66 +76,6 @@ def _extract_source(fn) -> tuple[str, str]:
     return textwrap.dedent(src), fn.__name__
 
 
-class _BoundMethod:
-    """Lazy getattr + call: defers the getattr until __call__ is invoked.
-
-    Attribute access on a RemoteObject (``obj.foo``) returns a
-    _BoundMethod rather than immediately sending a getattr request.
-    Calling it (``obj.foo(args)``) sends the getattr and the callobj
-    using the same request id so that a single id counter slot is
-    consumed for the compound operation.  This keeps the id sequence
-    predictable for unit tests that pre-stage responses.
-    """
-
-    def __init__(self, session: "RemotePython", handle: int, name: str):
-        self._session = session
-        self._handle = handle
-        self._name = name
-
-    def __call__(self, *args, **kwargs):
-        s = self._session
-        # Allocate one id for the whole getattr+callobj round-trip.
-        s._last_id += 1
-        rid = s._last_id
-        # Step 1: resolve the attribute.
-        s._send({"id": rid, "op": "getattr",
-                 "obj": self._handle, "name": self._name})
-        attr_resp = s._recv(s._timeout)
-        if attr_resp.get("id") != rid:
-            raise RemotePythonError(
-                f"protocol error: response id {attr_resp.get('id')!r}, "
-                f"expected {rid}")
-        if not attr_resp["ok"]:
-            raise RemotePythonError(
-                f"remote {attr_resp['type']}: {attr_resp['msg']}\n"
-                f"{attr_resp['traceback']}",
-                remote_traceback=attr_resp["traceback"])
-        attr_obj = s._decode(attr_resp["value"])
-        # Step 2: call the resolved object (same id slot).
-        if isinstance(attr_obj, RemoteObject):
-            call_handle = attr_obj._handle
-        else:
-            # Already a plain value (unusual but possible).
-            return attr_obj
-        s._send({"id": rid, "op": "callobj", "obj": call_handle,
-                 "args": s._encode_args(args),
-                 "kwargs": s._encode_kwargs(kwargs)})
-        call_resp = s._recv(s._timeout)
-        if call_resp.get("id") != rid:
-            raise RemotePythonError(
-                f"protocol error: response id {call_resp.get('id')!r}, "
-                f"expected {rid}")
-        if not call_resp["ok"]:
-            raise RemotePythonError(
-                f"remote {call_resp['type']}: {call_resp['msg']}\n"
-                f"{call_resp['traceback']}",
-                remote_traceback=call_resp["traceback"])
-        return s._decode(call_resp["value"])
-
-    def __repr__(self) -> str:
-        return f"<BoundMethod {self._name} of RemoteObject #{self._handle}>"
-
-
 class RemoteObject:
     """Proxy for an object living in the remote runner.
 
@@ -151,7 +91,8 @@ class RemoteObject:
     def __getattr__(self, name: str):
         if name.startswith("_"):
             raise AttributeError(name)
-        return _BoundMethod(self._session, self._handle, name)
+        return self._session._request(
+            {"op": "getattr", "obj": self._handle, "name": name})
 
     def __call__(self, *args, **kwargs):
         s = self._session

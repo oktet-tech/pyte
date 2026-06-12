@@ -32,7 +32,8 @@ class FakeSession(remote.RemotePython):
 
 def _reply_to(session, value):
     session.replies.append(
-        {"id": session._last_id + 1, "ok": True, "value": value})
+        {"id": session._last_id + len(session.replies) + 1,
+         "ok": True, "value": value})
 
 
 def outer(a):
@@ -64,6 +65,7 @@ def test_proxy_getattr_and_call_roundtrip():
     assert obj.dumps([1]) == "[1]"
     assert s.sent[0] == {"id": 1, "op": "getattr", "obj": 3,
                          "name": "dumps"}
+    assert s.sent[1]["id"] == 2
     assert s.sent[1]["op"] == "callobj" and s.sent[1]["obj"] == 4
     assert s.sent[1]["args"] == [[1]]
 
@@ -128,6 +130,14 @@ def test_underscore_attrs_not_proxied():
     with pytest.raises(AttributeError):
         obj._private
     assert s.sent == []
+
+
+def test_value_attribute_roundtrips_immediately():
+    s = FakeSession()
+    obj = remote.RemoteObject(s, 3)
+    _reply_to(s, 3.14159)
+    assert obj.pi == 3.14159
+    assert s.sent[0]["op"] == "getattr" and s.sent[0]["name"] == "pi"
 
 
 class BridgeSession(remote.RemotePython):
