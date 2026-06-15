@@ -25,6 +25,11 @@ class FakeLib:
     PYTE_MI_MEAS_LATENCY    = 2
     PYTE_MI_MEAS_THROUGHPUT = 3
     PYTE_MI_MEAS_IOPS       = 12
+    # Perf-tool meas types (mirror PYTE_MI_MEAS_* numeric values in shim)
+    PYTE_MI_MEAS_PERCENTAGE = 14
+    PYTE_MI_MEAS_RPS        = 7
+    PYTE_MI_MEAS_RTT        = 8
+    PYTE_MI_MEAS_RETRANS    = 9
 
     # Aggr constants (mirror PYTE_MI_AGGR_*)
     PYTE_MI_AGGR_SINGLE     = 1
@@ -164,3 +169,23 @@ def test_add_after_close_raises_runtime_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match="closed"):
         logger.add("latency", "x", "mean", 1.0)
+
+
+def test_perf_meas_types_resolve(monkeypatch):
+    """retrans / rtt / percentage / rps map to their shim int constants."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    # (type_name, aggr, expected shim int) — aggr names must be valid
+    cases = [
+        ("retrans",    "single", lib.PYTE_MI_MEAS_RETRANS),
+        ("rtt",        "mean",   lib.PYTE_MI_MEAS_RTT),
+        ("percentage", "single", lib.PYTE_MI_MEAS_PERCENTAGE),
+        ("rps",        "mean",   lib.PYTE_MI_MEAS_RPS),
+    ]
+    with mi.Logger("perf") as logger:
+        for type_name, aggr, _ in cases:
+            logger.add(type_name, f"{type_name}-x", aggr, 1.0)
+
+    add_calls = [c for c in lib.calls if c[0] == "add"]
+    assert [c[1] for c in add_calls] == [expected for _, _, expected in cases]

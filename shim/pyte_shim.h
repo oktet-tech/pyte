@@ -591,6 +591,10 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_MEAS_LATENCY    TE_MI_MEAS_LATENCY
 #define PYTE_MI_MEAS_THROUGHPUT TE_MI_MEAS_THROUGHPUT
 #define PYTE_MI_MEAS_IOPS       TE_MI_MEAS_IOPS
+#define PYTE_MI_MEAS_RTT        TE_MI_MEAS_RTT
+#define PYTE_MI_MEAS_RETRANS    TE_MI_MEAS_RETRANS
+#define PYTE_MI_MEAS_RPS        TE_MI_MEAS_RPS
+#define PYTE_MI_MEAS_PERCENTAGE TE_MI_MEAS_PERCENTAGE
 
 /*
  * Aggr constants (SINGLE through PERCENTILE, covering all fio aggrs plus

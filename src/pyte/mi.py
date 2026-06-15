@@ -24,8 +24,8 @@ Names are resolved lazily from shim constants (same pattern as
 populated on first use; unit tests that inject a fake shim just need to
 define the matching ``PYTE_MI_*`` attributes.
 
-Measurement types exposed (covering what fio's MI report needs):
-    latency, throughput, iops
+Measurement types exposed:
+    latency, throughput, iops, rtt, retrans, rps, percentage
 
 Aggregation types:
     single, min, max, mean, stdev, percentile
@@ -46,6 +46,10 @@ _TYPE_CONSTS: dict[str, str] = {
     "latency":    "PYTE_MI_MEAS_LATENCY",
     "throughput": "PYTE_MI_MEAS_THROUGHPUT",
     "iops":       "PYTE_MI_MEAS_IOPS",
+    "rtt":        "PYTE_MI_MEAS_RTT",
+    "retrans":    "PYTE_MI_MEAS_RETRANS",
+    "rps":        "PYTE_MI_MEAS_RPS",
+    "percentage": "PYTE_MI_MEAS_PERCENTAGE",
 }
 
 #: aggr name → PYTE_MI_AGGR_* shim constant name
