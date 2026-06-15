@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""pyte.fio — run fio from Python tests via pyte.job.
+"""pyte.tools.fio — run fio from Python tests via pyte.job.
 
 Pure Python over pyte.job's public API; zero shim imports.
 fio is resolved from the agent's PATH (the job program is ``"fio"``).

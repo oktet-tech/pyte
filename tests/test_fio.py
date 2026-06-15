@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""pyte.fio unit tests.
+"""pyte.tools.fio unit tests.
 
 Pure Python: no shim imports anywhere in fio.py.  The FioError
 message-only path (``FioError(str)``) constructs without the shim,
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from pyte import fio
 from pyte.errors import FioError
-from pyte.fio import (
+from pyte.tools import fio
+from pyte.tools.fio import (
     Opts,
     Report,
     _parse_report,

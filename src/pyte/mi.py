@@ -14,7 +14,7 @@ the MI JSON artifact that TE's Logger emits.  ``destroy`` (called on CM exit
 or explicit ``close()``) flushes the artifact; no MI data is emitted if no
 measurements were added.
 
-Design: thin and generic — pyte.fio (and future perf tools) consume it from
+Design: thin and generic — pyte.tools.fio (and future perf tools) consume it from
 pure Python without any tapi_fio linkage.
 
 Friendly-name maps

@@ -20,7 +20,7 @@ sysctl), `pyte.job` (Job/Channel/Filter), `pyte.tad`
 dynamic TAs), `pyte.remote` (run Python on the agent host),
 `pyte.env` (tapi_env binding — host/PCO/address/interface lookup
 from a named env string), `pyte.tester` (runtime requirements and
-TRC tags from the suite prologue), `pyte.fio` (pure-Python fio
+TRC tags from the suite prologue), `pyte.tools.fio` (pure-Python fio
 runner over pyte.job; gated by FIO req/prologue probe), `pyte.mi`
 (thin te_mi measurement-logger wrapper).
 
@@ -371,9 +371,9 @@ calls `add_trc_tag("no_fio")` followed by `modify_reqs("!FIO")` so that
 tests carrying `<req id="FIO"/>` are excluded for the rest of the run.
 See `ts/prologue.py` and `ts/tester/` for the full example.
 
-## pyte.fio — run fio from Python tests
+## pyte.tools.fio — run fio from Python tests
 
-`pyte.fio` is **pure Python** over `pyte.job`: it builds fio's argv,
+`pyte.tools.fio` is **pure Python** over `pyte.job`: it builds fio's argv,
 drives the job, parses the JSON report, and emits MI measurements —
 with zero shim imports and no `tapi_fio` linkage.  fio is resolved
 from the **agent's PATH** (the job program is the string `"fio"`).
@@ -385,7 +385,7 @@ filter.  Diagnostic warnings that fio may print to stdout before the
 JSON object (e.g. iodepth-capped notices) are stripped automatically.
 
 ```python
-from pyte import fio
+from pyte.tools import fio
 
 opts = fio.Opts(
     filename="/tmp/pyte_fio.dat",
@@ -420,7 +420,7 @@ mean), read/write IOPS (plain, mean) and read/write clat 99th
 percentile (µs, percentile aggr).
 
 Argv mapping mirrors `tapi_fio`'s `fio_binds` order; the docstring in
-`lib/pyte/src/pyte/fio.py` is the authoritative reference.
+`lib/pyte/src/pyte/tools/fio.py` is the authoritative reference.
 
 See `ts/fio/randrw.py` for the showcase test.
 

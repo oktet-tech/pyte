@@ -4,6 +4,6 @@ from setuptools import setup
 
 setup(
     package_dir={"": "src"},
-    packages=["pyte", "pyte.rpc", "pyte.tad"],
+    packages=["pyte", "pyte.rpc", "pyte.tad", "pyte.tools"],
     cffi_modules=["build_shim.py:ffibuilder"],
 )
