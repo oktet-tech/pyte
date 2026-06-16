@@ -37,6 +37,7 @@ class FakeLib:
     PYTE_MI_AGGR_MAX        = 4
     PYTE_MI_AGGR_MEAN       = 5
     PYTE_MI_AGGR_STDEV      = 8
+    PYTE_MI_AGGR_MEDIAN     = 6
     PYTE_MI_AGGR_PERCENTILE = 10
 
     # Multiplier constants (mirror PYTE_MI_MULT_*)
@@ -44,6 +45,7 @@ class FakeLib:
     PYTE_MI_MULT_MICRO = 1
     PYTE_MI_MULT_MILLI = 2
     PYTE_MI_MULT_PLAIN = 3
+    PYTE_MI_MULT_MEGA  = 6
     PYTE_MI_MULT_MEBI  = 7
 
     PYTE_ETIMEDOUT = 110
@@ -189,3 +191,17 @@ def test_perf_meas_types_resolve(monkeypatch):
 
     add_calls = [c for c in lib.calls if c[0] == "add"]
     assert [c[1] for c in add_calls] == [expected for _, _, expected in cases]
+
+
+def test_median_aggr_and_mega_mult_resolve(monkeypatch):
+    """median aggregation and mega multiplier map to their shim constants."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("perf") as logger:
+        logger.add("throughput", "x", "median", 1.0, "mega")
+
+    add = [c for c in lib.calls if c[0] == "add"][0]
+    # add tuple: ("add", typ, name, aggr, val, mult)
+    assert add[3] == lib.PYTE_MI_AGGR_MEDIAN
+    assert add[5] == lib.PYTE_MI_MULT_MEGA

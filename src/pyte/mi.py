@@ -28,10 +28,10 @@ Measurement types exposed:
     latency, throughput, iops, rtt, retrans, rps, percentage
 
 Aggregation types:
-    single, min, max, mean, stdev, percentile
+    single, min, max, mean, stdev, median, percentile
 
 Multipliers:
-    nano, micro, milli, plain, mebi
+    nano, micro, milli, plain, mega, mebi
 """
 from __future__ import annotations
 
@@ -59,6 +59,7 @@ _AGGR_CONSTS: dict[str, str] = {
     "max":        "PYTE_MI_AGGR_MAX",
     "mean":       "PYTE_MI_AGGR_MEAN",
     "stdev":      "PYTE_MI_AGGR_STDEV",
+    "median":     "PYTE_MI_AGGR_MEDIAN",
     "percentile": "PYTE_MI_AGGR_PERCENTILE",
 }
 
@@ -68,6 +69,7 @@ _MULT_CONSTS: dict[str, str] = {
     "micro": "PYTE_MI_MULT_MICRO",
     "milli": "PYTE_MI_MULT_MILLI",
     "plain": "PYTE_MI_MULT_PLAIN",
+    "mega":  "PYTE_MI_MULT_MEGA",
     "mebi":  "PYTE_MI_MULT_MEBI",
 }
 

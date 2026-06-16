@@ -606,6 +606,7 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_AGGR_MEAN       TE_MI_MEAS_AGGR_MEAN
 #define PYTE_MI_AGGR_STDEV      TE_MI_MEAS_AGGR_STDEV
 #define PYTE_MI_AGGR_PERCENTILE TE_MI_MEAS_AGGR_PERCENTILE
+#define PYTE_MI_AGGR_MEDIAN     TE_MI_MEAS_AGGR_MEDIAN
 
 /*
  * Multiplier constants (NANO for nanosecond latencies; MICRO for fio clat
@@ -617,6 +618,7 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_MULT_MILLI TE_MI_MEAS_MULTIPLIER_MILLI
 #define PYTE_MI_MULT_PLAIN TE_MI_MEAS_MULTIPLIER_PLAIN
 #define PYTE_MI_MULT_MEBI  TE_MI_MEAS_MULTIPLIER_MEBI
+#define PYTE_MI_MULT_MEGA  TE_MI_MEAS_MULTIPLIER_MEGA
 
 /**
  * Create a te_mi measurements logger for the named tool.
