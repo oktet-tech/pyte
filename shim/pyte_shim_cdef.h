@@ -6,6 +6,8 @@ void pyte_log_init(const char *entity);
 void pyte_log(unsigned int level, const char *user, const char *text);
 void pyte_step(const char *text);
 void pyte_substep(const char *text);
+void pyte_step_push(const char *text);
+void pyte_step_pop(const char *text);
 void pyte_verdict(unsigned int level, const char *text);
 void pyte_artifact(unsigned int level, const char *text);
 unsigned int pyte_rc_module(unsigned int rc);

@@ -273,13 +273,25 @@ def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
     Zero install on the agent: only ``interpreter`` (python3) with the
     stdlib is required there; the runner ships in argv.
     """
-    with pco.job(interpreter, ["-u", "-c", _runner_source()]) as job:
-        _ = job.stdin                     # MUST allocate before start()
-        flt = job.stdout.attach_filter(name="pyte-remote")
-        job.stderr.log()
-        job.start()
-        session = RemotePython(job, flt, timeout, server=pco._h)
-        try:
-            yield session
-        finally:
-            session._shutdown()
+    from pyte import log
+    # Group the (verbose) interpreter+channel setup under one readable,
+    # collapsed-by-default header instead of dumping job_create (which
+    # carries the whole runner source) and the channel RPCs at top level.
+    log.step_push(f"start remote python interpreter on {pco.ta}")
+    popped = False
+    try:
+        with pco.job(interpreter, ["-u", "-c", _runner_source()]) as job:
+            _ = job.stdin                 # MUST allocate before start()
+            flt = job.stdout.attach_filter(name="pyte-remote")
+            job.stderr.log()
+            job.start()
+            log.step_pop(f"remote python ready on {pco.ta}")
+            popped = True
+            session = RemotePython(job, flt, timeout, server=pco._h)
+            try:
+                yield session
+            finally:
+                session._shutdown()
+    finally:
+        if not popped:
+            log.step_pop("")

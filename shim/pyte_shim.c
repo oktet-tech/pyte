@@ -40,6 +40,23 @@ pyte_substep(const char *text)
 }
 
 void
+pyte_step_push(const char *text)
+{
+    /* Log the message, then nest subsequent messages one level deeper.
+     * INFO level: the nested block is collapsed by default in the HTML
+     * log (expandable), keeping verbose detail (e.g. session setup)
+     * out of the way. */
+    LGR_MESSAGE(TE_LL_CONTROL | TE_LL_INFO, TE_USER_STEP_PUSH, "%s", text);
+}
+
+void
+pyte_step_pop(const char *text)
+{
+    /* Decrement the nesting level and log the (optional) message. */
+    LGR_MESSAGE(TE_LL_CONTROL | TE_LL_INFO, TE_USER_STEP_POP, "%s", text);
+}
+
+void
 pyte_verdict(unsigned int level, const char *text)
 {
     te_test_verdict("pyte", 0, level, "%s", text);

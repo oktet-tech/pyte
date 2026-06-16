@@ -41,6 +41,22 @@ def verb(text: str, user: str = "Self") -> None:
     _emit("VERB", user, text)
 
 
+def step_push(text: str) -> None:
+    """Log ``text`` then nest following messages one level deeper.
+
+    The nested block is collapsed by default in the HTML log (INFO
+    level); pair with step_pop().
+    """
+    from pyte._shim import lib
+    lib.pyte_step_push(_enc(text))
+
+
+def step_pop(text: str = "") -> None:
+    """Decrement the nesting level (close a step_push); log ``text``."""
+    from pyte._shim import lib
+    lib.pyte_step_pop(_enc(text))
+
+
 class TeLogHandler(logging.Handler):
     """Routes stdlib logging records into the TE Logger."""
 
