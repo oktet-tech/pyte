@@ -37,6 +37,10 @@ def info(text: str, user: str = "Self") -> None:
     _emit("INFO", user, text)
 
 
+def verb(text: str, user: str = "Self") -> None:
+    _emit("VERB", user, text)
+
+
 class TeLogHandler(logging.Handler):
     """Routes stdlib logging records into the TE Logger."""
 

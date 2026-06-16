@@ -117,16 +117,26 @@ class RemotePython:
     """A live remote Python session; create with remote.python()."""
 
     def __init__(self, job: "Job | None", flt: "Filter | None",
-                 timeout: float):
+                 timeout: float, server=None):
         self._job = job
         self._flt = flt
         self._timeout = timeout
         self._last_id = 0
         self._buf = ""
+        # rcf_rpc_server* handle (pyte.RpcServer._h); None for test fakes.
+        self._server = server
+
+    def _silence_next(self) -> None:
+        """Suppress the next transport RPC's log on success."""
+        if self._server is None:
+            return
+        from pyte._shim import lib
+        lib.pyte_rpc_silent_pass(self._server)
 
     # -- transport (overridden by unit-test fakes) ----------------------
     def _send(self, req: dict) -> None:
         assert self._job is not None
+        self._silence_next()
         self._job.stdin.send(json.dumps(req) + "\n")
 
     def _recv(self, timeout: float) -> dict:
@@ -146,6 +156,7 @@ class RemotePython:
                     return json.loads(line)
                 continue
             remaining = max(deadline - time.monotonic(), 0.001)
+            self._silence_next()
             msg = self._flt.next(timeout=remaining)  # raises TimeoutError
             if msg.eos:
                 raise RemotePythonError(
@@ -254,7 +265,7 @@ def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
         flt = job.stdout.attach_filter(name="pyte-remote")
         job.stderr.log()
         job.start()
-        session = RemotePython(job, flt, timeout)
+        session = RemotePython(job, flt, timeout, server=pco._h)
         try:
             yield session
         finally:

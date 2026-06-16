@@ -86,6 +86,14 @@ pyte_rpc_server_destroy(rcf_rpc_server *rpcs)
     return rcf_rpc_server_destroy(rpcs);
 }
 
+void
+pyte_rpc_silent_pass(rcf_rpc_server *rpcs)
+{
+    /* One-shot: TE clears it after the next RPC. Suppresses that
+     * call's log on success but still logs an error. */
+    rpcs->silent_pass = true;
+}
+
 int
 pyte_rpc_errno(rcf_rpc_server *rpcs)
 {
