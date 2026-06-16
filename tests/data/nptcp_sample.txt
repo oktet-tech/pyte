@@ -1,0 +1,6 @@
+Send and receive buffers are 16384 and 87380 bytes
+Now starting the main loop
+  0:       1 bytes  23259 times -->      0.18 Mbps in      42.30 usec
+  1:       2 bytes  23644 times -->      0.36 Mbps in      42.14 usec
+  2:       3 bytes  22912 times -->      0.54 Mbps in      42.20 usec
+  3:    8192 bytes   4034 times -->   1175.42 Mbps in     53.17 usec
