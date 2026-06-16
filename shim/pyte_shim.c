@@ -87,11 +87,13 @@ pyte_rpc_server_destroy(rcf_rpc_server *rpcs)
 }
 
 void
-pyte_rpc_silent_pass(rcf_rpc_server *rpcs)
+pyte_rpc_set_silent(rcf_rpc_server *rpcs, int on)
 {
-    /* One-shot: TE clears it after the next RPC. Suppresses that
-     * call's log on success but still logs an error. */
-    rpcs->silent_pass = true;
+    /* TAPI_RPC_LOG suppresses a call's log when rpcs->silent is set.
+     * (silent_pass does NOT work for tapi_job: tapi_job_send/receive
+     * overwrite rpcs->silent_pass with the channel's value.)  Caller
+     * sets it before a transport RPC and clears it right after. */
+    rpcs->silent = on ? true : false;
 }
 
 int

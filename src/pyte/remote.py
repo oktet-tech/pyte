@@ -126,18 +126,28 @@ class RemotePython:
         # rcf_rpc_server* handle (pyte.RpcServer._h); None for test fakes.
         self._server = server
 
-    def _silence_next(self) -> None:
-        """Suppress the next transport RPC's log on success."""
+    def _set_silent(self, on: bool) -> None:
+        """Quiet (on) / restore (off) RPC logging for the transport.
+
+        Uses rpcs->silent: tapi_job overwrites rpcs->silent_pass with
+        the channel's value, so only plain ``silent`` actually quiets
+        job_send/job_receive. Set it before the transport RPC and clear
+        it right after, so other calls on the shared server (e.g. the
+        talib nvme_passthru) keep logging.
+        """
         if self._server is None:
             return
         from pyte._shim import lib
-        lib.pyte_rpc_silent_pass(self._server)
+        lib.pyte_rpc_set_silent(self._server, 1 if on else 0)
 
     # -- transport (overridden by unit-test fakes) ----------------------
     def _send(self, req: dict) -> None:
         assert self._job is not None
-        self._silence_next()
-        self._job.stdin.send(json.dumps(req) + "\n")
+        self._set_silent(True)
+        try:
+            self._job.stdin.send(json.dumps(req) + "\n")
+        finally:
+            self._set_silent(False)
 
     def _recv(self, timeout: float) -> dict:
         """Read one response line from the stdout filter.
@@ -156,8 +166,11 @@ class RemotePython:
                     return json.loads(line)
                 continue
             remaining = max(deadline - time.monotonic(), 0.001)
-            self._silence_next()
-            msg = self._flt.next(timeout=remaining)  # raises TimeoutError
+            self._set_silent(True)
+            try:
+                msg = self._flt.next(timeout=remaining)  # raises TimeoutError
+            finally:
+                self._set_silent(False)
             if msg.eos:
                 raise RemotePythonError(
                     "remote python runner died "
