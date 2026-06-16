@@ -1,0 +1,13 @@
+Settings for enp0s1:
+	Supported ports: [  ]
+	Supported link modes:   Not reported
+	Supports auto-negotiation: No
+	Advertised link modes:  Not reported
+	Advertised auto-negotiation: No
+	Speed: Unknown!
+	Duplex: Unknown! (255)
+	Auto-negotiation: off
+	Port: Other
+	PHYAD: 0
+	Transceiver: internal
+	Link detected: yes

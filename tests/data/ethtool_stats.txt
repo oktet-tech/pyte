@@ -1,0 +1,5 @@
+NIC statistics:
+     rx_drops: 0
+     rx_kicks: 525
+     tx_kicks: 13143378
+     tx_tx_timeouts: 0

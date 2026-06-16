@@ -1,0 +1,17 @@
+Ring parameters for enp0s1:
+Pre-set maximums:
+RX:			4096
+RX Mini:		n/a
+RX Jumbo:		n/a
+TX:			4096
+TX push buff len:	n/a
+HDS thresh:		n/a
+Current hardware settings:
+RX:			256
+RX Mini:		n/a
+RX Jumbo:		n/a
+TX:			512
+RX Buf Len:		n/a
+CQE Size:		n/a
+TX Push:		off
+HDS thresh:		n/a
