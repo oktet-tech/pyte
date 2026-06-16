@@ -110,6 +110,19 @@ class WrkError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class NetperfError(TeError):
+    """Raised when netperf/netserver fails or its output cannot be parsed."""
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class RcfError(TeError):
     """RCF request failed."""
 
