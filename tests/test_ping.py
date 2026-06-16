@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from pyte.errors import PingError
-from pyte.tools import ping
-from pyte.tools.ping import Opts, Report, _parse_report
+from pyte.tools import ping  # noqa: F401  (import-smoke check)
+from pyte.tools.ping import Opts, _parse_report
 
 DATA = Path(__file__).parent / "data"
 

@@ -84,6 +84,19 @@ class PingError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class IperfError(TeError):
+    """Raised when iperf/iperf3 fails or its output cannot be parsed."""
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):  # non-errno path: plain message
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class RcfError(TeError):
     """RCF request failed."""
 

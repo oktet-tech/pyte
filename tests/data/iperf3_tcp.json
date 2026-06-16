@@ -1,0 +1,14 @@
+{
+  "start": { "connected": [ { "socket": 5 } ], "test_start": { "protocol": "TCP", "num_streams": 2 } },
+  "intervals": [],
+  "end": {
+    "streams": [
+      { "sender":   { "socket": 5, "bits_per_second": 4600000000.0, "bytes": 5750000000, "seconds": 10.0, "retransmits": 7 },
+        "receiver": { "socket": 5, "bits_per_second": 4580000000.0, "bytes": 5725000000, "seconds": 10.0 } },
+      { "sender":   { "socket": 7, "bits_per_second": 4800000000.0, "bytes": 6000000000, "seconds": 10.0, "retransmits": 5 },
+        "receiver": { "socket": 7, "bits_per_second": 4790000000.0, "bytes": 5987000000, "seconds": 10.0 } }
+    ],
+    "sum_sent":     { "start": 0, "end": 10.0, "seconds": 10.0, "bytes": 11750000000, "bits_per_second": 9400000000.0, "retransmits": 12 },
+    "sum_received": { "start": 0, "end": 10.0, "seconds": 10.0, "bytes": 11712000000, "bits_per_second": 9370000000.0 }
+  }
+}
