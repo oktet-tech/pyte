@@ -8,5 +8,8 @@ agent-local via :mod:`pyte.remote`; pyte owns all TE logging. Engine-side
 option/stream/stats types are pure dataclasses (no shim imports).
 """
 from pyte.tools.trex._config import ServerOpts
+from pyte.tools.trex._stream import (PktBuilder, Stream, TXCont,
+                                     TXMultiBurst, TXSingleBurst)
 
-__all__ = ["ServerOpts"]
+__all__ = ["ServerOpts", "PktBuilder", "Stream", "TXCont", "TXSingleBurst",
+           "TXMultiBurst"]
