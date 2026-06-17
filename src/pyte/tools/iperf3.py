@@ -222,9 +222,10 @@ class Iperf3:
     Created via :func:`run`. The JSON report arrives on stdout (``-J``).
     """
 
-    def __init__(self, job, stdout_filter):
+    def __init__(self, job, stdout_filter, stderr_filter):
         self._job = job
         self._stdout_filter = stdout_filter
+        self._stderr_filter = stderr_filter
         self._report: Report | None = None
         self._closed = False
 
@@ -233,14 +234,24 @@ class Iperf3:
 
         Caches the report. Raises :exc:`pyte.errors.IperfError` on a
         non-zero exit or unparseable output.
+
+        The full stdout and stderr are dumped to the TE log (RING) before
+        parsing, mirroring the C tapi_performance perf_app_dump_output().
         """
         if self._report is not None:
             return self._report
 
+        from pyte import log
         from pyte.errors import IperfError
 
         status = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
+        out = self._stdout_filter.read_all(timeout=timeout)
+        err = self._stderr_filter.read_all(timeout=timeout)
+        # Mirror perf_app_dump_output(): RING the full stdout/stderr with the
+        # same "<bench> <tag> stdout|stderr:\n<...>" labelling the C uses.
+        log.ring(f"iperf3 client stdout:\n{out}")
+        log.ring(f"iperf3 client stderr:\n{err}")
+        raw = out
         json_start = raw.find("{")
         if json_start > 0:
             raw = raw[json_start:]
@@ -316,16 +327,17 @@ def run(pco: "RpcServer", opts: Opts):
     """Context manager: run an iperf3 *client*; yield an :class:`Iperf3`."""
     job = pco.job("iperf3", opts.client_argv())
     try:
-        # readable=True feeds the JSON parser; log_level also dumps the raw
-        # -J output to the TE log (visible in Bublik) for diagnostics.
+        # Capture stdout (the -J JSON, fed to the parser) and stderr; both are
+        # dumped to the TE log by wait() to mirror perf_app_dump_output().
         stdout_filter = job.stdout.attach_filter(
-            name="iperf3_stdout", readable=True, log_level="RING")
-        job.stderr.log(level="WARN")
+            name="iperf3_stdout", readable=True)
+        stderr_filter = job.stderr.attach_filter(
+            name="iperf3_stderr", readable=True)
         job.start()
     except Exception:
         job.destroy()
         raise
-    client = Iperf3(job, stdout_filter)
+    client = Iperf3(job, stdout_filter, stderr_filter)
     try:
         yield client
     finally:
