@@ -294,4 +294,4 @@ def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
                 session._shutdown()
     finally:
         if not popped:
-            log.step_pop("")
+            log.step_pop(f"remote python setup failed on {pco.ta}")
