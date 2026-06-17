@@ -1,0 +1,11 @@
+{
+  "0": {"opackets": 1000, "ipackets": 998, "obytes": 64000,
+        "ibytes": 63872, "tx_pps": 500.0, "rx_pps": 499.0,
+        "tx_bps": 256000.0, "rx_bps": 255488.0},
+  "1": {"opackets": 998, "ipackets": 1000, "obytes": 63872,
+        "ibytes": 64000, "tx_pps": 499.0, "rx_pps": 500.0,
+        "tx_bps": 255488.0, "rx_bps": 256000.0},
+  "global": {"tx_bps": 511488.0, "rx_bps": 511488.0, "tx_pps": 999.0,
+             "rx_pps": 999.0, "cpu_util": 12.5, "queue_full": 3},
+  "total": {"opackets": 1998, "ipackets": 1998}
+}

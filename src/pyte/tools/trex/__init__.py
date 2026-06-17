@@ -10,6 +10,7 @@ option/stream/stats types are pure dataclasses (no shim imports).
 from pyte.tools.trex._config import ServerOpts
 from pyte.tools.trex._stream import (PktBuilder, Stream, TXCont,
                                      TXMultiBurst, TXSingleBurst)
+from pyte.tools.trex._stats import GlobalStats, LatencyStats, PortStats
 
 __all__ = ["ServerOpts", "PktBuilder", "Stream", "TXCont", "TXSingleBurst",
-           "TXMultiBurst"]
+           "TXMultiBurst", "PortStats", "GlobalStats", "LatencyStats"]

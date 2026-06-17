@@ -1,0 +1,12 @@
+{
+  "flow_stats": {
+    "7": {"tx_pkts": {"total": 1000}, "rx_pkts": {"total": 998}}
+  },
+  "latency": {
+    "7": {
+      "latency": {"average": 35.2, "total_min": 20.0, "total_max": 80.0,
+                  "jitter": 4.1},
+      "err_cntrs": {"dropped": 2, "out_of_order": 1, "dup": 0}
+    }
+  }
+}
