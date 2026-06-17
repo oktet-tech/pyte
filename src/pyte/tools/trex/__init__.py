@@ -14,3 +14,7 @@ from pyte.tools.trex._stats import GlobalStats, LatencyStats, PortStats
 
 __all__ = ["ServerOpts", "PktBuilder", "Stream", "TXCont", "TXSingleBurst",
            "TXMultiBurst", "PortStats", "GlobalStats", "LatencyStats"]
+
+from pyte.tools.trex import stl  # noqa: E402,F401  (submodule re-export)
+
+__all__ += ["stl"]
