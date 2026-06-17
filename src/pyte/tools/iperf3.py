@@ -316,8 +316,10 @@ def run(pco: "RpcServer", opts: Opts):
     """Context manager: run an iperf3 *client*; yield an :class:`Iperf3`."""
     job = pco.job("iperf3", opts.client_argv())
     try:
+        # readable=True feeds the JSON parser; log_level also dumps the raw
+        # -J output to the TE log (visible in Bublik) for diagnostics.
         stdout_filter = job.stdout.attach_filter(
-            name="iperf3_stdout", readable=True)
+            name="iperf3_stdout", readable=True, log_level="RING")
         job.stderr.log(level="WARN")
         job.start()
     except Exception:
