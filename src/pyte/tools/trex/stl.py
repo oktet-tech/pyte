@@ -65,10 +65,12 @@ class Client:
         specs = [s.spec() for s in _streams(streams)]
         for port in ports:
             log.step_push(f"add {len(specs)} stream(s) → port {port}")
-            res = self._call(_ops.add_streams, port, specs)
-            for s in res["streams"]:
-                log.ring(f"stream {s['name']!r}: {s['summary']} "
-                         f"({s['len']} B)")
+            # Summary/len are computed engine-side (Scapy), so log before
+            # shipping — no round-trip needed just to render the log line.
+            for sp in specs:
+                log.ring(f"stream {sp['name']!r}: {sp['summary']} "
+                         f"({sp['len']} B)")
+            self._call(_ops.add_streams, port, specs)
             log.step_pop()
 
     def start(self, ports: list[int], mult: str = "1",

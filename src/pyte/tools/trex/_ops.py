@@ -54,13 +54,17 @@ def reset(cli, ports):
 def add_streams(cli, port, stream_specs):
     """Build native STLStreams from spec dicts; add to one port.
 
-    Returns per-stream {name, summary, len} for engine-side logging.
+    The packet arrives as base64 wire bytes (built with Scapy on the
+    engine) and is wrapped via STLPktBuilder(pkt_buffer=...): no Scapy
+    parse and no eval of engine code on the agent. Only the optional VM
+    (STLVm*, which exists solely in the trex lib) is evaluated here, in
+    the trex.stl.api namespace. Returns the count of streams added.
     """
-    import sys  # noqa: F401  (trex_lib_dir already on sys.path via bootstrap)
+    import base64
+    import trex.stl.api as _api
     from trex.stl.api import (STLStream, STLPktBuilder, STLTXCont,
                               STLTXSingleBurst, STLTXMultiBurst,
                               STLFlowStats, STLFlowLatencyStats)
-    import scapy.all as _scapy
 
     def _mode(m):
         if m["type"] == "continuous":
@@ -82,23 +86,20 @@ def add_streams(cli, port, stream_specs):
             return STLTXMultiBurst(**kw)
         raise ValueError("unknown TX mode: %r" % (m,))
 
-    ns = dict(vars(_scapy))
     streams = []
-    summaries = []
     for spec in stream_specs:
-        pkt = eval(spec["packet"], ns)            # noqa: S307 (trusted test code)
-        vm = [eval(v, ns) for v in spec["vm"]] if spec["vm"] else None
-        builder = STLPktBuilder(pkt=pkt, vm=vm)
+        buf = base64.b64decode(spec["pkt_b64"])
+        vm = ([eval(v, vars(_api)) for v in spec["vm"]]  # noqa: S307
+              if spec["vm"] else None)
+        builder = STLPktBuilder(pkt_buffer=buf, vm=vm)
         fs = None
         if spec["pgid"] is not None:
             fs = (STLFlowLatencyStats(pg_id=spec["pgid"]) if spec["latency"]
                   else STLFlowStats(pg_id=spec["pgid"]))
         streams.append(STLStream(packet=builder, mode=_mode(spec["mode"]),
                                  name=spec["name"], flow_stats=fs))
-        summaries.append({"name": spec["name"],
-                          "summary": pkt.summary(), "len": len(pkt)})
     cli.add_streams(streams, ports=[port])
-    return {"streams": summaries}
+    return {"count": len(streams)}
 
 
 def start(cli, ports, mult, duration, force):

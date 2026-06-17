@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex.stl unit tests (offline: orchestration with fakes)."""
+from scapy.all import IP, UDP, Ether
+
 from pyte.errors import TeError, TrexError
 from pyte.tools.trex import PktBuilder, Stream, TXCont
 from pyte.tools.trex import stl
@@ -38,8 +40,7 @@ _STATS = {
 def _client():
     rem = _FakeRem({
         "reset": {"ok": True},
-        "add_streams": {"streams": [{"name": "s1",
-                                     "summary": "Ether / IP / UDP", "len": 64}]},
+        "add_streams": {"count": 1},
         "start": {"started": True},
         "wait_on_traffic": {"done": True},
         "get_stats": _STATS,
@@ -51,13 +52,14 @@ def _client():
 
 def test_client_add_streams_shipped_and_logged():
     c, rem = _client()
-    c.add_streams(Stream(packet=PktBuilder("Ether()/IP()/UDP()"),
+    c.add_streams(Stream(packet=PktBuilder(Ether() / IP() / UDP()),
                          mode=TXCont(pps=1000), name="s1"), ports=[0])
     op, args, _ = rem.calls[-1]
     assert op == "add_streams"
     # args: (cli, port, [spec, ...])
     assert args[1] == 0
     assert args[2][0]["name"] == "s1"
+    assert "pkt_b64" in args[2][0]
 
 
 def test_client_start_passes_params():

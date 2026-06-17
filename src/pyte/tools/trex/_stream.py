@@ -2,30 +2,55 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """TRex STL stream / packet / TX-mode descriptors.
 
-Pure (no shim/TE imports). Each type renders a JSON-able ``spec()`` dict
-that is shipped to the agent, where pyte.tools.trex._ops rebuilds the
-native trex.stl.api objects. The packet is a Scapy expression string —
-the native, most direct form (TRex profiles use Scapy directly); the
-field-engine VM is a list of STLVm* expression strings.
+No shim/TE imports. Each type renders a JSON-able ``spec()`` dict shipped
+to the agent, where pyte.tools.trex._ops rebuilds the native trex.stl.api
+objects. The packet is a real Scapy packet built on the engine (pyte
+depends on Scapy); ``spec()`` ships its wire bytes (base64) so the agent
+needs no Scapy to parse a string and no engine-side code is evaluated on
+the agent. The field-engine VM has no engine representation (STLVm* lives
+only in the bundled trex lib), so it stays a list of expression strings
+evaluated agent-side; in wire-bytes mode its packet offsets must be
+numeric.
 """
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
-from typing import Union
+from typing import TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from scapy.packet import Packet
 
 
 @dataclass(frozen=True)
 class PktBuilder:
-    """A packet: a Scapy expression string plus optional VM instructions."""
+    """A packet: an engine-built Scapy packet plus optional VM instructions."""
 
-    #: e.g. "Ether()/IP(dst='10.0.0.2')/UDP(dport=80)/('x'*18)"
-    scapy: str
-    #: Optional STLVm* expression strings (the TRex field engine).
+    #: A Scapy packet, e.g. Ether()/IP(dst="10.0.0.2")/UDP(dport=80)/("x"*18)
+    pkt: "Packet"
+    #: Optional STLVm* expression strings (TRex field engine, agent-side).
+    #: With wire-bytes packets, VM packet offsets must be numeric.
     vm: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if not self.scapy.strip():
-            raise ValueError("empty Scapy expression")
+        if isinstance(self.pkt, (str, bytes)):
+            raise TypeError(
+                "PktBuilder.pkt must be a Scapy packet object, not a "
+                "string; build it with scapy (e.g. Ether()/IP()/UDP())")
+
+    def wire_bytes(self) -> bytes:
+        """The packet's wire bytes (what gets shipped to the agent)."""
+        return bytes(self.pkt)
+
+    def summary(self) -> str:
+        """Scapy's one-line packet summary (for logging)."""
+        return self.pkt.summary()
+
+    def spec(self) -> dict:
+        raw = bytes(self.pkt)
+        return {"pkt_b64": base64.b64encode(raw).decode("ascii"),
+                "summary": self.pkt.summary(), "len": len(raw),
+                "vm": list(self.vm)}
 
 
 @dataclass(frozen=True)
@@ -88,6 +113,8 @@ class Stream:
     latency: bool = False
 
     def spec(self) -> dict:
-        return {"name": self.name, "packet": self.packet.scapy,
-                "vm": list(self.packet.vm), "mode": self.mode.spec(),
+        pkt = self.packet.spec()
+        return {"name": self.name, "pkt_b64": pkt["pkt_b64"],
+                "summary": pkt["summary"], "len": pkt["len"],
+                "vm": pkt["vm"], "mode": self.mode.spec(),
                 "pgid": self.flow_stats_pgid, "latency": self.latency}
