@@ -3,11 +3,16 @@
 """Pythonic Configurator access.
 
 Values cross the C boundary as text; the shim converts them using the
-real instance type, and get() converts integers back to int.
+real instance type, and get() returns the value typed by its CVT.
 
 Notes:
-    - CVT_ADDRESS values are portless IP strings (e.g. "192.0.2.1").
-    - CVT_BOOL instances read back as int 0 or 1, not Python bool.
+    - get() returns the value typed by its CVT: BOOL -> bool,
+      DOUBLE -> float, integer CVTs -> int, NONE -> None,
+      STRING/ADDRESS -> str.
+    - CVT_ADDRESS values are plain strings: a portless IP
+      (e.g. "192.0.2.1") or a MAC (e.g. "aa:bb:cc:dd:ee:ff" for
+      link-layer addresses).  Use ipaddress.ip_address() at the call
+      site when an IP object is wanted.
     - A literal ``*`` in a CfgSubtree name cannot be matched by
       iteration; ``*`` is reserved as a wildcard for find().
 
@@ -85,21 +90,30 @@ def _get_type(oid: str) -> int:
     return out[0]
 
 
-def get(oid: str) -> str | int | None:
-    """Get an instance value; integer types come back as int."""
+def _raw_get(oid: str) -> tuple[str, int]:
+    """Shim seam: return (text value, CVT int) for an instance.
+
+    Isolated so get() is unit-testable by monkeypatching this.
+    """
     from pyte._shim import ffi, lib
     out = ffi.new("char **")
     t_out = ffi.new("int *")
     check(lib.pyte_cfg_get_str(_enc(oid), out, t_out),
           f"cfg get {oid}", CfgError)
-    value = _take_str(out)
-    t = t_out[0]
-    if t == lib.PYTE_CVT_NONE:
-        return None
-    if t == lib.PYTE_CVT_BOOL or any(
-            t == getattr(lib, f"PYTE_CVT_{n}") for n in _INT_CVT_NAMES):
-        return int(value)
-    return value
+    return _take_str(out), t_out[0]
+
+
+def get(oid: str, sync: bool = False) -> bool | float | int | str | None:
+    """Get an instance value, typed by its CVT.
+
+    BOOL -> bool, DOUBLE -> float, integer CVTs -> int, NONE -> None,
+    STRING/ADDRESS -> str (ADDRESS may be an IP or a MAC string).
+    sync=True re-reads the instance from the agent before returning.
+    """
+    if sync:
+        synchronize(oid, subtree=False)
+    value, cvt = _raw_get(oid)
+    return _to_py_kind(value, _cvt_kind(cvt))
 
 
 def set(oid: str, value) -> None:  # noqa: A001 - deliberate cfg.set name
