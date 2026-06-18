@@ -72,3 +72,36 @@ def test_get_no_sync_does_not_synchronize(monkeypatch):
     rec = _install_fake_get(monkeypatch, "5", 6)
     cfg.get("/agent:A/x:")
     assert "sync" not in rec
+
+
+# -- set(): cvt passthrough vs lookup ---------------------------------
+
+def test_set_uses_given_cvt_without_lookup(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cfg, "_get_type",
+                        lambda oid: calls.append(("lookup", oid)) or 6)
+    monkeypatch.setattr(cfg, "_raw_set",
+                        lambda oid, cvt, wire: calls.append(
+                            ("set", oid, cvt, wire)))
+    cfg.set("/agent:A/x:", 5, cvt=6)
+    assert calls == [("set", "/agent:A/x:", 6, "5")]  # no ("lookup", ...)
+
+
+def test_set_without_cvt_looks_up_type(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cfg, "_get_type",
+                        lambda oid: calls.append(("lookup", oid)) or 6)
+    monkeypatch.setattr(cfg, "_raw_set",
+                        lambda oid, cvt, wire: calls.append(
+                            ("set", oid, cvt, wire)))
+    cfg.set("/agent:A/x:", 5)
+    assert calls == [("lookup", "/agent:A/x:"),
+                     ("set", "/agent:A/x:", 6, "5")]
+
+
+def test_set_bool_becomes_01(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cfg, "_raw_set",
+                        lambda oid, cvt, wire: calls.append(wire))
+    cfg.set("/agent:A/x:", True, cvt=1)
+    assert calls == ["1"]

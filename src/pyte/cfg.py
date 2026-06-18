@@ -116,14 +116,24 @@ def get(oid: str, sync: bool = False) -> bool | float | int | str | None:
     return _to_py_kind(value, _cvt_kind(cvt))
 
 
-def set(oid: str, value) -> None:  # noqa: A001 - deliberate cfg.set name
-    """Set an existing instance; the type is taken from the object."""
+def _raw_set(oid: str, cvt: int, wire: str) -> None:
+    """Shim seam: set an existing instance to `wire` as CVT `cvt`."""
     from pyte._shim import lib
-    t = _get_type(oid)
+    check(lib.pyte_cfg_set_str(_enc(oid), cvt, _enc(wire)),
+          f"cfg set {oid}={wire!r}", CfgError)
+
+
+def set(oid: str, value, cvt: int | None = None) -> None:  # noqa: A001
+    """Set an existing instance.
+
+    If cvt is given (a PYTE_CVT_* int) the object-type lookup is skipped;
+    otherwise it is read from the object descriptor.
+    """
+    if cvt is None:
+        cvt = _get_type(oid)
     if isinstance(value, bool):
         value = int(value)
-    check(lib.pyte_cfg_set_str(_enc(oid), t, _enc(str(value))),
-          f"cfg set {oid}={value!r}", CfgError)
+    _raw_set(oid, cvt, str(value))
 
 
 def add(oid: str, value=None) -> CfgNode:
