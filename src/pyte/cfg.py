@@ -209,6 +209,51 @@ def synchronize(oid: str, subtree: bool = True) -> None:
           f"cfg synchronize {oid}", CfgError)
 
 
+def _backup_create() -> str:
+    """Shim seam: snapshot the configuration; return the backup name."""
+    from pyte._shim import ffi, lib
+    out = ffi.new("char **")
+    check(lib.pyte_cfg_backup_create(out), "cfg backup create", CfgError)
+    return _take_str(out)
+
+
+def _backup_restore(name: str) -> None:
+    """Shim seam: restore the named snapshot."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_backup_restore(_enc(name)),
+          f"cfg backup restore {name}", CfgError)
+
+
+def _backup_release(name: str) -> None:
+    """Shim seam: release (free) the named backup."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_backup_release(_enc(name)),
+          f"cfg backup release {name}", CfgError)
+
+
+@contextmanager
+def backup():
+    """Snapshot the configuration; restore it on block exit.
+
+    Restore runs whether the block succeeds or raises; the backup name
+    is released afterwards.  This is TE's transactional rollback idiom.
+    """
+    name = _backup_create()
+    try:
+        yield name
+    finally:
+        try:
+            _backup_restore(name)
+        finally:
+            _backup_release(name)
+
+
+def wait_changes() -> None:
+    """Wait for pending configuration changes to propagate to agents."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_wait_changes(), "cfg wait_changes", CfgError)
+
+
 def grab_rsrc(agent: str, name: str, target_oid: str) -> CfgNode:
     """Grab ``target_oid`` as agent resource ``/agent:X/rsrc:name``.
 

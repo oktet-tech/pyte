@@ -5,6 +5,8 @@
 Pure Python — the shim is never imported; lib-touching code is exercised
 through monkeypatched seams.
 """
+import pytest
+
 from pyte import cfg
 
 
@@ -105,3 +107,53 @@ def test_set_bool_becomes_01(monkeypatch):
                         lambda oid, cvt, wire: calls.append(wire))
     cfg.set("/agent:A/x:", True, cvt=1)
     assert calls == ["1"]
+
+
+# -- backup(): order + always-release ---------------------------------
+
+@pytest.fixture
+def backup_seam(monkeypatch):
+    seq = []
+    monkeypatch.setattr(cfg, "_backup_create", lambda: (seq.append("create")
+                                                        or "BK"))
+    monkeypatch.setattr(cfg, "_backup_restore",
+                        lambda name: seq.append(("restore", name)))
+    monkeypatch.setattr(cfg, "_backup_release",
+                        lambda name: seq.append(("release", name)))
+    return seq
+
+
+def test_backup_happy_path(backup_seam):
+    with cfg.backup():
+        backup_seam.append("body")
+    assert backup_seam == ["create", "body",
+                           ("restore", "BK"), ("release", "BK")]
+
+
+def test_backup_restores_and_releases_on_exception(backup_seam):
+    with pytest.raises(RuntimeError, match="boom"):
+        with cfg.backup():
+            backup_seam.append("body")
+            raise RuntimeError("boom")
+    assert backup_seam == ["create", "body",
+                           ("restore", "BK"), ("release", "BK")]
+
+
+def test_backup_yields_name(backup_seam):
+    with cfg.backup() as name:
+        assert name == "BK"
+
+
+def test_backup_releases_even_if_restore_raises(backup_seam, monkeypatch):
+    # The inner finally must release the backup even when restore itself
+    # raises -- otherwise a failed restore would leak the snapshot.
+    def boom_restore(name):
+        backup_seam.append(("restore", name))
+        raise RuntimeError("restore failed")
+
+    monkeypatch.setattr(cfg, "_backup_restore", boom_restore)
+    with pytest.raises(RuntimeError, match="restore failed"):
+        with cfg.backup():
+            backup_seam.append("body")
+    assert backup_seam == ["create", "body",
+                           ("restore", "BK"), ("release", "BK")]
