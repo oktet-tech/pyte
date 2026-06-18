@@ -33,8 +33,39 @@ from contextlib import contextmanager
 from pyte.errors import CfgError, check
 from pyte.log import _enc
 
-_INT_TYPES = ("BOOL", "INT8", "UINT8", "INT16", "UINT16",
-              "INT32", "UINT32", "INT64", "UINT64")
+_INT_CVT_NAMES = ("INT8", "UINT8", "INT16", "UINT16",
+                  "INT32", "UINT32", "INT64", "UINT64")
+
+
+def _to_py_kind(value: str, kind: str):
+    """Decode a shim text value into a Python value by kind.
+
+    kind is one of: "none", "bool", "int", "float", "str".
+    Pure: no shim access, so it is unit-testable without TE.
+    """
+    if kind == "none":
+        return None
+    if kind == "bool":
+        return int(value) != 0
+    if kind == "int":
+        return int(value)
+    if kind == "float":
+        return float(value)
+    return value  # "str": STRING, ADDRESS (IP or MAC), UNSPECIFIED
+
+
+def _cvt_kind(cvt: int) -> str:
+    """Map a shim PYTE_CVT_* int to the kind used by _to_py_kind."""
+    from pyte._shim import lib
+    if cvt == lib.PYTE_CVT_NONE:
+        return "none"
+    if cvt == lib.PYTE_CVT_BOOL:
+        return "bool"
+    if cvt == lib.PYTE_CVT_DOUBLE:
+        return "float"
+    if any(cvt == getattr(lib, f"PYTE_CVT_{n}") for n in _INT_CVT_NAMES):
+        return "int"
+    return "str"
 
 
 def _take_str(out) -> str:
@@ -65,7 +96,8 @@ def get(oid: str) -> str | int | None:
     t = t_out[0]
     if t == lib.PYTE_CVT_NONE:
         return None
-    if any(t == getattr(lib, f"PYTE_CVT_{n}") for n in _INT_TYPES):
+    if t == lib.PYTE_CVT_BOOL or any(
+            t == getattr(lib, f"PYTE_CVT_{n}") for n in _INT_CVT_NAMES):
         return int(value)
     return value
 
