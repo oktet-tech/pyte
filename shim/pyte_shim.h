@@ -203,6 +203,10 @@ extern te_errno pyte_cfg_find_pattern(const char *pattern, unsigned int *n,
 extern te_errno pyte_cfg_oid_str(cfg_handle h, char **out);
 extern te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
 extern te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
+extern te_errno pyte_cfg_wait_changes(void);
+extern te_errno pyte_cfg_backup_create(char **out_name);
+extern te_errno pyte_cfg_backup_restore(const char *name);
+extern te_errno pyte_cfg_backup_release(const char *name);
 extern void pyte_free_handles(cfg_handle *set);
 
 /*

@@ -90,6 +90,10 @@ te_errno pyte_cfg_find_pattern(const char *pattern, unsigned int *n,
 te_errno pyte_cfg_oid_str(cfg_handle h, char **out);
 te_errno pyte_cfg_inst_name(cfg_handle h, char **out);
 te_errno pyte_cfg_synchronize(const char *oid, int with_subtree);
+te_errno pyte_cfg_wait_changes(void);
+te_errno pyte_cfg_backup_create(char **out_name);
+te_errno pyte_cfg_backup_restore(const char *name);
+te_errno pyte_cfg_backup_release(const char *name);
 void pyte_free_handles(cfg_handle *set);
 
 te_errno pyte_cfg_route_add(const char *ta, const char *dst, int prefix,

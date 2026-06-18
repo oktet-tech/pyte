@@ -737,6 +737,65 @@ pyte_cfg_synchronize(const char *oid, int with_subtree)
     return 0;
 }
 
+te_errno
+pyte_cfg_wait_changes(void)
+{
+    PYTE_GUARD_RC(cfg_wait_changes());
+    return 0;
+}
+
+te_errno
+pyte_cfg_backup_create(char **out_name)
+{
+    char *name = NULL;
+
+    *out_name = NULL;
+    /*
+     * No _nojmp helper is needed here: cfg_create_backup() sets *name =
+     * NULL on entry and only allocates it after the call succeeds, so a
+     * guard-caught longjmp can never strand a non-NULL allocation in
+     * `name` (unlike release, where cfg_release_backup frees its arg).
+     */
+    PYTE_GUARD_RC(cfg_create_backup(&name));
+    /* cfg_create_backup allocates `name`; hand it to Python, which frees
+     * it with pyte_free_string() like every other char* out-param. */
+    *out_name = name;
+    return 0;
+}
+
+te_errno
+pyte_cfg_backup_restore(const char *name)
+{
+    PYTE_GUARD_RC(cfg_restore_backup(name));
+    return 0;
+}
+
+static te_errno
+pyte_cfg_backup_release_nojmp(const char *name)
+{
+    char    *dup = strdup(name);
+    te_errno rc;
+
+    /*
+     * cfg_release_backup() does free(*name) on success, so it must never
+     * receive Python/cffi-owned memory.  Give it our own strdup; on
+     * success it frees+NULLs dup (free(NULL) below is a no-op), on
+     * failure dup still points to our copy and we free it here.
+     */
+    if (dup == NULL)
+        return TE_RC(TE_TAPI, TE_ENOMEM);
+    rc = cfg_release_backup(&dup);
+    free(dup);
+    return rc;
+}
+
+te_errno
+pyte_cfg_backup_release(const char *name)
+{
+    PYTE_GUARD_RC(pyte_cfg_backup_release_nojmp(name));
+    return 0;
+}
+
 void
 pyte_free_handles(cfg_handle *set)
 {
