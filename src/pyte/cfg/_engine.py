@@ -183,3 +183,56 @@ class SubObject:
         if obj is None:
             return self
         return self.cls(f"{obj.oid}/{self.subid}:")
+
+
+class Collection:
+    """An instance-named child collection (e.g. net_addr, vlans, rule)."""
+
+    def __init__(self, subid: str, cls: type[CfgObject]):
+        self.subid = subid
+        self.cls = cls
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        return BoundCollection(obj.oid, self.subid, self.cls)
+
+
+class BoundCollection:
+    """Children of one object under a fixed collection subid.
+
+    Indexable (``coll[name]``), iterable (``for child in coll``), and
+    mutable (``coll.add(name, value)`` / ``del coll[name]``).
+    """
+
+    def __init__(self, parent_oid: str, subid: str, cls: type[CfgObject]):
+        self._parent_oid = parent_oid
+        self._subid = subid
+        self._cls = cls
+
+    def _child_oid(self, name: str) -> str:
+        return f"{self._parent_oid}/{self._subid}:{name}"
+
+    def __getitem__(self, name: str) -> CfgObject:
+        """Return the entry's typed view by name.
+
+        Composes the OID but does NOT verify the entry exists (a later
+        knob read does that).  Iterate the collection to enumerate the
+        entries that actually exist.
+        """
+        return self._cls(self._child_oid(name))
+
+    def __iter__(self):
+        for node in cfg.find(f"{self._parent_oid}/{self._subid}:*"):
+            yield self._cls(node.oid)
+
+    def add(self, name: str, value=None) -> CfgObject:
+        cfg.add(self._child_oid(name), value)
+        return self[name]
+
+    def __delitem__(self, name: str) -> None:
+        cfg.delete(self._child_oid(name), children=True)
+
+    def __repr__(self) -> str:
+        return (f"BoundCollection({self._parent_oid!r}, {self._subid!r}, "
+                f"{self._cls.__name__})")

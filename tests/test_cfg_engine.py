@@ -245,3 +245,77 @@ def test_subobject_knob_set(fake):
 
 def test_subobject_on_class_returns_descriptor():
     assert isinstance(IfaceWithPhy.phy, SubObject)
+
+
+# -- Collection: instance-named children ------------------------------
+
+from pyte.cfg._engine import BoundCollection, Collection  # noqa: E402
+
+
+class NetAddr(CfgObject):
+    broadcast = AddrKnob("broadcast")
+
+
+class IfaceWithAddrs(CfgObject):
+    net_addr = Collection("net_addr", NetAddr)
+
+    def __init__(self, ta, ifname):
+        super().__init__(f"/agent:{ta}/interface:{ifname}")
+
+
+def test_collection_on_class_returns_descriptor():
+    assert isinstance(IfaceWithAddrs.net_addr, Collection)
+
+
+def test_collection_getitem_builds_child(fake):
+    a = IfaceWithAddrs("A", "eth0").net_addr["192.0.2.1"]
+    assert isinstance(a, NetAddr)
+    assert a.oid == "/agent:A/interface:eth0/net_addr:192.0.2.1"
+
+
+def test_collection_is_bound(fake):
+    assert isinstance(IfaceWithAddrs("A", "eth0").net_addr, BoundCollection)
+
+
+def test_collection_iter_yields_children(fake, monkeypatch):
+    nodes = [types.SimpleNamespace(oid="/agent:A/interface:eth0/net_addr:10.0.0.1"),
+             types.SimpleNamespace(oid="/agent:A/interface:eth0/net_addr:10.0.0.2")]
+    captured = {}
+
+    def _find(pattern):
+        captured["pattern"] = pattern
+        return nodes
+
+    monkeypatch.setattr(cfg, "find", _find)
+    addrs = list(IfaceWithAddrs("A", "eth0").net_addr)
+    assert captured["pattern"] == "/agent:A/interface:eth0/net_addr:*"
+    assert [a.oid for a in addrs] == [n.oid for n in nodes]
+    assert all(isinstance(a, NetAddr) for a in addrs)
+
+
+def test_collection_add(fake, monkeypatch):
+    added = []
+    monkeypatch.setattr(cfg, "add",
+                        lambda oid, value=None: added.append((oid, value)))
+    a = IfaceWithAddrs("A", "eth0").net_addr.add("10.0.0.5")
+    assert added == [("/agent:A/interface:eth0/net_addr:10.0.0.5", None)]
+    assert isinstance(a, NetAddr)
+    assert a.oid == "/agent:A/interface:eth0/net_addr:10.0.0.5"
+
+
+def test_collection_add_passes_value_through(fake, monkeypatch):
+    added = []
+    monkeypatch.setattr(cfg, "add",
+                        lambda oid, value=None: added.append((oid, value)))
+    IfaceWithAddrs("A", "eth0").net_addr.add("10.0.0.6", "192.168.0.255")
+    assert added == [("/agent:A/interface:eth0/net_addr:10.0.0.6",
+                      "192.168.0.255")]
+
+
+def test_collection_delitem(fake, monkeypatch):
+    deleted = []
+    monkeypatch.setattr(cfg, "delete",
+                        lambda oid, children=False: deleted.append(
+                            (oid, children)))
+    del IfaceWithAddrs("A", "eth0").net_addr["10.0.0.5"]
+    assert deleted == [("/agent:A/interface:eth0/net_addr:10.0.0.5", True)]
