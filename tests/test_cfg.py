@@ -179,6 +179,8 @@ def test_transaction_rolls_back_on_exception(backup_seam):
 
 def test_transaction_releases_even_if_restore_raises(backup_seam,
                                                      monkeypatch):
+    # The inner finally must still release; and a restore failure during
+    # unwind replaces the body's exception (standard finally semantics).
     def boom_restore(name):
         backup_seam.append(("restore", name))
         raise RuntimeError("restore failed")
