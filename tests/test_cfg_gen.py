@@ -418,9 +418,36 @@ def test_emit_self_value_for_value_typed_parent():
 
 
 def test_emit_no_self_value_for_pure_container():
-    # phy is type none with children -> NO self-value
+    # phy is type none -> its own class carries no self-value (only the
+    # value-typed nodes do).
     src = _emit_iface()
-    assert "SelfKnob" not in src
+    phy_block = src.split("class Phy(CfgObject):")[1].split("\nclass ")[0]
+    assert "SelfKnob" not in phy_block
+
+
+def test_emit_self_value_for_childless_value_collection():
+    # A value-typed collection with NO children (e.g. a string macvlan
+    # keyed by name) must still expose its own value.
+    y = """
+- register:
+    - oid: "/agent/interface"
+      type: none
+      name: ifname
+      access: read_create
+      d: |
+         Network interface.
+    - oid: "/agent/interface/macvlan"
+      type: string
+      name: ifname
+      access: read_create
+      d: |
+         MAC VLAN.
+"""
+    root = _gen.build_tree(_gen.parse_cm(y))
+    src = _gen.emit_module(root.children["interface"], "interface")
+    assert "class Macvlan(CfgObject):" in src
+    assert 'value = SelfKnob(cvt_name="STRING")' in src
+    assert 'macvlan = Collection("macvlan", Macvlan)' in src
 
 
 def test_emitted_netaddr_self_value_roundtrips(monkeypatch):

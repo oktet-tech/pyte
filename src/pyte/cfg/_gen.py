@@ -331,8 +331,12 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
     body.extend(_docstring(node, "    "))
 
     members: list[str] = []
-    if (node.entry is not None and node.entry.type != "none"
-            and node.children):
+    # Any node emitted as its own class (collection element or value-
+    # bearing subobject) that carries a scalar value gets a self-value,
+    # whether or not it also has children -- otherwise a childless
+    # value-typed collection (e.g. a string macvlan keyed by name) would
+    # lose its value.  Pure none-typed containers get none.
+    if node.entry is not None and node.entry.type != "none":
         used.add("SelfKnob")
         members.append(
             f'    value = SelfKnob(cvt_name="{cvt_for(node.entry.type)}")')
