@@ -347,6 +347,19 @@ def test_collection_delitem(fake, monkeypatch):
 
 # -- public re-exports from pyte.cfg ----------------------------------
 
+def test_cfgobject_name_is_instance_key():
+    assert CfgObject("/agent:A/interface:eth0/net_addr:192.0.2.1").name \
+        == "192.0.2.1"
+
+
+def test_cfgobject_name_empty_for_singleton_segment():
+    assert CfgObject("/agent:A/interface:eth0/phy:").name == ""
+
+
+def test_cfgobject_name_top_level():
+    assert CfgObject("/agent:A").name == "A"
+
+
 def test_engine_names_reexported_from_pyte_cfg():
     import pyte.cfg as cfgpkg
     for name in ("CfgObject", "IntKnob", "BoolKnob", "DoubleKnob",

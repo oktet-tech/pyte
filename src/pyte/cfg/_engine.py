@@ -40,6 +40,12 @@ class CfgObject:
     def __init__(self, oid: str):
         self.oid = oid
 
+    @property
+    def name(self) -> str:
+        """The instance name: what follows ':' in the last OID segment."""
+        last = self.oid.rsplit("/", 1)[-1]
+        return last.split(":", 1)[1] if ":" in last else ""
+
     @contextmanager
     def saved(self, *attrs: str):
         """Save the named knob attributes; restore them on block exit.
