@@ -714,3 +714,92 @@ def test_emit_wraps_long_knob_line():
     # the knob is still present (wrapped form)
     assert "in_unknown_protos_counter = IntKnob(" in src
     assert 'sync=True' in src
+
+
+# -- include allow-list (curated root facade) -------------------------
+
+_MIXED_YAML = """
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      d: |
+         Root.
+    - oid: "/agent/x/a"
+      type: int32
+      access: read_write
+      d: |
+         Scalar A.
+    - oid: "/agent/x/b"
+      type: string
+      access: read_only
+      d: |
+         Scalar B.
+    - oid: "/agent/x/sub"
+      type: string
+      access: read_only
+      d: |
+         A value-bearing subobject.
+    - oid: "/agent/x/sub/leaf"
+      type: int32
+      access: read_write
+      d: |
+         Sub leaf.
+    - oid: "/agent/x/coll"
+      type: none
+      name: key
+      access: read_create
+      d: |
+         A collection.
+    - oid: "/agent/x/coll/n"
+      type: int32
+      access: read_write
+      d: |
+         Coll leaf.
+"""
+
+
+def _emit_mixed(include):
+    root = _gen.build_tree(_gen.parse_cm(_MIXED_YAML))
+    return _gen.emit_module(root.children["x"], "x", include=include)
+
+
+def test_include_emits_only_named_members():
+    src = _emit_mixed(("a", "sub"))
+    assert 'a = IntKnob("a", cvt_name="INT32")' in src
+    assert 'sub = SubObject("sub", Sub)' in src
+    assert "class Sub(CfgObject):" in src
+    assert 'leaf = IntKnob("leaf", cvt_name="INT32")' in src
+    assert "def __init__(self, ta):" in src
+    assert 'super().__init__(f"/agent:{ta}/x:")' in src
+    assert "b = StrKnob" not in src
+    assert "class Coll(CfgObject):" not in src
+    assert "coll = Collection" not in src
+
+
+def test_include_none_emits_everything():
+    src = _emit_mixed(None)
+    assert 'a = IntKnob("a", cvt_name="INT32")' in src
+    assert 'b = StrKnob("b", access="read_only")' in src
+    assert 'coll = Collection("coll", Coll)' in src
+    assert "class Coll(CfgObject):" in src
+
+
+def test_include_unknown_member_raises():
+    with pytest.raises(ValueError, match="not a child"):
+        _emit_mixed(("a", "nope"))
+
+
+def test_include_via_target_and_generate_from():
+    files = {"cm_x.yml": _MIXED_YAML}
+    out = _gen.generate_from(files, [
+        _gen.Target("cm_x.yml", "/agent/x", "x", include=("a",))])
+    assert 'a = IntKnob("a", cvt_name="INT32")' in out["x"]
+    assert "b = StrKnob" not in out["x"]
+
+
+def test_target_has_optional_include_field():
+    t = _gen.Target("f.yml", "/agent/x", "x")
+    assert t.include is None
+    t2 = _gen.Target("f.yml", "/agent/x", "x", include=("a",))
+    assert t2.include == ("a",)

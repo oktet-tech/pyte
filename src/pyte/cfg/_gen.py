@@ -352,11 +352,15 @@ def _init_spec(root: Node) -> tuple[list[str], str]:
     return params, "".join(parts)
 
 
-def emit_module(root: Node, module_name: str) -> str:
+def emit_module(root: Node, module_name: str,
+                include: tuple[str, ...] | None = None) -> str:
     """Emit a Python module (source text) for the root subtree.
 
     The emitted root class gets a convenience __init__ taking ``ta`` plus
-    the root's own collection key (when the root is a collection).
+    the root's own collection key (when the root is a collection).  When
+    ``include`` is given, the root class emits ONLY those named direct
+    children (each by its normal classification, recursing into named
+    subobjects/collections); otherwise all children are emitted.
     """
     root_oid = root.oid
     title = _esc_doc(root.entry.doc.splitlines()[0]
@@ -366,7 +370,7 @@ def emit_module(root: Node, module_name: str) -> str:
 
     blocks: list[str] = []
     used: set[str] = {"CfgObject"}   # every emitted class subclasses it
-    _emit_class(root, root_oid, params, oid_fmt, blocks, used)
+    _emit_class(root, root_oid, params, oid_fmt, blocks, used, include)
     header = _HEADER.format(title=title, imports=_imports_for(used))
     # Two blank lines before the first class and between classes (PEP 8 /
     # ruff E302) so the generated module is lint-clean.
@@ -375,12 +379,16 @@ def emit_module(root: Node, module_name: str) -> str:
 
 def _emit_class(node: Node, root_oid: str, root_params: list[str],
                 root_oid_fmt: str, blocks: list[str],
-                used: set[str]) -> None:
+                used: set[str],
+                include: tuple[str, ...] | None = None) -> None:
     """Append the class block for `node`; recurse into object children.
 
     Child object classes are appended BEFORE the parent's block so that
     SubObject/Collection references are already defined.  `used`
     accumulates the engine names actually emitted (for the import block).
+    `include`, honored only at this (root) call, restricts the emitted
+    children to the named ones; recursive calls pass None so named
+    subtrees emit in full.
     """
     cname = class_name(node.oid, root_oid)
     body: list[str] = [f"class {cname}(CfgObject):"]
@@ -398,7 +406,17 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
         members.append(
             f'    value = SelfKnob(cvt_name="{cvt_for(node.entry.type)}"'
             f'{sync})')
-    for seg, child in node.children.items():
+    if include is None:
+        items = list(node.children.items())
+    else:
+        items = []
+        for seg in include:
+            child = node.children.get(seg)
+            if child is None:
+                raise ValueError(
+                    f"include lists {seg!r}, not a child of {node.oid}")
+            items.append((seg, child))
+    for seg, child in items:
         kind = classify(child)
         if kind == "knob":
             used.add(knob_class(child.entry.type))
@@ -440,6 +458,8 @@ class Target:
     cm_file: str   # e.g. "cm_sys.yml"
     root_oid: str  # e.g. "/agent/sys"
     module: str    # e.g. "sys" -> gen/sys.py
+    include: tuple[str, ...] | None = None  # root emits ONLY these
+    #                                       # direct children (else all)
 
 
 TARGETS = [
@@ -485,7 +505,7 @@ def generate_from(files: dict[str, str],
     out: dict[str, str] = {}
     for t in targets:
         node = _root_node(parse_cm(files[t.cm_file]), t.root_oid)
-        out[t.module] = emit_module(node, t.module)
+        out[t.module] = emit_module(node, t.module, include=t.include)
     return out
 
 
