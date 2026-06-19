@@ -170,6 +170,36 @@ def test_attr_name_is_segment():
     assert _gen.attr_name("net_addr") == "net_addr"
 
 
+def test_attr_name_sanitizes_non_identifiers():
+    assert _gen.attr_name("file-max") == "file_max"      # hyphen -> _
+    assert _gen.attr_name("global") == "global_"          # keyword -> _
+    assert _gen.attr_name("exception-trace") == "exception_trace"
+
+
+def test_class_name_handles_hyphen_segment():
+    assert _gen.class_name("/a/file-max", "/a") == "FileMax"
+
+
+def test_emit_keeps_raw_subid_with_sanitized_attr():
+    # A hyphenated leaf -> attr file_max but OID subid stays "file-max".
+    y = """
+- register:
+    - oid: "/agent/sys"
+      type: none
+      access: read_only
+      d: |
+         System.
+    - oid: "/agent/sys/file-max"
+      type: uint64
+      access: read_write
+      d: |
+         Max files.
+"""
+    root = _gen.build_tree(_gen.parse_cm(y))
+    src = _gen.emit_module(root.children["sys"], "sys")
+    assert 'file_max = IntKnob("file-max", cvt_name="UINT64")' in src
+
+
 # -- emit_module ------------------------------------------------------
 
 _IFACE_YAML = """

@@ -9,6 +9,7 @@ or testbed access here; wiring to real CM files lives in Phase 2b-ii.
 """
 from __future__ import annotations
 
+import keyword
 import os
 import re
 from dataclasses import dataclass, field
@@ -213,7 +214,9 @@ def classify(node: Node) -> str:
 
 
 def _pascal(seg: str) -> str:
-    return seg.replace("_", " ").title().replace(" ", "")
+    # Split on any non-alphanumeric (OID segments may contain '-'), then
+    # CamelCase, so e.g. "file-max" -> "FileMax".
+    return re.sub(r"[^0-9a-zA-Z]+", " ", seg).title().replace(" ", "")
 
 
 def class_name(oid: str, root_oid: str) -> str:
@@ -230,8 +233,19 @@ def class_name(oid: str, root_oid: str) -> str:
 
 
 def attr_name(seg: str) -> str:
-    """Child attribute name (the raw OID segment)."""
-    return seg
+    """A valid Python attribute name for an OID segment.
+
+    The raw segment stays the OID subid; only the Python attribute name
+    is sanitized: non-identifier chars (e.g. '-') become '_', a leading
+    digit is prefixed with '_', and a Python keyword gets a trailing '_'
+    (so e.g. "file-max" -> "file_max", "global" -> "global_").
+    """
+    a = re.sub(r"\W", "_", seg)
+    if a[:1].isdigit():
+        a = "_" + a
+    if keyword.iskeyword(a):
+        a += "_"
+    return a
 
 
 _HEADER = '''# SPDX-License-Identifier: Apache-2.0
