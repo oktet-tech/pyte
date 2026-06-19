@@ -21,7 +21,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pyte import cfg, log
+from pyte.cfg import SubObject
 from pyte.cfg.gen.interface import Interface as _GenInterface
+from pyte.cfg.gen.interface import Phy as _GenPhy
+from pyte.cfg.gen.sys import Sys as _GenSys
 from pyte.errors import CfgError, check
 from pyte.log import _enc
 
@@ -88,6 +91,31 @@ class Neigh:
     static: bool
 
 
+class Phy(_GenPhy):
+    """Ergonomic PHY view.
+
+    speed/duplex read the OPERATIONAL value and set the ADMINISTRATIVE
+    one (the common test mental model); the raw speed_admin/speed_oper/
+    duplex_admin/duplex_oper knobs remain available.
+    """
+
+    @property
+    def speed(self) -> int:
+        return self.speed_oper
+
+    @speed.setter
+    def speed(self, value: int) -> None:
+        self.speed_admin = value
+
+    @property
+    def duplex(self) -> str:
+        return self.duplex_oper
+
+    @duplex.setter
+    def duplex(self, value: str) -> None:
+        self.duplex_admin = value
+
+
 class Iface(_GenInterface):
     """One /agent:X/interface:Y subtree (must be a grabbed resource).
 
@@ -96,6 +124,8 @@ class Iface(_GenInterface):
     (net_addr, vlans, ...) are inherited; this class adds the ergonomic
     helpers and the agent attribute.
     """
+
+    phy = SubObject("phy", Phy)   # override: return the curated Phy
 
     def __init__(self, agent: str, name: str):
         super().__init__(agent, name)   # builds /agent:agent/interface:name
@@ -233,6 +263,15 @@ class AgentNet:
               f"neigh_del({ip})", CfgError)
 
     # -- sysctl ------------------------------------------------------------
+    @property
+    def sys(self) -> _GenSys:
+        """Typed access to CM-registered /proc/sys settings.
+
+        e.g. ``agt.sys.net.ipv4.ip_forward``.  For arbitrary /proc/sys
+        paths not registered in the CM, use ``sysctl()``.
+        """
+        return _GenSys(self.name)
+
     def sysctl(self, path: str) -> int | str:
         from pyte._shim import ffi, lib
         p = _sys_path(path)

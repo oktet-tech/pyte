@@ -69,3 +69,44 @@ def test_parse_mac_dashed_rejected():
 def test_parse_mac_short_rejected():
     with pytest.raises(ValueError, match="bad MAC"):
         _parse_mac("02:ab:cd:ef:12")
+
+
+# -- Sys + Phy curated facades ----------------------------------------
+
+def test_agentnet_sys_is_typed_generated_sys():
+    from pyte import net
+    from pyte.cfg.gen.sys import Sys
+    s = net.agent("A").sys
+    assert isinstance(s, Sys)
+    assert s.oid == "/agent:A/sys:"
+
+
+def test_iface_phy_is_curated_phy():
+    from pyte import net
+    assert isinstance(net.Iface("A", "eth0").phy, net.Phy)
+
+
+def test_curated_phy_speed_reads_oper_sets_admin(monkeypatch):
+    from pyte import cfg, net
+    from pyte.cfg import _engine
+    sets = []
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: 10000)
+    monkeypatch.setattr(cfg, "set",
+                        lambda oid, value, cvt=None: sets.append((oid, value)))
+    monkeypatch.setattr(_engine, "_cvt_int", lambda name: 6)
+    phy = net.Iface("A", "eth0").phy
+    assert phy.speed == 10000   # get -> speed_oper
+    phy.speed = 25000           # set -> speed_admin
+    assert sets[-1] == ("/agent:A/interface:eth0/phy:/speed_admin:", 25000)
+
+
+def test_curated_phy_duplex_reads_oper_sets_admin(monkeypatch):
+    from pyte import cfg, net
+    sets = []
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: "full")
+    monkeypatch.setattr(cfg, "set",
+                        lambda oid, value, cvt=None: sets.append((oid, value)))
+    phy = net.Iface("A", "eth0").phy
+    assert phy.duplex == "full"  # get -> duplex_oper
+    phy.duplex = "half"          # set -> duplex_admin
+    assert sets[-1] == ("/agent:A/interface:eth0/phy:/duplex_admin:", "half")
