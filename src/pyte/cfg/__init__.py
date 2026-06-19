@@ -395,3 +395,16 @@ class CfgSubtree:
 
     def __repr__(self) -> str:
         return f"CfgSubtree({self.parent.oid!r}, {self.sub!r})"
+
+
+from pyte.cfg._engine import (  # noqa: E402,F401 - public re-exports
+    AddrKnob,
+    BoolKnob,
+    CfgObject,
+    Collection,
+    DoubleKnob,
+    IntKnob,
+    IpAddrKnob,
+    StrKnob,
+    SubObject,
+)

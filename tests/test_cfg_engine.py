@@ -319,3 +319,13 @@ def test_collection_delitem(fake, monkeypatch):
                             (oid, children)))
     del IfaceWithAddrs("A", "eth0").net_addr["10.0.0.5"]
     assert deleted == [("/agent:A/interface:eth0/net_addr:10.0.0.5", True)]
+
+
+# -- public re-exports from pyte.cfg ----------------------------------
+
+def test_engine_names_reexported_from_pyte_cfg():
+    import pyte.cfg as cfgpkg
+    for name in ("CfgObject", "IntKnob", "BoolKnob", "DoubleKnob",
+                 "StrKnob", "AddrKnob", "IpAddrKnob", "SubObject",
+                 "Collection"):
+        assert hasattr(cfgpkg, name), name
