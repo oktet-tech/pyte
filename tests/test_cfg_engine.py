@@ -135,3 +135,74 @@ def test_saved_read_only_knob_raises_up_front(fake):
 def test_knob_rejects_invalid_access():
     with pytest.raises(ValueError, match="invalid access"):
         IntKnob("x", access="readonly")
+
+
+# -- typed knob subclasses --------------------------------------------
+
+from pyte.cfg._engine import (AddrKnob, BoolKnob, DoubleKnob,  # noqa: E402
+                              IpAddrKnob, StrKnob)
+
+
+class Knobs(CfgObject):
+    flag = BoolKnob("flag")
+    rate = DoubleKnob("rate")
+    name = StrKnob("name")
+    mac = AddrKnob("link_addr")
+    ip = IpAddrKnob("net_addr")
+
+    def __init__(self):
+        super().__init__("/agent:A/x:y")
+
+
+def test_bool_knob_get_and_set(fake):
+    fake.store["/agent:A/x:y/flag:"] = True
+    k = Knobs()
+    assert k.flag is True
+    k.flag = 0
+    assert fake.sets[-1] == ("/agent:A/x:y/flag:", False, 1)
+
+
+def test_double_knob_set_coerces_float(fake):
+    Knobs().rate = "2.5"
+    assert fake.sets[-1] == ("/agent:A/x:y/rate:", 2.5, 12)
+
+
+def test_str_knob_set_coerces_str(fake):
+    Knobs().name = 7
+    assert fake.sets[-1] == ("/agent:A/x:y/name:", "7", 10)
+
+
+def test_addr_knob_is_plain_string(fake):
+    fake.store["/agent:A/x:y/link_addr:"] = "aa:bb:cc:dd:ee:ff"
+    assert Knobs().mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_ipaddr_knob_get_returns_ip_object(fake):
+    import ipaddress
+    fake.store["/agent:A/x:y/net_addr:"] = "192.0.2.1"
+    assert Knobs().ip == ipaddress.ip_address("192.0.2.1")
+
+
+def test_ipaddr_knob_set_serialises_to_str(fake):
+    import ipaddress
+    Knobs().ip = ipaddress.ip_address("192.0.2.9")
+    assert fake.sets[-1] == ("/agent:A/x:y/net_addr:", "192.0.2.9", 11)
+
+
+def test_ipaddr_knob_empty_is_none(fake):
+    fake.store["/agent:A/x:y/net_addr:"] = ""
+    assert Knobs().ip is None
+
+
+def test_runtime_fallback_knob_passes_cvt_none(fake):
+    # A bare _Knob (no cvt_name) lets cfg.set look the type up (cvt=None).
+    from pyte.cfg._engine import _Knob
+
+    class Bare(CfgObject):
+        thing = _Knob("thing")
+
+        def __init__(self):
+            super().__init__("/agent:A/x:y")
+
+    Bare().thing = "v"
+    assert fake.sets[-1] == ("/agent:A/x:y/thing:", "v", None)

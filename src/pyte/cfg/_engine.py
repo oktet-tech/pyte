@@ -111,3 +111,58 @@ class IntKnob(_Knob):
 
     def to_cfg(self, value):
         return int(value)
+
+
+class BoolKnob(_Knob):
+    """Boolean knob (CVT_BOOL)."""
+
+    cvt_name = "BOOL"
+
+    def to_cfg(self, value):
+        return bool(value)
+
+
+class DoubleKnob(_Knob):
+    """Floating-point knob (CVT_DOUBLE)."""
+
+    cvt_name = "DOUBLE"
+
+    def to_cfg(self, value):
+        return float(value)
+
+
+class StrKnob(_Knob):
+    """String knob (CVT_STRING)."""
+
+    cvt_name = "STRING"
+
+    def to_cfg(self, value):
+        return str(value)
+
+
+class AddrKnob(_Knob):
+    """CVT_ADDRESS knob returning a plain string.
+
+    CVT_ADDRESS is overloaded: the value may be an IP or a MAC
+    (link-layer addresses such as link_addr).  Use IpAddrKnob only where
+    the OID is known to carry an IP.
+    """
+
+    cvt_name = "ADDRESS"
+
+    def to_cfg(self, value):
+        return str(value)
+
+
+class IpAddrKnob(_Knob):
+    """CVT_ADDRESS knob typed as ipaddress; only for IP-bearing OIDs."""
+
+    cvt_name = "ADDRESS"
+
+    def from_cfg(self, value):
+        import ipaddress
+        # An empty or unset address (None or "") yields None.
+        return ipaddress.ip_address(value) if value else None
+
+    def to_cfg(self, value):
+        return str(value)
