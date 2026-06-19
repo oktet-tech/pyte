@@ -599,6 +599,13 @@ def test_targets_cover_sys_and_interface():
     assert {"sys", "interface"} <= names
 
 
+def test_targets_cover_agent_core():
+    names = {t.module for t in _gen.TARGETS}
+    assert {"sys", "interface", "agent", "pci", "module"} <= names
+    agent = next(t for t in _gen.TARGETS if t.module == "agent")
+    assert agent.include and "uname" in agent.include
+
+
 def test_generate_from_text_map_emits_modules():
     # generate_from() takes a {filename: yaml_text} map so it is testable
     # without the real CM files on disk.

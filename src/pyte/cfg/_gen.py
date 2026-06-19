@@ -462,9 +462,23 @@ class Target:
     #                                       # direct children (else all)
 
 
+# The /agent root mixes agent-wide scalars with large separate subtrees
+# (interface, route, hardware, rsrc, ...) and several collection-leaves
+# carrying a defaulted name: none.  An explicit allow-list emits exactly
+# the intended members without touching cm_base's annotations.  uname is a
+# value-bearing subobject (string value + version/release/machine).
+AGENT_MEMBERS = (
+    "platform", "dir", "tmp_dir", "lib_mod_dir", "lib_bin_dir",
+    "ip4_fw", "ip6_fw", "ip4_rt_default_if", "ip6_rt_default_if",
+    "rpcprovider", "rpc_default_timeout", "rp_filter_all", "uname",
+)
+
 TARGETS = [
     Target("cm_sys.yml", "/agent/sys", "sys"),
     Target("cm_base.yml", "/agent/interface", "interface"),
+    Target("cm_base.yml", "/agent", "agent", include=AGENT_MEMBERS),
+    Target("cm_pci.yml", "/agent/hardware/pci", "pci"),
+    Target("cm_module.yml", "/agent/module", "module"),
 ]
 
 
