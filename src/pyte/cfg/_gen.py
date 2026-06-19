@@ -241,8 +241,8 @@ _HEADER = '''# SPDX-License-Identifier: Apache-2.0
 # Engine names the emitter may reference; imported only when actually used
 # (an unconditional import would trip ruff F401 on the generated module).
 _ENGINE_NAMES = ("AddrKnob", "BoolKnob", "CfgObject", "Collection",
-                 "DoubleKnob", "IntKnob", "IpAddrKnob", "StrKnob",
-                 "SubObject")
+                 "DoubleKnob", "IntKnob", "IpAddrKnob", "SelfKnob",
+                 "StrKnob", "SubObject")
 
 
 def _imports_for(used: set[str]) -> str:
@@ -329,6 +329,11 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
     body.extend(_docstring(node, "    "))
 
     members: list[str] = []
+    if (node.entry is not None and node.entry.type != "none"
+            and node.children):
+        used.add("SelfKnob")
+        members.append(
+            f'    value = SelfKnob(cvt_name="{cvt_for(node.entry.type)}")')
     for seg, child in node.children.items():
         kind = classify(child)
         if kind == "knob":

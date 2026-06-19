@@ -378,3 +378,78 @@ def test_lint_flags_likely_collection_defaulted_to_none():
 def test_lint_clean_input_has_no_warnings():
     entries = _gen.parse_cm(_IFACE_YAML)
     assert _gen.lint(entries) == []
+
+
+# -- self-value emission (value + children objects) -------------------
+
+_NETADDR_YAML = """
+- register:
+    - oid: "/agent/interface"
+      type: none
+      name: ifname
+      access: read_create
+      d: |
+         Network interface.
+    - oid: "/agent/interface/net_addr"
+      type: int32
+      name: address
+      access: read_create
+      d: |
+         Network address of the interface.
+    - oid: "/agent/interface/net_addr/broadcast"
+      type: address
+      access: read_write
+      d: |
+         Broadcast address.
+"""
+
+
+def _emit_netaddr():
+    root = _gen.build_tree(_gen.parse_cm(_NETADDR_YAML))
+    return _gen.emit_module(root.children["interface"], "interface")
+
+
+def test_emit_self_value_for_value_typed_parent():
+    src = _emit_netaddr()
+    assert "class NetAddr(CfgObject):" in src
+    assert 'value = SelfKnob(cvt_name="INT32")' in src       # own prefix value
+    assert 'broadcast = AddrKnob("broadcast")' in src        # the child
+    assert "    SelfKnob," in src                            # imported
+
+
+def test_emit_no_self_value_for_pure_container():
+    # phy is type none with children -> NO self-value
+    src = _emit_iface()
+    assert "SelfKnob" not in src
+
+
+def test_emitted_netaddr_self_value_roundtrips(monkeypatch):
+    from pyte import cfg
+    from pyte.cfg import _engine
+    src = _emit_netaddr()
+    ns: dict = {}
+    exec(compile(src, "<gen>", "exec"), ns)  # noqa: S102
+    sets = []
+    monkeypatch.setattr(cfg, "set",
+                        lambda oid, value, cvt=None: sets.append((oid, cvt)))
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: 24)
+    monkeypatch.setattr(_engine, "_cvt_int", lambda name: 6)
+    iface = ns["Interface"]("A", "eth0")
+    na = iface.net_addr["10.0.0.1"]
+    assert na.value == 24
+    na.value = 25
+    # own-OID write: no trailing /value: segment
+    assert sets[-1] == ("/agent:A/interface:eth0/net_addr:10.0.0.1", 6)
+
+
+def test_emitted_netaddr_is_ruff_clean():
+    import shutil
+    import subprocess
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff not on PATH")
+    src = _emit_netaddr()
+    res = subprocess.run(
+        [ruff, "check", "--stdin-filename", "gen_netaddr.py", "-"],
+        input=src, text=True, capture_output=True)
+    assert res.returncode == 0, res.stdout + res.stderr
