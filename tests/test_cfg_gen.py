@@ -84,6 +84,15 @@ def test_is_leaf_vs_parent():
     assert _gen.is_leaf(iface.children["phy"])  # none-typed but no children here
 
 
+def test_build_tree_sets_parent_links():
+    root = _gen.build_tree(_gen.parse_cm(_SAMPLE))
+    iface = root.children["interface"]
+    mtu = iface.children["mtu"]
+    assert root.parent is None
+    assert iface.parent is root
+    assert mtu.parent is iface
+
+
 def test_build_tree_is_order_independent():
     # A child entry arriving BEFORE its parent must still produce a tree
     # with the parent's own entry attached (CM cross-file merges do not

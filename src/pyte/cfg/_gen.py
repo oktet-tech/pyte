@@ -140,6 +140,7 @@ class Node:
     oid: str                       # full object OID, e.g. "/agent/interface/mtu"
     entry: Entry | None = None     # None for synthetic interior nodes
     children: dict[str, Node] = field(default_factory=dict)
+    parent: Node | None = None     # tree parent (None for the root)
 
 
 def build_tree(entries: list[Entry]) -> Node:
@@ -162,7 +163,7 @@ def build_tree(entries: list[Entry]) -> Node:
                 node = root
                 continue
             if seg not in node.children:
-                node.children[seg] = Node(seg=seg, oid=path)
+                node.children[seg] = Node(seg=seg, oid=path, parent=node)
             node = node.children[seg]
         if node is not None and node.oid == e.oid:
             node.entry = e
