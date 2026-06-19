@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""CM-driven generator core for the pyte.cfg knob engine.
+"""CM-driven generator for the pyte.cfg knob engine.
 
-Pure functions: parse TE's Configurator-model YAML into an object tree,
-classify each node, and emit a Python module of engine shapes
-(CfgObject + typed knobs + SubObject + Collection).  No filesystem, shim
-or testbed access here; wiring to real CM files lives in Phase 2b-ii.
+Pure functions parse TE's Configurator-model YAML into an object tree,
+classify each node, and emit a Python module of engine shapes (CfgObject
++ typed knobs + SubObject + Collection).  ``cm_dir()``/``generate()``/
+``main()`` read the real CM source (te/doc/cm) and write the checked-in
+modules under ``pyte/cfg/gen/``; everything else is filesystem/shim/
+testbed-free and unit-tested on inline YAML.
 """
 from __future__ import annotations
 
