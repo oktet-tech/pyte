@@ -10,7 +10,7 @@ or testbed access here; wiring to real CM files lives in Phase 2b-ii.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -61,3 +61,46 @@ def parse_cm(text: str) -> list[Entry]:
                     doc=_strip_doc(raw.get("d", "")),
                 ))
     return entries
+
+
+@dataclass
+class Node:
+    """A node in the Configurator object tree."""
+
+    seg: str                       # last OID segment, e.g. "mtu"
+    oid: str                       # full object OID, e.g. "/agent/interface/mtu"
+    entry: Entry | None = None     # None for synthetic interior nodes
+    children: dict[str, Node] = field(default_factory=dict)
+
+
+def build_tree(entries: list[Entry]) -> Node:
+    """Build the object tree from register entries.
+
+    Returns the synthetic root (the first OID segment, normally
+    ``agent``).  Interior OIDs missing from `entries` get synthetic
+    nodes with ``entry is None``.
+    """
+    root: Node | None = None
+    for e in entries:
+        segs = [s for s in e.oid.split("/") if s]
+        node = root
+        path = ""
+        for i, seg in enumerate(segs):
+            path = f"{path}/{seg}"
+            if i == 0:
+                if root is None:
+                    root = Node(seg=seg, oid=path)
+                node = root
+                continue
+            if seg not in node.children:
+                node.children[seg] = Node(seg=seg, oid=path)
+            node = node.children[seg]
+        if node is not None and node.oid == e.oid:
+            node.entry = e
+    assert root is not None, "no entries"
+    return root
+
+
+def is_leaf(node: Node) -> bool:
+    """A node with no registered children is a leaf (a value knob)."""
+    return not node.children
