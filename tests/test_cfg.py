@@ -157,3 +157,36 @@ def test_backup_releases_even_if_restore_raises(backup_seam, monkeypatch):
             backup_seam.append("body")
     assert backup_seam == ["create", "body",
                            ("restore", "BK"), ("release", "BK")]
+
+
+# -- transaction(): keep on success, roll back on failure --------------
+
+def test_transaction_keeps_changes_on_success(backup_seam):
+    with cfg.transaction():
+        backup_seam.append("body")
+    # create, body, then release -- NO restore (changes kept)
+    assert backup_seam == ["create", "body", ("release", "BK")]
+
+
+def test_transaction_rolls_back_on_exception(backup_seam):
+    with pytest.raises(RuntimeError, match="boom"):
+        with cfg.transaction():
+            backup_seam.append("body")
+            raise RuntimeError("boom")
+    assert backup_seam == ["create", "body",
+                           ("restore", "BK"), ("release", "BK")]
+
+
+def test_transaction_releases_even_if_restore_raises(backup_seam,
+                                                     monkeypatch):
+    def boom_restore(name):
+        backup_seam.append(("restore", name))
+        raise RuntimeError("restore failed")
+
+    monkeypatch.setattr(cfg, "_backup_restore", boom_restore)
+    with pytest.raises(RuntimeError, match="restore failed"):
+        with cfg.transaction():
+            backup_seam.append("body")
+            raise RuntimeError("boom")
+    assert backup_seam == ["create", "body",
+                           ("restore", "BK"), ("release", "BK")]

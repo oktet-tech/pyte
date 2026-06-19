@@ -248,6 +248,34 @@ def backup():
             _backup_release(name)
 
 
+@contextmanager
+def transaction():
+    """Apply configuration changes with all-or-nothing rollback.
+
+    Takes a configuration backup on entry.  Writes inside the block apply
+    immediately (no batching).  On a clean exit the backup is released
+    and the changes are KEPT; on ANY exception the backup is restored --
+    rolling back every change made in the block -- and the exception
+    propagates.
+
+    Contrast with backup(), which ALWAYS restores on exit.  Batched /
+    deferred-commit transactions are not provided: TE has no public API
+    to abort a staged local-command sequence, so rollback-via-backup is
+    the safe primitive.
+    """
+    name = _backup_create()
+    ok = False
+    try:
+        yield
+        ok = True
+    finally:
+        try:
+            if not ok:
+                _backup_restore(name)
+        finally:
+            _backup_release(name)
+
+
 def wait_changes() -> None:
     """Wait for pending configuration changes to propagate to agents."""
     from pyte._shim import lib
