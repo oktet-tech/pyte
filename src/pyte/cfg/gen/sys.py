@@ -19,7 +19,11 @@ class Vm(CfgObject):
 class Fs(CfgObject):
     """System settings from /proc/sys/fs."""
     file_max = IntKnob("file-max", cvt_name="UINT64")
-    file_nr = IntKnob("file-nr", cvt_name="UINT64", access="read_only")
+    file_nr = IntKnob(
+        "file-nr",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
 
 
 class NetCore(CfgObject):
@@ -37,7 +41,9 @@ class NetCore(CfgObject):
 class NetNetfilter(CfgObject):
     """System settings from /proc/sys/net/netfilter/."""
     nf_conntrack_max = IntKnob("nf_conntrack_max", cvt_name="INT32")
-    nf_conntrack_tcp_loose = IntKnob("nf_conntrack_tcp_loose", cvt_name="INT32")
+    nf_conntrack_tcp_loose = IntKnob(
+        "nf_conntrack_tcp_loose",
+        cvt_name="INT32")
 
 
 class NetIpv4Conf(CfgObject):
@@ -80,7 +86,9 @@ class NetIpv4(CfgObject):
     tcp_dsack = IntKnob("tcp_dsack", cvt_name="INT32")
     igmp_max_memberships = IntKnob("igmp_max_memberships", cvt_name="INT32")
     tcp_early_retrans = IntKnob("tcp_early_retrans", cvt_name="INT32")
-    fib_multipath_hash_policy = IntKnob("fib_multipath_hash_policy", cvt_name="INT32")
+    fib_multipath_hash_policy = IntKnob(
+        "fib_multipath_hash_policy",
+        cvt_name="INT32")
     ip_default_ttl = IntKnob("ip_default_ttl", cvt_name="INT32")
     tcp_congestion_control = StrKnob("tcp_congestion_control")
     icmp_ratelimit = IntKnob("icmp_ratelimit", cvt_name="INT32")
@@ -111,7 +119,9 @@ class NetIpv6(CfgObject):
     auto_flowlabels = IntKnob("auto_flowlabels", cvt_name="INT32")
     conf = SubObject("conf", NetIpv6Conf)
     route = SubObject("route", NetIpv6Route)
-    fib_multipath_hash_policy = IntKnob("fib_multipath_hash_policy", cvt_name="INT32")
+    fib_multipath_hash_policy = IntKnob(
+        "fib_multipath_hash_policy",
+        cvt_name="INT32")
 
 
 class Net(CfgObject):

@@ -38,8 +38,8 @@ class NeighStatic(CfgObject):
 
 class NeighDynamic(CfgObject):
     """Dynamic neighbour entries."""
-    value = SelfKnob(cvt_name="ADDRESS")
-    state = IntKnob("state", cvt_name="INT32", access="read_only")
+    value = SelfKnob(cvt_name="ADDRESS", sync=True)
+    state = IntKnob("state", cvt_name="INT32", access="read_only", sync=True)
 
 
 class NeighProxy(CfgObject):
@@ -49,18 +49,62 @@ class NeighProxy(CfgObject):
 
 class Stats(CfgObject):
     """Interface statistics."""
-    value = SelfKnob(cvt_name="STRING")
-    in_octets = IntKnob("in_octets", cvt_name="UINT64", access="read_only")
-    in_ucast_pkts = IntKnob("in_ucast_pkts", cvt_name="UINT64", access="read_only")
-    in_nucast_pkts = IntKnob("in_nucast_pkts", cvt_name="UINT64", access="read_only")
-    in_discards = IntKnob("in_discards", cvt_name="UINT64", access="read_only")
-    in_errors = IntKnob("in_errors", cvt_name="UINT64", access="read_only")
-    in_unknown_protos = IntKnob("in_unknown_protos", cvt_name="UINT64", access="read_only")
-    out_octets = IntKnob("out_octets", cvt_name="UINT64", access="read_only")
-    out_ucast_pkts = IntKnob("out_ucast_pkts", cvt_name="UINT64", access="read_only")
-    out_nucast_pkts = IntKnob("out_nucast_pkts", cvt_name="UINT64", access="read_only")
-    out_discards = IntKnob("out_discards", cvt_name="UINT64", access="read_only")
-    out_errors = IntKnob("out_errors", cvt_name="UINT64", access="read_only")
+    value = SelfKnob(cvt_name="STRING", sync=True)
+    in_octets = IntKnob(
+        "in_octets",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    in_ucast_pkts = IntKnob(
+        "in_ucast_pkts",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    in_nucast_pkts = IntKnob(
+        "in_nucast_pkts",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    in_discards = IntKnob(
+        "in_discards",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    in_errors = IntKnob(
+        "in_errors",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    in_unknown_protos = IntKnob(
+        "in_unknown_protos",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    out_octets = IntKnob(
+        "out_octets",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    out_ucast_pkts = IntKnob(
+        "out_ucast_pkts",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    out_nucast_pkts = IntKnob(
+        "out_nucast_pkts",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    out_discards = IntKnob(
+        "out_discards",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
+    out_errors = IntKnob(
+        "out_errors",
+        cvt_name="UINT64",
+        access="read_only",
+        sync=True)
 
 
 class Vlans(CfgObject):
@@ -130,18 +174,26 @@ class Phy(CfgObject):
     port = StrKnob("port", access="read_only")
     autoneg = IntKnob("autoneg", cvt_name="INT32")
     duplex_admin = StrKnob("duplex_admin")
-    duplex_oper = StrKnob("duplex_oper", access="read_only")
+    duplex_oper = StrKnob("duplex_oper", access="read_only", sync=True)
     speed_admin = IntKnob("speed_admin", cvt_name="INT32")
-    speed_oper = IntKnob("speed_oper", cvt_name="INT32", access="read_only")
+    speed_oper = IntKnob(
+        "speed_oper",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
     mode = Collection("mode", PhyMode)
     lp_advertised = Collection("lp_advertised", PhyLpAdvertised)
-    state = IntKnob("state", cvt_name="INT32", access="read_only")
-    set_supported = IntKnob("set_supported", cvt_name="INT32", access="read_only")
+    state = IntKnob("state", cvt_name="INT32", access="read_only", sync=True)
+    set_supported = IntKnob(
+        "set_supported",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
 
 
 class Eee(CfgObject):
     """Network interface Energy Efficient Ethernet parameters"""
-    eee_active = BoolKnob("eee_active", access="read_only")
+    eee_active = BoolKnob("eee_active", access="read_only", sync=True)
     eee_enabled = BoolKnob("eee_enabled")
     tx_lpi_enabled = IntKnob("tx_lpi_enabled", cvt_name="UINT64")
     tx_lpi_timer = IntKnob("tx_lpi_timer", cvt_name="UINT32")
@@ -166,25 +218,41 @@ class Private(CfgObject):
 class ChannelsCombined(CfgObject):
     """NIC combined channel count controls"""
     current = IntKnob("current", cvt_name="INT32")
-    maximum = IntKnob("maximum", cvt_name="INT32", access="read_only")
+    maximum = IntKnob(
+        "maximum",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
 
 
 class ChannelsOther(CfgObject):
     """NIC other channel count controls"""
     current = IntKnob("current", cvt_name="INT32")
-    maximum = IntKnob("maximum", cvt_name="INT32", access="read_only")
+    maximum = IntKnob(
+        "maximum",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
 
 
 class ChannelsRx(CfgObject):
     """NIC Rx channel count controls"""
     current = IntKnob("current", cvt_name="INT32")
-    maximum = IntKnob("maximum", cvt_name="INT32", access="read_only")
+    maximum = IntKnob(
+        "maximum",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
 
 
 class ChannelsTx(CfgObject):
     """NIC Tx channel count controls"""
     current = IntKnob("current", cvt_name="INT32")
-    maximum = IntKnob("maximum", cvt_name="INT32", access="read_only")
+    maximum = IntKnob(
+        "maximum",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
 
 
 class Channels(CfgObject):
@@ -222,7 +290,7 @@ class Deviceinfo(CfgObject):
 
 class XstatsXstat(CfgObject):
     """Network interface certain extended statistic"""
-    value = SelfKnob(cvt_name="UINT64")
+    value = SelfKnob(cvt_name="UINT64", sync=True)
 
 
 class Xstats(CfgObject):
@@ -232,7 +300,7 @@ class Xstats(CfgObject):
 
 class IrqCpu(CfgObject):
     """Interrupt counter per CPU"""
-    value = SelfKnob(cvt_name="UINT64")
+    value = SelfKnob(cvt_name="UINT64", sync=True)
 
 
 class Irq(CfgObject):
@@ -244,10 +312,10 @@ class Irq(CfgObject):
 
 class Interface(CfgObject):
     """Network interface"""
-    switch_id = StrKnob("switch_id", access="read_only")
-    port_id = StrKnob("port_id", access="read_only")
-    port_name = StrKnob("port_name", access="read_only")
-    index = IntKnob("index", cvt_name="INT32", access="read_only")
+    switch_id = StrKnob("switch_id", access="read_only", sync=True)
+    port_id = StrKnob("port_id", access="read_only", sync=True)
+    port_name = StrKnob("port_name", access="read_only", sync=True)
+    index = IntKnob("index", cvt_name="INT32", access="read_only", sync=True)
     net_addr = Collection("net_addr", NetAddr)
     mcast_link_addr = Collection("mcast_link_addr", McastLinkAddr)
     link_addr = AddrKnob("link_addr")
@@ -255,7 +323,11 @@ class Interface(CfgObject):
     mtu = IntKnob("mtu", cvt_name="INT32")
     ip4_ttl = IntKnob("ip4_ttl", cvt_name="INT32")
     status = IntKnob("status", cvt_name="INT32")
-    oper_status = IntKnob("oper_status", cvt_name="INT32", access="read_only")
+    oper_status = IntKnob(
+        "oper_status",
+        cvt_name="INT32",
+        access="read_only",
+        sync=True)
     hwtstamp = SubObject("hwtstamp", Hwtstamp)
     promisc = IntKnob("promisc", cvt_name="INT32")
     allmulti = BoolKnob("allmulti")
@@ -279,7 +351,7 @@ class Interface(CfgObject):
     ring = SubObject("ring", Ring)
     msglvl = IntKnob("msglvl", cvt_name="UINT64")
     deviceinfo = SubObject("deviceinfo", Deviceinfo)
-    reset = IntKnob("reset", cvt_name="INT32")
+    reset = IntKnob("reset", cvt_name="INT32", sync=True)
     xstats = SubObject("xstats", Xstats)
     irq = Collection("irq", Irq)
 
