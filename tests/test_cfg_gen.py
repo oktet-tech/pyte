@@ -521,6 +521,77 @@ def test_emitted_netaddr_is_ruff_clean():
     assert res.returncode == 0, res.stdout + res.stderr
 
 
+# -- generalized root __init__ (any root) -----------------------------
+
+def test_init_spec_unchanged_for_agent_roots():
+    iface = _emit_iface()
+    assert "def __init__(self, ta, ifname):" in iface
+    assert 'super().__init__(f"/agent:{ta}/interface:{ifname}")' in iface
+    sysroot = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/sys"
+      type: none
+      access: read_only
+      d: |
+         System.
+""")).children["sys"]
+    src = _gen.emit_module(sysroot, "sys")
+    assert "def __init__(self, ta):" in src
+    assert 'super().__init__(f"/agent:{ta}/sys:")' in src
+
+
+def test_emit_non_agent_collection_root():
+    root = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/net"
+      type: none
+      name: net
+      access: read_create
+      d: |
+         A network.
+    - oid: "/net/node"
+      type: none
+      name: node
+      access: read_create
+      d: |
+         A node in the network.
+"""))
+    # /net is the tree root itself (top-level, no synthetic parent).
+    src = _gen.emit_module(root, "net")
+    assert "class Net(CfgObject):" in src
+    assert "def __init__(self, net):" in src
+    assert 'super().__init__(f"/net:{net}")' in src
+    assert 'node = Collection("node",' in src
+
+
+def test_emit_deep_root_collects_ancestor_keys():
+    root = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/interface"
+      type: none
+      name: ifname
+      access: read_create
+      d: |
+         Interface.
+    - oid: "/agent/interface/rule"
+      type: none
+      name: ruleid
+      access: read_create
+      d: |
+         A rule.
+    - oid: "/agent/interface/rule/prio"
+      type: int32
+      access: read_write
+      d: |
+         Priority.
+"""))
+    rule = root.children["interface"].children["rule"]
+    src = _gen.emit_module(rule, "rule")
+    assert "def __init__(self, ta, ifname, ruleid):" in src
+    assert ('super().__init__('
+            'f"/agent:{ta}/interface:{ifname}/rule:{ruleid}")' in src)
+
+
 # -- real-CM wiring ---------------------------------------------------
 
 def test_targets_cover_sys_and_interface():

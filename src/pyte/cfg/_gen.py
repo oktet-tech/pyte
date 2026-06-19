@@ -316,6 +316,42 @@ def _knob_line(seg: str, node: Node) -> str:
     return f"    {attr} = {cls}(\n{inner})"
 
 
+def _init_spec(root: Node) -> tuple[list[str], str]:
+    """Derive (init params, base-OID f-string) from the root's path.
+
+    Walks tree-root -> emitted root via parent links.  The universal TA
+    root segment ``agent`` contributes ``ta`` (-> ``/agent:{ta}``); each
+    other collection level contributes its key (``/{seg}:{key}``);
+    singleton levels contribute ``/{seg}:``.
+
+    Limitation: an ancestor missing from the parsed input has ``entry is
+    None`` and is treated as a singleton; only ``agent`` is recognized
+    without an entry.  So a deeper root's collection ancestors must be in
+    the same parse input (the per-file targets satisfy this).
+    """
+    path: list[Node] = []
+    node: Node | None = root
+    while node is not None:
+        path.append(node)
+        node = node.parent
+    path.reverse()
+
+    params: list[str] = []
+    parts: list[str] = []
+    for n in path:
+        if n.seg == "agent":
+            params.append("ta")
+            parts.append("/agent:{ta}")
+        elif classify(n) == "collection":
+            key = (n.entry.name
+                   if n.entry and n.entry.name != "composite" else "name")
+            params.append(key)
+            parts.append(f"/{n.seg}:{{{key}}}")
+        else:
+            parts.append(f"/{n.seg}:")
+    return params, "".join(parts)
+
+
 def emit_module(root: Node, module_name: str) -> str:
     """Emit a Python module (source text) for the root subtree.
 
@@ -326,14 +362,7 @@ def emit_module(root: Node, module_name: str) -> str:
     title = _esc_doc(root.entry.doc.splitlines()[0]
                      if root.entry and root.entry.doc else module_name)
 
-    params = ["ta"]
-    oid_fmt = "/agent:{ta}"
-    if classify(root) == "collection":
-        key = root.entry.name if root.entry.name != "composite" else "name"
-        params.append(key)
-        oid_fmt += f"/{root.seg}:{{{key}}}"
-    else:
-        oid_fmt += f"/{root.seg}:"
+    params, oid_fmt = _init_spec(root)
 
     blocks: list[str] = []
     used: set[str] = {"CfgObject"}   # every emitted class subclasses it
