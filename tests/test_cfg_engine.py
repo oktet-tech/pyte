@@ -350,8 +350,8 @@ def test_collection_delitem(fake, monkeypatch):
 def test_engine_names_reexported_from_pyte_cfg():
     import pyte.cfg as cfgpkg
     for name in ("CfgObject", "IntKnob", "BoolKnob", "DoubleKnob",
-                 "StrKnob", "AddrKnob", "IpAddrKnob", "SubObject",
-                 "Collection"):
+                 "StrKnob", "AddrKnob", "IpAddrKnob", "SelfKnob",
+                 "SubObject", "Collection"):
         assert hasattr(cfgpkg, name), name
 
 

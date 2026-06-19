@@ -405,6 +405,7 @@ from pyte.cfg._engine import (  # noqa: E402,F401 - public re-exports
     DoubleKnob,
     IntKnob,
     IpAddrKnob,
+    SelfKnob,
     StrKnob,
     SubObject,
 )
