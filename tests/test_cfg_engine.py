@@ -360,6 +360,41 @@ def test_cfgobject_name_top_level():
     assert CfgObject("/agent:A").name == "A"
 
 
+def _record_sync_get(monkeypatch, seen):
+    def fake_get(oid, sync=False):
+        seen["sync"] = sync
+        return 5
+    monkeypatch.setattr(cfg, "get", fake_get)
+
+
+def test_knob_sync_reads_with_sync(monkeypatch):
+    seen = {}
+    _record_sync_get(monkeypatch, seen)
+
+    class Obj(CfgObject):
+        v = IntKnob("v", sync=True)
+
+        def __init__(self):
+            super().__init__("/agent:A/x:y")
+
+    assert Obj().v == 5
+    assert seen["sync"] is True
+
+
+def test_knob_default_no_sync(monkeypatch):
+    seen = {}
+    _record_sync_get(monkeypatch, seen)
+
+    class Obj(CfgObject):
+        v = IntKnob("v")
+
+        def __init__(self):
+            super().__init__("/agent:A/x:y")
+
+    _ = Obj().v
+    assert seen["sync"] is False
+
+
 def test_engine_names_reexported_from_pyte_cfg():
     import pyte.cfg as cfgpkg
     for name in ("CfgObject", "IntKnob", "BoolKnob", "DoubleKnob",

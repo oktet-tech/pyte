@@ -79,11 +79,12 @@ class _Knob:
     cvt_name: str | None = None  # e.g. "INT32"; None -> cfg.set looks it up
 
     def __init__(self, subid: str, *, cvt_name: str | None = None,
-                 access: str = "read_write"):
+                 access: str = "read_write", sync: bool = False):
         if access not in ("read_write", "read_only", "read_create"):
             raise ValueError(f"invalid access {access!r}")
         self.subid = subid
         self.access = access
+        self.sync = sync  # volatile knobs re-read from the agent on get
         if cvt_name is not None:
             self.cvt_name = cvt_name  # overrides the subclass class default
         self.attr = subid  # replaced by __set_name__ when used as a class attr
@@ -97,7 +98,7 @@ class _Knob:
     def __get__(self, obj, owner=None):
         if obj is None:
             return self
-        return self.from_cfg(cfg.get(self._oid(obj)))
+        return self.from_cfg(cfg.get(self._oid(obj), sync=self.sync))
 
     def __set__(self, obj, value) -> None:
         if self.access == "read_only":
@@ -187,8 +188,8 @@ class SelfKnob(_Knob):
     """
 
     def __init__(self, *, cvt_name: str | None = None,
-                 access: str = "read_write"):
-        super().__init__("", cvt_name=cvt_name, access=access)
+                 access: str = "read_write", sync: bool = False):
+        super().__init__("", cvt_name=cvt_name, access=access, sync=sync)
 
     def _oid(self, obj: CfgObject) -> str:
         return obj.oid
