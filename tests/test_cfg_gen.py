@@ -104,3 +104,65 @@ def test_build_tree_is_order_independent():
     iface = root.children["interface"]
     assert iface.entry is not None and iface.entry.name == "ifname"
     assert iface.children["mtu"].entry.type == "int32"
+
+
+# -- classify + cvt + naming ------------------------------------------
+
+def test_cvt_for_maps_types():
+    assert _gen.cvt_for("int32") == "INT32"
+    assert _gen.cvt_for("uint64") == "UINT64"
+    assert _gen.cvt_for("integer") == "INT32"   # known typo -> normalised
+    assert _gen.cvt_for("bool") == "BOOL"
+    assert _gen.cvt_for("address") == "ADDRESS"
+
+
+def test_knob_class_for_type():
+    assert _gen.knob_class("int32") == "IntKnob"
+    assert _gen.knob_class("bool") == "BoolKnob"
+    assert _gen.knob_class("double") == "DoubleKnob"
+    assert _gen.knob_class("string") == "StrKnob"
+    assert _gen.knob_class("address") == "AddrKnob"
+
+
+def test_classify_leaf_singleton_is_knob():
+    root = _gen.build_tree(_gen.parse_cm(_SAMPLE))
+    mtu = root.children["interface"].children["mtu"]
+    assert _gen.classify(mtu) == "knob"
+
+
+def test_classify_singleton_parent_is_subobject():
+    root = _gen.build_tree(_gen.parse_cm(_SAMPLE))
+    phy = root.children["interface"].children["phy"]
+    assert _gen.classify(phy) == "subobject"
+
+
+def test_classify_named_parent_is_collection():
+    root = _gen.build_tree(_gen.parse_cm(_SAMPLE))
+    iface = root.children["interface"]      # name: ifname
+    assert _gen.classify(iface) == "collection"
+
+
+def test_classify_composite():
+    entries = _gen.parse_cm('''
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      name: composite
+      d: |
+         X.
+''')
+    root = _gen.build_tree(entries)
+    assert _gen.classify(root.children["x"]) == "collection"
+
+
+def test_class_name_is_path_qualified_pascalcase():
+    assert _gen.class_name("/agent/interface", "/agent/interface") == \
+        "Interface"
+    assert _gen.class_name("/agent/interface/channels/combined",
+                           "/agent/interface") == "ChannelsCombined"
+
+
+def test_attr_name_is_segment():
+    assert _gen.attr_name("speed_admin") == "speed_admin"
+    assert _gen.attr_name("net_addr") == "net_addr"
