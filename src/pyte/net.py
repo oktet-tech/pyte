@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pyte import cfg, log
+from pyte.cfg.gen.interface import Interface as _GenInterface
 from pyte.errors import CfgError, check
 from pyte.log import _enc
 
@@ -87,45 +88,36 @@ class Neigh:
     static: bool
 
 
-class Iface:
-    """One /agent:X/interface:Y subtree (must be a grabbed resource)."""
+class Iface(_GenInterface):
+    """One /agent:X/interface:Y subtree (must be a grabbed resource).
+
+    Subclasses the generated Interface: typed knobs (mtu, status,
+    link_addr, ...), sub-objects (phy, stats, ...) and collections
+    (net_addr, vlans, ...) are inherited; this class adds the ergonomic
+    helpers and the agent attribute.
+    """
 
     def __init__(self, agent: str, name: str):
+        super().__init__(agent, name)   # builds /agent:agent/interface:name
         self.agent = agent
-        self.name = name
-        self._node = cfg.node(f"/agent:{agent}/interface:{name}")
-
-    @property
-    def oid(self) -> str:
-        return self._node.oid
-
-    @property
-    def status(self) -> int:
-        return self._node.child("status").value
+        # Do NOT set self.name: CfgObject.name is a read-only property
+        # (the inherited property yields the ifname from the OID).
 
     def up(self) -> None:
-        self._node.child("status").value = 1
+        self.status = 1
 
     def down(self) -> None:
-        self._node.child("status").value = 0
-
-    @property
-    def mtu(self) -> int:
-        return self._node.child("mtu").value
-
-    @mtu.setter
-    def mtu(self, value: int) -> None:
-        self._node.child("mtu").value = int(value)
+        self.status = 0
 
     @property
     def mac(self) -> str:
-        return self._node.child("link_addr").value
+        """The link-layer (MAC) address (alias for link_addr)."""
+        return self.link_addr
 
     @property
     def addresses(self) -> list[tuple[str, int]]:
-        """[(ip, prefix)]: the net_addr node's own value is the prefix."""
-        return [(n.name, int(n.value))
-                for n in cfg.find(f"{self.oid}/net_addr:*")]
+        """[(ip, prefix)]: the net_addr entry's own value is the prefix."""
+        return [(na.name, na.value) for na in self.net_addr]
 
     def addr_add(self, ip: str, prefix: int, broadcast: bool = True) -> None:
         from pyte._shim import lib
@@ -134,7 +126,7 @@ class Iface:
               f"addr_add({ip}/{prefix})", CfgError)
 
     def addr_del(self, ip: str) -> None:
-        cfg.delete(f"{self.oid}/net_addr:{ip}")
+        del self.net_addr[ip]
 
     def grab(self) -> None:
         """Grab this interface as the agent's rsrc (see cfg.grab_rsrc)."""
