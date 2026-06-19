@@ -206,3 +206,42 @@ def test_runtime_fallback_knob_passes_cvt_none(fake):
 
     Bare().thing = "v"
     assert fake.sets[-1] == ("/agent:A/x:y/thing:", "v", None)
+
+
+# -- SubObject: singleton child nesting -------------------------------
+
+from pyte.cfg._engine import SubObject  # noqa: E402
+
+
+class Phy(CfgObject):
+    autoneg = BoolKnob("autoneg")
+    speed_admin = IntKnob("speed_admin")
+
+
+class IfaceWithPhy(CfgObject):
+    phy = SubObject("phy", Phy)
+
+    def __init__(self, ta, ifname):
+        super().__init__(f"/agent:{ta}/interface:{ifname}")
+
+
+def test_subobject_returns_bound_child(fake):
+    phy = IfaceWithPhy("A", "eth0").phy
+    assert isinstance(phy, Phy)
+    assert phy.oid == "/agent:A/interface:eth0/phy:"
+
+
+def test_subobject_knob_oid_has_double_segment(fake):
+    # Real TE OID form: /agent:%s/interface:%s/phy:/autoneg:
+    fake.store["/agent:A/interface:eth0/phy:/autoneg:"] = True
+    assert IfaceWithPhy("A", "eth0").phy.autoneg is True
+
+
+def test_subobject_knob_set(fake):
+    IfaceWithPhy("A", "eth0").phy.speed_admin = 10000
+    assert fake.sets[-1] == (
+        "/agent:A/interface:eth0/phy:/speed_admin:", 10000, 6)
+
+
+def test_subobject_on_class_returns_descriptor():
+    assert isinstance(IfaceWithPhy.phy, SubObject)

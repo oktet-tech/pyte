@@ -166,3 +166,20 @@ class IpAddrKnob(_Knob):
 
     def to_cfg(self, value):
         return str(value)
+
+
+class SubObject:
+    """A singleton child object (CVT none, empty instance name).
+
+    Returns the child class bound to ``{parent oid}/{subid}:`` so the
+    child's own knobs compose the real TE form, e.g. ``.../phy:/autoneg:``.
+    """
+
+    def __init__(self, subid: str, cls: type[CfgObject]):
+        self.subid = subid
+        self.cls = cls
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        return self.cls(f"{obj.oid}/{self.subid}:")
