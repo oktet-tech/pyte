@@ -245,11 +245,15 @@ _ENGINE_NAMES = ("AddrKnob", "BoolKnob", "CfgObject", "Collection",
                  "SubObject")
 
 
-def _imports_for(blocks: list[str]) -> str:
-    """Render a `from pyte.cfg import (...)` of the names used in blocks."""
-    text = "\n".join(blocks)
-    used = [n for n in _ENGINE_NAMES if re.search(rf"\b{n}\b", text)]
-    inner = "\n".join(f"    {n}," for n in used)
+def _imports_for(used: set[str]) -> str:
+    """Render `from pyte.cfg import (...)` for the engine names used.
+
+    `used` is collected deterministically while emitting (not by scanning
+    the rendered text), so docstring prose containing an engine word
+    cannot introduce a spurious -> unused (ruff F401) import.
+    """
+    names = [n for n in _ENGINE_NAMES if n in used]
+    inner = "\n".join(f"    {n}," for n in names)
     return f"from pyte.cfg import (\n{inner}\n)\n"
 
 
@@ -303,19 +307,22 @@ def emit_module(root: Node, module_name: str) -> str:
         oid_fmt += f"/{root.seg}:"
 
     blocks: list[str] = []
-    _emit_class(root, root_oid, params, oid_fmt, blocks)
-    header = _HEADER.format(title=title, imports=_imports_for(blocks))
+    used: set[str] = {"CfgObject"}   # every emitted class subclasses it
+    _emit_class(root, root_oid, params, oid_fmt, blocks, used)
+    header = _HEADER.format(title=title, imports=_imports_for(used))
     # Two blank lines before the first class and between classes (PEP 8 /
     # ruff E302) so the generated module is lint-clean.
     return header + "\n\n" + "\n\n\n".join(blocks) + "\n"
 
 
 def _emit_class(node: Node, root_oid: str, root_params: list[str],
-                root_oid_fmt: str, blocks: list[str]) -> None:
+                root_oid_fmt: str, blocks: list[str],
+                used: set[str]) -> None:
     """Append the class block for `node`; recurse into object children.
 
     Child object classes are appended BEFORE the parent's block so that
-    SubObject/Collection references are already defined.
+    SubObject/Collection references are already defined.  `used`
+    accumulates the engine names actually emitted (for the import block).
     """
     cname = class_name(node.oid, root_oid)
     body: list[str] = [f"class {cname}(CfgObject):"]
@@ -325,17 +332,22 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
     for seg, child in node.children.items():
         kind = classify(child)
         if kind == "knob":
+            used.add(knob_class(child.entry.type))
             members.append(_knob_line(seg, child))
         elif kind == "subobject":
+            used.add("SubObject")
             members.append(
                 f'    {attr_name(seg)} = SubObject('
                 f'"{seg}", {class_name(child.oid, root_oid)})')
-            _emit_class(child, root_oid, root_params, root_oid_fmt, blocks)
+            _emit_class(child, root_oid, root_params, root_oid_fmt,
+                        blocks, used)
         else:  # collection
+            used.add("Collection")
             members.append(
                 f'    {attr_name(seg)} = Collection('
                 f'"{seg}", {class_name(child.oid, root_oid)})')
-            _emit_class(child, root_oid, root_params, root_oid_fmt, blocks)
+            _emit_class(child, root_oid, root_params, root_oid_fmt,
+                        blocks, used)
 
     has_init = node.oid == root_oid
     if members:

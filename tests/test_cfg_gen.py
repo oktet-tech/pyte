@@ -264,6 +264,30 @@ def test_emit_imports_only_used_names():
         assert unused not in src
 
 
+def test_emit_docstring_word_does_not_add_import():
+    # Engine words appearing in d: prose must NOT pull in an import (which
+    # would then be unused -> ruff F401). Imports are tracked from emitted
+    # code, not by scanning rendered text.
+    y = """
+- register:
+    - oid: "/agent/thing"
+      type: none
+      access: read_only
+      d: |
+         A Collection of SubObject-like AddrKnob words.
+    - oid: "/agent/thing/n"
+      type: int32
+      access: read_write
+      d: |
+         A number.
+"""
+    root = _gen.build_tree(_gen.parse_cm(y))
+    src = _gen.emit_module(root.children["thing"], "thing")
+    for spurious in ("    Collection,", "    SubObject,", "    AddrKnob,"):
+        assert spurious not in src
+    assert "    IntKnob," in src   # the only real engine name used
+
+
 def test_emitted_source_is_ruff_clean():
     # The generated module is checked in and linted in Phase 2b-ii, so it
     # must pass the repo's own ruff configuration.
