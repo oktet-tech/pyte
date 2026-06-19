@@ -110,3 +110,31 @@ def test_curated_phy_duplex_reads_oper_sets_admin(monkeypatch):
     assert phy.duplex == "full"  # get -> duplex_oper
     phy.duplex = "half"          # set -> duplex_admin
     assert sets[-1] == ("/agent:A/interface:eth0/phy:/duplex_admin:", "half")
+
+
+# -- AgentNet.base (generated agent scalars) --------------------------
+
+def test_agentnet_base_is_typed_generated_agent():
+    from pyte import net
+    from pyte.cfg.gen.agent import Agent
+    b = net.agent("A").base
+    assert isinstance(b, Agent)
+    assert b.oid == "/agent:A"
+
+
+def test_agentnet_base_reads_scalar(monkeypatch):
+    from pyte import cfg, net
+    gets = []
+    monkeypatch.setattr(cfg, "get",
+                        lambda oid, sync=False: gets.append(oid) or "/tmp")
+    val = net.agent("A").base.dir
+    assert val == "/tmp"
+    assert gets[-1] == "/agent:A/dir:"
+
+
+def test_agentnet_base_uname_subobject(monkeypatch):
+    from pyte import cfg, net
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: "Linux")
+    u = net.agent("A").base.uname
+    assert u.oid == "/agent:A/uname:"
+    assert u.release == "Linux"   # /agent:A/uname:/release:

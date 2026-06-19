@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from pyte import cfg, log
 from pyte.cfg import SubObject
+from pyte.cfg.gen.agent import Agent as _GenAgent
 from pyte.cfg.gen.interface import Interface as _GenInterface
 from pyte.cfg.gen.interface import Phy as _GenPhy
 from pyte.cfg.gen.sys import Sys as _GenSys
@@ -261,6 +262,16 @@ class AgentNet:
         check(lib.pyte_cfg_neigh_del(_enc(self.name), _enc(iface),
                                      _enc(ip)),
               f"neigh_del({ip})", CfgError)
+
+    # -- base ----------------------------------------------------------
+    @property
+    def base(self) -> _GenAgent:
+        """Typed access to the agent-level scalar settings.
+
+        e.g. ``agt.base.dir``, ``agt.base.uname.release``,
+        ``agt.base.ip4_fw``.  Mirrors the ``tapi_cfg_base_*`` getters.
+        """
+        return _GenAgent(self.name)
 
     # -- sysctl ------------------------------------------------------------
     @property
