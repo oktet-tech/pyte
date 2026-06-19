@@ -28,6 +28,7 @@ class Entry:
     name: str       # "none" (default/singleton) | "composite" | <ident>
     doc: str        # human prose from d:, structural trailer stripped
     raw_name: str = ""  # text after "Name:" in d: block; "" if not kept
+    volatile: bool = False  # True when the CM entry carries volatile: true
 
 
 def _strip_doc(d: str) -> str:
@@ -70,6 +71,7 @@ def _make_entry(raw: dict, keep_raw: bool) -> Entry:
         name=str(raw.get("name", "none")),
         doc=_strip_doc(d),
         raw_name=_name_prose(d) if keep_raw else "",
+        volatile=bool(raw.get("volatile", False)),
     )
 
 
@@ -294,7 +296,7 @@ def _docstring(node: Node, indent: str) -> list[str]:
 
 
 def _knob_line(seg: str, node: Node) -> str:
-    """Render one leaf-knob descriptor assignment line."""
+    """Render one leaf-knob descriptor assignment line (wrapped if long)."""
     cm_type = node.entry.type
     cls = knob_class(cm_type)
     args = [f'"{seg}"']
@@ -302,7 +304,15 @@ def _knob_line(seg: str, node: Node) -> str:
         args.append(f'cvt_name="{cvt_for(cm_type)}"')
     if node.entry.access == "read_only":
         args.append('access="read_only"')
-    return f'    {attr_name(seg)} = {cls}({", ".join(args)})'
+    if node.entry.volatile:
+        args.append("sync=True")
+    attr = attr_name(seg)
+    one = f'    {attr} = {cls}({", ".join(args)})'
+    if len(one) <= 79:
+        return one
+    # Wrap: one arg per continuation line (guarantees <=79 for any real arg).
+    inner = ",\n".join(f"        {a}" for a in args)
+    return f"    {attr} = {cls}(\n{inner})"
 
 
 def emit_module(root: Node, module_name: str) -> str:
@@ -354,8 +364,10 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
     # lose its value.  Pure none-typed containers get none.
     if node.entry is not None and node.entry.type != "none":
         used.add("SelfKnob")
+        sync = ", sync=True" if node.entry.volatile else ""
         members.append(
-            f'    value = SelfKnob(cvt_name="{cvt_for(node.entry.type)}")')
+            f'    value = SelfKnob(cvt_name="{cvt_for(node.entry.type)}"'
+            f'{sync})')
     for seg, child in node.children.items():
         kind = classify(child)
         if kind == "knob":

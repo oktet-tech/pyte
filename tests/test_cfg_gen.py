@@ -543,3 +543,94 @@ def test_generate_from_text_map_emits_modules():
     assert "class Sys(CfgObject):" in out["sys"]
     assert 'console_loglevel = IntKnob("console_loglevel", cvt_name="INT32")' \
         in out["sys"]
+
+
+# -- volatile -> sync=True --------------------------------------------
+
+def test_parse_captures_volatile():
+    e = {x.oid: x for x in _gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      d: |
+         X.
+    - oid: "/agent/x/counter"
+      type: uint64
+      access: read_only
+      volatile: true
+      d: |
+         A counter.
+""")}
+    assert e["/agent/x/counter"].volatile is True
+    assert e["/agent/x"].volatile is False
+
+
+def test_emit_sync_for_volatile_knob():
+    root = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      d: |
+         X.
+    - oid: "/agent/x/nm"
+      type: string
+      access: read_write
+      d: |
+         A name.
+    - oid: "/agent/x/c"
+      type: int32
+      access: read_write
+      volatile: true
+      d: |
+         A volatile counter.
+"""))
+    src = _gen.emit_module(root.children["x"], "x")
+    assert 'c = IntKnob("c", cvt_name="INT32", sync=True)' in src
+    assert 'nm = StrKnob("nm")' in src   # non-volatile: no sync
+
+
+def test_emit_sync_for_volatile_self_value():
+    root = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      d: |
+         X.
+    - oid: "/agent/x/stat"
+      type: uint64
+      name: name
+      access: read_only
+      volatile: true
+      d: |
+         A keyed volatile stat.
+"""))
+    src = _gen.emit_module(root.children["x"], "x")
+    assert 'value = SelfKnob(cvt_name="UINT64", sync=True)' in src
+
+
+def test_emit_wraps_long_knob_line():
+    # A volatile read-only uint64 knob with a long name exceeds 79 chars
+    # on one line; it must be emitted wrapped (each line <= 79).
+    root = _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      d: |
+         X.
+    - oid: "/agent/x/in_unknown_protos_counter"
+      type: uint64
+      access: read_only
+      volatile: true
+      d: |
+         Long volatile counter.
+"""))
+    src = _gen.emit_module(root.children["x"], "x")
+    assert all(len(line) <= 79 for line in src.splitlines()), \
+        [ln for ln in src.splitlines() if len(ln) > 79]
+    # the knob is still present (wrapped form)
+    assert "in_unknown_protos_counter = IntKnob(" in src
+    assert 'sync=True' in src
