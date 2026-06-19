@@ -25,7 +25,8 @@ class Interface(CfgObject):
         super().__init__(f"/agent:{ta}/interface:{ifname}")
 
 
-_CVT = {"INT32": 6, "BOOL": 1, "DOUBLE": 12, "STRING": 10, "ADDRESS": 11}
+_CVT = {"INT32": 6, "BOOL": 1, "DOUBLE": 12, "STRING": 10, "ADDRESS": 11,
+        "UINT64": 9}
 
 
 @pytest.fixture
@@ -137,6 +138,17 @@ def test_knob_rejects_invalid_access():
         IntKnob("x", access="readonly")
 
 
+def test_intknob_accepts_custom_cvt_name(fake):
+    class Big(CfgObject):
+        n = IntKnob("n", cvt_name="UINT64")
+
+        def __init__(self):
+            super().__init__("/agent:A/x:y")
+
+    Big().n = 5
+    assert fake.sets[-1] == ("/agent:A/x:y/n:", 5, 9)  # UINT64 -> 9
+
+
 # -- typed knob subclasses --------------------------------------------
 
 from pyte.cfg._engine import (AddrKnob, BoolKnob, DoubleKnob,  # noqa: E402
@@ -245,6 +257,18 @@ def test_subobject_knob_set(fake):
 
 def test_subobject_on_class_returns_descriptor():
     assert isinstance(IfaceWithPhy.phy, SubObject)
+
+
+def test_saved_rejects_non_knob_attr(fake):
+    # saved() of a SubObject (or a typo) would shadow the class
+    # descriptor on restore; reject it up front instead.
+    iface = IfaceWithPhy("A", "eth0")
+    with pytest.raises(TypeError, match="not a writable knob"):
+        with iface.saved("phy"):
+            pass
+    with pytest.raises(TypeError, match="not a writable knob"):
+        with iface.saved("nonexistent"):
+            pass
 
 
 # -- Collection: instance-named children ------------------------------

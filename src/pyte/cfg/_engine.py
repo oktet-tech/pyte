@@ -52,7 +52,9 @@ class CfgObject:
         """
         for a in attrs:
             knob = getattr(type(self), a, None)
-            if isinstance(knob, _Knob) and knob.access == "read_only":
+            if not isinstance(knob, _Knob):
+                raise TypeError(f"{a!r} is not a writable knob")
+            if knob.access == "read_only":
                 raise TypeError(f"cannot save read-only knob {a!r}")
         old = {a: getattr(self, a) for a in attrs}
         try:
@@ -70,11 +72,14 @@ class _Knob:
 
     cvt_name: str | None = None  # e.g. "INT32"; None -> cfg.set looks it up
 
-    def __init__(self, subid: str, *, access: str = "read_write"):
+    def __init__(self, subid: str, *, cvt_name: str | None = None,
+                 access: str = "read_write"):
         if access not in ("read_write", "read_only", "read_create"):
             raise ValueError(f"invalid access {access!r}")
         self.subid = subid
         self.access = access
+        if cvt_name is not None:
+            self.cvt_name = cvt_name  # overrides the subclass class default
         self.attr = subid  # replaced by __set_name__ when used as a class attr
 
     def __set_name__(self, owner, name: str) -> None:
@@ -105,9 +110,7 @@ class _Knob:
 class IntKnob(_Knob):
     """Integer-valued knob (defaults to CVT_INT32; pass cvt_name for others)."""
 
-    def __init__(self, subid, *, cvt_name="INT32", access="read_write"):
-        super().__init__(subid, access=access)
-        self.cvt_name = cvt_name
+    cvt_name = "INT32"
 
     def to_cfg(self, value):
         return int(value)
