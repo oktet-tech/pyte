@@ -305,3 +305,52 @@ def test_emitted_module_imports_and_composes_oids(monkeypatch):
     na = iface.net_addr["192.0.2.1"]
     assert na.oid == "/agent:Agt_A/interface:eth0/net_addr:192.0.2.1"
     assert isinstance(ns["NetAddr"], type)
+
+
+# -- lint -------------------------------------------------------------
+
+def test_lint_flags_invalid_name_token():
+    entries = _gen.parse_cm('''
+- register:
+    - oid: "/agent/x"
+      type: none
+      access: read_only
+      name: "Bad Name"
+      d: |
+         X.
+''')
+    warns = _gen.lint(entries)
+    assert any("invalid name" in w for w in warns)
+
+
+def test_lint_flags_integer_typo():
+    entries = _gen.parse_cm('''
+- register:
+    - oid: "/agent/x"
+      type: integer
+      access: read_write
+      d: |
+         X.
+''')
+    warns = _gen.lint(entries)
+    assert any("integer" in w for w in warns)
+
+
+def test_lint_flags_likely_collection_defaulted_to_none():
+    # name: absent (=> none) but the d: prose names a key.
+    entries = _gen.parse_cm_raw('''
+- register:
+    - oid: "/agent/iface2"
+      type: none
+      access: read_create
+      d: |
+         Some interface.
+         Name: interface name
+''')
+    warns = _gen.lint(entries)
+    assert any("looks like a collection" in w for w in warns)
+
+
+def test_lint_clean_input_has_no_warnings():
+    entries = _gen.parse_cm(_IFACE_YAML)
+    assert _gen.lint(entries) == []

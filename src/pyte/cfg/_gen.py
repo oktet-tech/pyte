@@ -20,8 +20,9 @@ class Entry:
     oid: str
     type: str
     access: str
-    name: str   # "none" (default/singleton) | "composite" | <ident>
-    doc: str    # human prose from d:, structural trailer stripped
+    name: str       # "none" (default/singleton) | "composite" | <ident>
+    doc: str        # human prose from d:, structural trailer stripped
+    raw_name: str = ""  # text after "Name:" in d: block; "" if not kept
 
 
 def _strip_doc(d: str) -> str:
@@ -41,8 +42,34 @@ def _strip_doc(d: str) -> str:
     return "\n".join(out).strip()
 
 
-def parse_cm(text: str) -> list[Entry]:
-    """Parse CM YAML text into a flat list of register Entry objects."""
+def _name_prose(d: str) -> str:
+    """The text after the first 'Name:' label in a d: block ("" if none)."""
+    for line in d.splitlines():
+        m = re.match(r"\s*Name\s*:\s*(.*)", line)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _make_entry(raw: dict, keep_raw: bool) -> Entry:
+    """Build an Entry from a raw CM register dict.
+
+    When *keep_raw* is True the ``raw_name`` field is populated from the
+    ``d:`` block's first ``Name:`` label (used by ``parse_cm_raw``).
+    """
+    d = raw.get("d", "")
+    return Entry(
+        oid=raw["oid"],
+        type=raw.get("type", "none"),
+        access=raw.get("access", "read_only"),
+        name=str(raw.get("name", "none")),
+        doc=_strip_doc(d),
+        raw_name=_name_prose(d) if keep_raw else "",
+    )
+
+
+def _parse(text: str, keep_raw: bool) -> list[Entry]:
+    """Shared parser loop; *keep_raw* controls ``raw_name`` population."""
     import yaml
 
     entries: list[Entry] = []
@@ -53,14 +80,49 @@ def parse_cm(text: str) -> list[Entry]:
             if not isinstance(block, dict) or "register" not in block:
                 continue
             for raw in block["register"]:
-                entries.append(Entry(
-                    oid=raw["oid"],
-                    type=raw.get("type", "none"),
-                    access=raw.get("access", "read_only"),
-                    name=str(raw.get("name", "none")),
-                    doc=_strip_doc(raw.get("d", "")),
-                ))
+                entries.append(_make_entry(raw, keep_raw))
     return entries
+
+
+def parse_cm(text: str) -> list[Entry]:
+    """Parse CM YAML text into a flat list of register Entry objects.
+
+    The ``raw_name`` field of each Entry is left empty; use
+    ``parse_cm_raw`` when the lint check for defaulted collections is
+    needed.
+    """
+    return _parse(text, keep_raw=False)
+
+
+def parse_cm_raw(text: str) -> list[Entry]:
+    """Like ``parse_cm`` but also populates ``Entry.raw_name``.
+
+    ``raw_name`` holds the prose after the first ``Name:`` label in the
+    ``d:`` block.  Required for the ``lint`` collection-probe check.
+    """
+    return _parse(text, keep_raw=True)
+
+
+_NAME_RE = re.compile(
+    r"^(none|composite|[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)*)$")
+_SINGLETON_NAMEPROSE = {"", "empty", "none"}
+
+
+def lint(entries: list[Entry]) -> list[str]:
+    """Return human-readable warnings about unreliable/ambiguous CM."""
+    warns: list[str] = []
+    for e in entries:
+        if not _NAME_RE.match(e.name):
+            warns.append(f"{e.oid}: invalid name {e.name!r}")
+        if e.type == "integer":
+            warns.append(
+                f"{e.oid}: type 'integer' typo -> normalised INT32")
+        if e.name == "none" and e.raw_name and \
+                e.raw_name.lower() not in _SINGLETON_NAMEPROSE:
+            warns.append(
+                f"{e.oid}: name defaulted to none but d: Name "
+                f"{e.raw_name!r} looks like a collection key")
+    return warns
 
 
 @dataclass
