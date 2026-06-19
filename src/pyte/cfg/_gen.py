@@ -9,8 +9,10 @@ or testbed access here; wiring to real CM files lives in Phase 2b-ii.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -367,3 +369,80 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
         body.append(f'        super().__init__(f"{root_oid_fmt}")')
 
     blocks.append("\n".join(body))
+
+
+@dataclass
+class Target:
+    """One generation target: a CM file, a root OID, an output module."""
+
+    cm_file: str   # e.g. "cm_sys.yml"
+    root_oid: str  # e.g. "/agent/sys"
+    module: str    # e.g. "sys" -> gen/sys.py
+
+
+TARGETS = [
+    Target("cm_sys.yml", "/agent/sys", "sys"),
+    Target("cm_base.yml", "/agent/interface", "interface"),
+]
+
+
+def cm_dir() -> Path:
+    """Locate the TE CM SOURCE directory (te/doc/cm).
+
+    Prefers $TE_BASE/doc/cm; falls back to the sibling ``te`` checkout in
+    the workspace (``<repo>/../te/doc/cm``).  Raises FileNotFoundError if
+    neither exists.
+    """
+    candidates = []
+    base = os.environ.get("TE_BASE")
+    if base:
+        candidates.append(Path(base) / "doc" / "cm")
+    repo = Path(__file__).resolve().parents[5]   # .../python-ts
+    candidates.append(repo.parent / "te" / "doc" / "cm")
+    for c in candidates:
+        if c.is_dir():
+            return c
+    raise FileNotFoundError(
+        f"TE CM source not found; tried {[str(c) for c in candidates]}")
+
+
+def _root_node(entries: list[Entry], root_oid: str) -> Node:
+    root = build_tree(entries)
+    node = root
+    for seg in [s for s in root_oid.split("/") if s][1:]:
+        node = node.children[seg]
+    return node
+
+
+def generate_from(files: dict[str, str],
+                  targets: list[Target]) -> dict[str, str]:
+    """Emit modules from an in-memory {cm_file: yaml_text} map.
+
+    Pure: no disk access, so unit-testable.  Returns {module: source}.
+    """
+    out: dict[str, str] = {}
+    for t in targets:
+        node = _root_node(parse_cm(files[t.cm_file]), t.root_oid)
+        out[t.module] = emit_module(node, t.module)
+    return out
+
+
+def generate(targets: list[Target] | None = None) -> dict[str, str]:
+    """Emit modules from the real CM source (see cm_dir())."""
+    targets = targets or TARGETS
+    cm = cm_dir()
+    files = {t.cm_file: (cm / t.cm_file).read_text()
+             for t in {x.cm_file: x for x in targets}.values()}
+    return generate_from(files, targets)
+
+
+def main() -> None:
+    """Write the generated modules into pyte/cfg/gen/ (run by a dev)."""
+    gen_dir = Path(__file__).resolve().parent / "gen"
+    for module, src in generate().items():
+        (gen_dir / f"{module}.py").write_text(src)
+        print(f"wrote {gen_dir / f'{module}.py'}")
+
+
+if __name__ == "__main__":
+    main()

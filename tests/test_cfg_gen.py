@@ -453,3 +453,36 @@ def test_emitted_netaddr_is_ruff_clean():
         [ruff, "check", "--stdin-filename", "gen_netaddr.py", "-"],
         input=src, text=True, capture_output=True)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+# -- real-CM wiring ---------------------------------------------------
+
+def test_targets_cover_sys_and_interface():
+    names = {t.module for t in _gen.TARGETS}
+    assert {"sys", "interface"} <= names
+
+
+def test_generate_from_text_map_emits_modules():
+    # generate_from() takes a {filename: yaml_text} map so it is testable
+    # without the real CM files on disk.
+    files = {
+        "cm_sys.yml": """
+- register:
+    - oid: "/agent/sys"
+      type: none
+      access: read_only
+      d: |
+         System settings.
+    - oid: "/agent/sys/console_loglevel"
+      type: int32
+      access: read_write
+      d: |
+         Console log level.
+""",
+    }
+    out = _gen.generate_from(files, [
+        _gen.Target("cm_sys.yml", "/agent/sys", "sys")])
+    assert "sys" in out
+    assert "class Sys(CfgObject):" in out["sys"]
+    assert 'console_loglevel = IntKnob("console_loglevel", cvt_name="INT32")' \
+        in out["sys"]
