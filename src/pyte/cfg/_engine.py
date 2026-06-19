@@ -171,6 +171,23 @@ class IpAddrKnob(_Knob):
         return str(value)
 
 
+class SelfKnob(_Knob):
+    """A knob bound to the object's OWN value (its base OID).
+
+    Use for an object that carries a scalar value AND has children, e.g.
+    ``/agent/interface/net_addr:<ip>`` whose own value is the prefix
+    length and which also has a ``broadcast`` child.  Unlike a normal
+    knob it composes no ``/subid:`` segment.
+    """
+
+    def __init__(self, *, cvt_name: str | None = None,
+                 access: str = "read_write"):
+        super().__init__("", cvt_name=cvt_name, access=access)
+
+    def _oid(self, obj: CfgObject) -> str:
+        return obj.oid
+
+
 class SubObject:
     """A singleton child object (CVT none, empty instance name).
 

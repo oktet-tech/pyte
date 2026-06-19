@@ -353,3 +353,36 @@ def test_engine_names_reexported_from_pyte_cfg():
                  "StrKnob", "AddrKnob", "IpAddrKnob", "SubObject",
                  "Collection"):
         assert hasattr(cfgpkg, name), name
+
+
+# -- SelfKnob: the object's own value ---------------------------------
+
+from pyte.cfg._engine import SelfKnob  # noqa: E402
+
+
+class NetAddr2(CfgObject):
+    value = SelfKnob(cvt_name="INT32")        # the prefix length
+    broadcast = AddrKnob("broadcast")
+
+
+def test_selfknob_get_reads_own_oid(fake):
+    fake.store["/agent:A/interface:eth0/net_addr:10.0.0.1"] = 24
+    na = NetAddr2("/agent:A/interface:eth0/net_addr:10.0.0.1")
+    assert na.value == 24                       # reads the base OID itself
+    assert na.broadcast is None                 # child not set
+
+
+def test_selfknob_set_writes_own_oid(fake):
+    na = NetAddr2("/agent:A/interface:eth0/net_addr:10.0.0.1")
+    na.value = 25
+    # the own-OID write has NO trailing /subid: segment
+    assert fake.sets[-1] == ("/agent:A/interface:eth0/net_addr:10.0.0.1",
+                             25, 6)
+
+
+def test_selfknob_read_only_rejects(fake):
+    class RO(CfgObject):
+        value = SelfKnob(cvt_name="INT32", access="read_only")
+
+    with pytest.raises(AttributeError, match="read-only"):
+        RO("/agent:A/x:y").value = 1
