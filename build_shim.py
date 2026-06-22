@@ -4,6 +4,7 @@
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from cffi import FFI
@@ -12,8 +13,10 @@ TE_INSTALL = os.environ.get("TE_INSTALL")
 if not TE_INSTALL:
     raise RuntimeError("TE_INSTALL must be set to build pyte (run via run.sh)")
 
-# te_compat.py sits alongside this file; cffi runs build_shim.py from the
-# project root, which is on sys.path.
+# te_compat.py sits alongside this file. cffi execs build_shim.py without
+# its directory on sys.path (especially under uv build isolation), so add
+# it explicitly before importing the sibling module.
+sys.path.insert(0, str(Path(__file__).parent))
 from te_compat import check_te_compat, read_min_te_commit
 
 _PYPROJECT = Path(__file__).parent / "pyproject.toml"
