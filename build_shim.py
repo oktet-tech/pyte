@@ -12,6 +12,12 @@ TE_INSTALL = os.environ.get("TE_INSTALL")
 if not TE_INSTALL:
     raise RuntimeError("TE_INSTALL must be set to build pyte (run via run.sh)")
 
+from te_compat import check_te_compat, read_min_te_commit
+
+_PYPROJECT = Path(__file__).parent / "pyproject.toml"
+check_te_compat(os.environ.get("TE_BASE"),
+                read_min_te_commit(_PYPROJECT))
+
 PKGCONF = str(Path(TE_INSTALL) / "default/lib/pkgconfig")
 LIBDIR = str(Path(TE_INSTALL) / "default/lib")
 TE_LIBS = [

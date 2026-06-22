@@ -13,3 +13,8 @@ dependencies = ["cffi>=1.16", "scapy>=2.5"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.pyte]
+# Minimum TE this pyte is ABI-compatible with: a git ref your TE checkout
+# must contain. Use a commit hash today; a tag works once TE publishes them.
+min_te_commit = "dbe9608cb8f1e4fbf6864dd3bcb6aec1f42e6b56"
