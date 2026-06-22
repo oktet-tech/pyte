@@ -12,6 +12,8 @@ TE_INSTALL = os.environ.get("TE_INSTALL")
 if not TE_INSTALL:
     raise RuntimeError("TE_INSTALL must be set to build pyte (run via run.sh)")
 
+# te_compat.py sits alongside this file; cffi runs build_shim.py from the
+# project root, which is on sys.path.
 from te_compat import check_te_compat, read_min_te_commit
 
 _PYPROJECT = Path(__file__).parent / "pyproject.toml"

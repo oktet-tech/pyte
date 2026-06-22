@@ -14,7 +14,7 @@ from pathlib import Path
 
 def read_min_te_commit(pyproject_path):
     """Return tool.pyte.min_te_commit from pyproject.toml, or None."""
-    data = tomllib.loads(Path(pyproject_path).read_text())
+    data = tomllib.loads(Path(pyproject_path).read_text(encoding="utf-8"))
     return data.get("tool", {}).get("pyte", {}).get("min_te_commit")
 
 
@@ -40,7 +40,8 @@ def check_te_compat(te_base, min_te_commit, *, env=None, run=subprocess.run):
         return
     try:
         proc = run(["git", "-C", str(te_base), "merge-base",
-                    "--is-ancestor", min_te_commit, "HEAD"])
+                    "--is-ancestor", min_te_commit, "HEAD"],
+                   capture_output=True)
     except FileNotFoundError:
         print("pyte: git not found; skipping TE compatibility check",
               file=sys.stderr)

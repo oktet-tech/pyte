@@ -8,7 +8,7 @@ import te_compat
 
 
 def _fake_run(returncode):
-    def run(argv):
+    def run(argv, **_kwargs):
         assert argv[0] == "git"
         return types.SimpleNamespace(returncode=returncode)
     return run
@@ -72,6 +72,6 @@ def test_raise_when_commit_missing(tmp_path):
 
 
 def test_skip_when_git_missing(tmp_path):
-    def run(argv):
+    def run(argv, **_kwargs):
         raise FileNotFoundError("git")
     te_compat.check_te_compat(_make_te(tmp_path), "abc123", env={}, run=run)
