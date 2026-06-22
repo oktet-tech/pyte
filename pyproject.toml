@@ -10,3 +10,6 @@ version = "0.1.0"
 description = "Python API wrappers for OKTET Labs Test Environment"
 requires-python = ">=3.11"
 dependencies = ["cffi>=1.16", "scapy>=2.5"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
