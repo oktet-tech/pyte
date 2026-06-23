@@ -44,10 +44,26 @@ Open `docs/_build/html/index.html`.
 
 ## Unit tests
 
-pyte's own unit tests are pure-Python and need no TE engine:
+Most of pyte's unit tests are pure-Python and need no TE engine. A subset
+needs the built cffi shim (`pyte._shim`) or is designed to run from a
+consuming suite's environment.
+
+The TE-free subset (365 tests) runs with:
 
 ```sh
-uv run --no-project --with pytest pytest tests
+PYTHONPATH=src uv run --no-project --with pytest --with scapy --with pyyaml \
+  pytest tests \
+  --ignore=tests/test_tests_info.py \
+  --ignore=tests/test_env.py \
+  --ignore=tests/test_net.py \
+  --ignore=tests/test_trex_stl.py
+```
+
+The full suite (including shim-backed tests) is most easily run from a
+consuming suite that has already built pyte, for example:
+
+```sh
+cd ../python-ts && uv run pytest lib/pyte/tests
 ```
 
 ## License

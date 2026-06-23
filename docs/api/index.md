@@ -24,9 +24,3 @@ Generated from the in-code docstrings.
    pyte.trc
 ```
 
-```{toctree}
-:hidden:
-:glob:
-
-generated/pyte.*
-```

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.so
+*.egg-info/
+.venv/
+build/
+.pytest_cache/
+uv.lock
+docs/_build/
+docs/api/generated/
