@@ -28,6 +28,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
+    "sphinxcontrib.mermaid",
 ]
 
 autosummary_generate = True

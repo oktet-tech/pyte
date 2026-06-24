@@ -1,5 +1,24 @@
 # Architecture
 
+A pyte test is plain Python. Each call descends through the pure-Python
+facades into the cffi shim, which drives TE's engine-side libraries; those
+talk to the Test Agents on the host(s) under test via RCF.
+
+```{mermaid}
+flowchart TD
+    T["Python test<br/>(ts/*.py)"]
+    F["pyte facades — pure Python<br/>cfg · rpc · net · tad.dsl · job · env"]
+    S["pyte._shim — cffi C bridge<br/>PYTE_GUARD &rarr; te_errno · RPC_AWAIT_ERROR"]
+    L["TE engine libraries<br/>tapi_* · rcfrpc · confapi · tad · logger"]
+    R["RCF — Remote Control Facility"]
+    A["Test Agent(s)<br/>on host(s) under test"]
+    T --> F
+    F -->|"lazy import inside functions"| S
+    S --> L
+    L --> R
+    R --> A
+```
+
 - **Shim** (`shim/pyte_shim.{c,h}` + `shim/pyte_shim_cdef.h`): every
   exported function returns `te_errno` and writes results through
   out-parameters.  TAPI code reports some failures by `longjmp` to the
