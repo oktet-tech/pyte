@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Konstantin Ushakov
+# Task runner for the pyte documentation (https://taskfile.dev).
+version: '3'
+
+vars:
+  HTML_DIR: docs/_build/html
+  PORT: '8000'
+  BIND: 0.0.0.0
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the HTML documentation (no TE needed)
+    cmds:
+      - ./scripts/build-docs.sh
+
+  serve:
+    desc: Build the docs and serve them on a local HTTP server
+    deps: [build]
+    cmds:
+      - echo "Serving docs at http://{{.BIND}}:{{.PORT}}/ (Ctrl-C to stop)"
+      - python3 -m http.server {{.PORT}} --bind {{.BIND}} --directory {{.HTML_DIR}}
