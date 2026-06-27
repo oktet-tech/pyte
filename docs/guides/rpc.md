@@ -13,23 +13,27 @@ with pco.socket("inet", "dgram") as s:
 ### IoMux — multiplexed waiting (select/poll/epoll)
 
 `pco.iomux(kind)` returns an `IoMux` context manager backed by
-`tapi_iomux`.  Supported kinds: `"select"`, `"pselect"`, `"poll"`,
-`"ppoll"`, `"epoll"`, `"epoll_pwait"`, `"epoll_pwait2"`.
+`tapi_iomux`.  Supported kinds: `Kind.SELECT`, `Kind.PSELECT`,
+`Kind.POLL`, `Kind.PPOLL`, `Kind.EPOLL`, `Kind.EPOLL_PWAIT`,
+`Kind.EPOLL_PWAIT2`.
 
 ```python
-with pco.iomux("epoll") as mux:
-    mux.add(sock_a, "in")       # also accepts int fd
-    mux.add(sock_b, "in,out")
-    events = mux.wait(2.0)      # [(fd, {"in", ...}), ...]
+from pyte.rpc.iomux import Evt, Kind
+
+with pco.iomux(Kind.EPOLL) as mux:
+    mux.add(sock_a, Evt.IN)            # also accepts int fd
+    mux.add(sock_b, Evt.IN | Evt.OUT)
+    events = mux.wait(2.0)             # [(fd, Evt.IN|...), ...]
     if events == []:
         ...  # timeout — not an error
-    mux.mod(sock_a, "out")
+    mux.mod(sock_a, Evt.OUT)
     mux.delete(sock_a)
 ```
 
 `wait()` returns an empty list on timeout (n==0 from
-`tapi_iomux_call`).  Event names: `in`, `out`, `pri`, `exc`, `err`,
-`hup`, `rdhup`, `et`, `oneshot`, `nval`.
+`tapi_iomux_call`).  Event flags: `Evt.IN`, `Evt.OUT`, `Evt.PRI`,
+`Evt.EXC`, `Evt.ERR`, `Evt.HUP`, `Evt.RDHUP`, `Evt.ET`,
+`Evt.ONESHOT`, `Evt.NVAL`.
 
 Note: `tapi_iomux` functions longjmp via `TEST_FAIL` on error; the
 shim guards them with `PYTE_GUARD`.  The TAPI manages

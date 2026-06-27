@@ -3,41 +3,62 @@
 """Multiplexed waiting on remote sockets (tapi_iomux)."""
 from __future__ import annotations
 
+import enum
+
 from pyte.errors import RpcError, check
 
-#: Ordered event names (human-friendly aliases for tapi_iomux_evt bits).
-_EVENT_NAMES = ("in", "pri", "out", "exc", "err", "hup", "rdhup",
-                "et", "oneshot", "nval")
 
-#: Map from user-facing event name to the corresponding PYTE_IOMUX_EVT_*
-#: constant name in the shim.
-_BIT_CONSTS = {
-    "in":      "PYTE_IOMUX_EVT_RD",
-    "pri":     "PYTE_IOMUX_EVT_PRI",
-    "out":     "PYTE_IOMUX_EVT_WR",
-    "exc":     "PYTE_IOMUX_EVT_EXC",
-    "err":     "PYTE_IOMUX_EVT_ERR",
-    "hup":     "PYTE_IOMUX_EVT_HUP",
-    "rdhup":   "PYTE_IOMUX_EVT_RDHUP",
-    "et":      "PYTE_IOMUX_EVT_ET",
-    "oneshot": "PYTE_IOMUX_EVT_ONESHOT",
-    "nval":    "PYTE_IOMUX_EVT_NVAL",
+class Evt(enum.Flag):
+    """Event flags for :class:`IoMux`; compose with ``|``.
+
+    Symbolic, pyte-local values; the integer bits the TAPI uses are
+    resolved lazily from the shim (see :data:`EVENT_BITS`).
+    """
+
+    IN = enum.auto()
+    PRI = enum.auto()
+    OUT = enum.auto()
+    EXC = enum.auto()
+    ERR = enum.auto()
+    HUP = enum.auto()
+    RDHUP = enum.auto()
+    ET = enum.auto()
+    ONESHOT = enum.auto()
+    NVAL = enum.auto()
+
+
+class Kind(enum.Enum):
+    """Multiplexer kind (which syscall family tapi_iomux uses).
+
+    Each value is the name of the corresponding PYTE_IOMUX_* shim constant.
+    """
+
+    SELECT = "PYTE_IOMUX_SELECT"
+    PSELECT = "PYTE_IOMUX_PSELECT"
+    POLL = "PYTE_IOMUX_POLL"
+    PPOLL = "PYTE_IOMUX_PPOLL"
+    EPOLL = "PYTE_IOMUX_EPOLL"
+    EPOLL_PWAIT = "PYTE_IOMUX_EPOLL_PWAIT"
+    EPOLL_PWAIT2 = "PYTE_IOMUX_EPOLL_PWAIT2"
+
+
+#: Map from Evt member to the corresponding PYTE_IOMUX_EVT_* shim constant.
+_EVT_CONSTS = {
+    Evt.IN:      "PYTE_IOMUX_EVT_RD",
+    Evt.PRI:     "PYTE_IOMUX_EVT_PRI",
+    Evt.OUT:     "PYTE_IOMUX_EVT_WR",
+    Evt.EXC:     "PYTE_IOMUX_EVT_EXC",
+    Evt.ERR:     "PYTE_IOMUX_EVT_ERR",
+    Evt.HUP:     "PYTE_IOMUX_EVT_HUP",
+    Evt.RDHUP:   "PYTE_IOMUX_EVT_RDHUP",
+    Evt.ET:      "PYTE_IOMUX_EVT_ET",
+    Evt.ONESHOT: "PYTE_IOMUX_EVT_ONESHOT",
+    Evt.NVAL:    "PYTE_IOMUX_EVT_NVAL",
 }
 
-#: Map from user-facing iomux kind name to PYTE_IOMUX_* constant name.
-_KINDS = {
-    "select":       "PYTE_IOMUX_SELECT",
-    "pselect":      "PYTE_IOMUX_PSELECT",
-    "poll":         "PYTE_IOMUX_POLL",
-    "ppoll":        "PYTE_IOMUX_PPOLL",
-    "epoll":        "PYTE_IOMUX_EPOLL",
-    "epoll_pwait":  "PYTE_IOMUX_EPOLL_PWAIT",
-    "epoll_pwait2": "PYTE_IOMUX_EPOLL_PWAIT2",
-}
-
-#: Lazy dict: event-name -> integer bit value (populated from shim on first
-#: access so that unit tests using a fake shim can supply the values directly).
-EVENT_BITS: dict[str, int] = {}
+#: Lazy dict: Evt member -> integer bit value (populated from the shim on
+#: first use so unit tests with a fake shim can supply the values).
+EVENT_BITS: dict[Evt, int] = {}
 
 
 def _ensure_event_bits() -> None:
@@ -45,31 +66,30 @@ def _ensure_event_bits() -> None:
     if EVENT_BITS:
         return
     from pyte._shim import lib
-    for name, const in _BIT_CONSTS.items():
-        EVENT_BITS[name] = int(getattr(lib, const))
+    for member, const in _EVT_CONSTS.items():
+        EVENT_BITS[member] = int(getattr(lib, const))
 
 
-def _evt_bits(spec: str) -> int:
-    """Parse a comma-separated event spec like ``"in,out"`` into a bit mask.
-
-    Raises ``ValueError`` for unrecognised event names.
-    """
+def _evt_bits(events: Evt) -> int:
+    """Convert an :class:`Evt` flag into the TAPI integer bit mask."""
+    if not isinstance(events, Evt):
+        raise TypeError(
+            f"events must be an Evt flag, not {type(events).__name__}")
     _ensure_event_bits()
     bits = 0
-    for token in spec.split(","):
-        token = token.strip()
-        if token not in EVENT_BITS:
-            raise ValueError(
-                f"unknown iomux event {token!r}; "
-                f"valid names: {sorted(EVENT_BITS)}")
-        bits |= EVENT_BITS[token]
+    for member in events:
+        bits |= EVENT_BITS[member]
     return bits
 
 
-def _evt_names(bits: int) -> set[str]:
-    """Decode a bit mask back into a set of event-name strings."""
+def _evt_flag(bits: int) -> Evt:
+    """Decode a TAPI integer bit mask back into an :class:`Evt` flag."""
     _ensure_event_bits()
-    return {name for name, bit in EVENT_BITS.items() if bits & bit}
+    flag = Evt(0)
+    for member, bit in EVENT_BITS.items():
+        if bits & bit:
+            flag |= member
+    return flag
 
 
 class IoMux:
@@ -77,16 +97,18 @@ class IoMux:
 
     Use as a context manager or call ``close()`` explicitly::
 
-        with pco.iomux("epoll") as mux:
-            mux.add(sock, "in")
-            events = mux.wait(1.0)   # [(fd, {"in", ...}), ...]
+        from pyte.rpc.iomux import Evt, Kind
+
+        with pco.iomux(Kind.EPOLL) as mux:
+            mux.add(sock, Evt.IN)
+            events = mux.wait(1.0)   # [(fd, Evt.IN|...), ...]
 
     ``wait()`` returns an empty list on timeout (n == 0 from
     tapi_iomux_call); this is NOT an error — callers should check for ``[]``
     explicitly when they care about the distinction.
 
     ``add()`` / ``mod()`` accept either an int fd or any object with a
-    ``.fd`` attribute (e.g. an ``RpcSocket``).
+    ``.fd`` attribute (e.g. an ``RpcSocket``), plus an :class:`Evt` flag.
     """
 
     def __init__(self, server, handle):
@@ -94,18 +116,16 @@ class IoMux:
         self._h = handle
 
     @classmethod
-    def create(cls, server, kind: str = "epoll") -> "IoMux":
+    def create(cls, server, kind: Kind = Kind.EPOLL) -> "IoMux":
         """Create a new iomux of the given *kind* on *server*."""
         from pyte._shim import ffi, lib
-        try:
-            kind_const = getattr(lib, _KINDS[kind])
-        except KeyError:
-            raise ValueError(
-                f"unknown iomux kind {kind!r}; "
-                f"valid kinds: {sorted(_KINDS)}") from None
+        if not isinstance(kind, Kind):
+            raise TypeError(
+                f"kind must be a Kind, not {type(kind).__name__}")
+        kind_const = getattr(lib, kind.value)
         out = ffi.new("tapi_iomux_handle **")
         check(lib.pyte_iomux_create(server._h, kind_const, out),
-              f"iomux_create({kind})", RpcError)
+              f"iomux_create({kind.name})", RpcError)
         return cls(server, out[0])
 
     # -- fd helpers -------------------------------------------------------
@@ -134,7 +154,7 @@ class IoMux:
 
     # -- fd management ----------------------------------------------------
 
-    def add(self, sock_or_fd, events: str) -> None:
+    def add(self, sock_or_fd, events: Evt) -> None:
         """Add *sock_or_fd* to the multiplexer watching *events*."""
         if self._h is None:
             raise RuntimeError("IoMux is closed")
@@ -144,7 +164,7 @@ class IoMux:
         check(lib.pyte_iomux_add(self._h, fd, bits),
               f"iomux_add(fd={fd}, events={events!r})", RpcError)
 
-    def mod(self, sock_or_fd, events: str) -> None:
+    def mod(self, sock_or_fd, events: Evt) -> None:
         """Modify the watched *events* for *sock_or_fd*."""
         if self._h is None:
             raise RuntimeError("IoMux is closed")
@@ -165,18 +185,13 @@ class IoMux:
 
     # -- waiting ----------------------------------------------------------
 
-    def wait(self, timeout: float = -1.0) -> list[tuple[int, set[str]]]:
+    def wait(self, timeout: float = -1.0) -> list[tuple[int, Evt]]:
         """Wait up to *timeout* seconds for events.
 
-        Returns a list of ``(fd, event_names_set)`` pairs — one per ready
-        file descriptor.  Returns an empty list on timeout (n == 0).
+        Returns a list of ``(fd, Evt)`` pairs — one per ready file
+        descriptor.  Returns an empty list on timeout (n == 0).
 
         *timeout* < 0 means block indefinitely (passed as -1 ms to the TAPI).
-
-        The shim returns a single malloc'ed int[2*n] array with interleaved
-        [fd0, evt0, fd1, evt1, ...] pairs.  We unpack fds from even indices
-        and evts from odd indices, then free the array with one pyte_free_ints
-        call.
         """
         if self._h is None:
             raise RuntimeError("IoMux is closed")
@@ -192,9 +207,8 @@ class IoMux:
         revts_arr = revts_p[0]
         try:
             flat = ffi.unpack(revts_arr, 2 * n)
-            _ensure_event_bits()
             result = [
-                (flat[2 * i], _evt_names(flat[2 * i + 1]))
+                (flat[2 * i], _evt_flag(flat[2 * i + 1]))
                 for i in range(n)
             ]
         finally:

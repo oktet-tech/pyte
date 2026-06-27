@@ -8,7 +8,7 @@ import pytest
 
 import pyte.rpc.iomux as _iomux_mod
 from pyte.errors import RpcError
-from pyte.rpc.iomux import EVENT_BITS, IoMux, _evt_bits, _evt_names
+from pyte.rpc.iomux import EVENT_BITS, Evt, IoMux, Kind, _evt_bits, _evt_flag
 
 
 class FakeLib:
@@ -132,32 +132,37 @@ def _reset_event_bits():
 def test_evt_bits_roundtrip(monkeypatch):
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
-    assert _evt_bits("in") == EVENT_BITS["in"]
-    assert _evt_bits("in,out") == (EVENT_BITS["in"] | EVENT_BITS["out"])
-    with pytest.raises(ValueError, match="bogus"):
-        _evt_bits("bogus")
+    assert _evt_bits(Evt.IN) == EVENT_BITS[Evt.IN]
+    assert _evt_bits(Evt.IN | Evt.OUT) == (
+        EVENT_BITS[Evt.IN] | EVENT_BITS[Evt.OUT])
 
 
-def test_evt_names_decodes_bits(monkeypatch):
+def test_evt_bits_rejects_non_flag(monkeypatch):
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
-    # Ensure EVENT_BITS is populated before reading it
-    _evt_bits("in")
-    names = _evt_names(EVENT_BITS["in"] | EVENT_BITS["err"])
-    assert names == {"in", "err"}
+    with pytest.raises(TypeError):
+        _evt_bits("in")  # strings are no longer accepted
+
+
+def test_evt_flag_decodes_bits(monkeypatch):
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    _evt_bits(Evt.IN)  # populate EVENT_BITS first
+    flag = _evt_flag(EVENT_BITS[Evt.IN] | EVENT_BITS[Evt.ERR])
+    assert flag == Evt.IN | Evt.ERR
 
 
 def test_iomux_sequence_and_timeout(monkeypatch):
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
-    mux = IoMux.create(FakeServer(), "epoll")
-    mux.add(7, "in")
-    mux.mod(7, "out")
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
+    mux.add(7, Evt.IN)
+    mux.mod(7, Evt.OUT)
     assert mux.wait(0.5) == []           # timeout -> empty list (n==0)
     # Two events: fd=7 (in/RD=0x1), fd=9 (err=0x100)
     lib.call_result = (2, [7, 0x1, 9, 0x100])
     res = mux.wait(1.0)
-    assert res == [(7, {"in"}), (9, {"err"})]
+    assert res == [(7, Evt.IN), (9, Evt.ERR)]
     mux.delete(7)
     mux.close()
     kinds = [c[0] for c in lib.calls]
@@ -169,7 +174,7 @@ def test_iomux_sequence_and_timeout(monkeypatch):
 def test_iomux_close_idempotent(monkeypatch):
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
-    mux = IoMux.create(FakeServer(), "epoll")
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
     mux.close()
     mux.close()
     assert [c for c in lib.calls if c[0] == "destroy"] == [("destroy",)]
@@ -180,18 +185,18 @@ def test_iomux_errors_are_rpcerror(monkeypatch):
     lib = FakeLib()
     lib.add_rc = 42  # any nonzero te_errno value
     _fake_shim(monkeypatch, lib)
-    mux = IoMux.create(FakeServer(), "epoll")
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
     with pytest.raises(RpcError):
-        mux.add(5, "in")
+        mux.add(5, Evt.IN)
 
 
 def test_iomux_use_after_close_raises(monkeypatch):
     """Methods that touch the remote handle must raise RuntimeError after close."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
-    mux = IoMux.create(FakeServer(), "epoll")
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
     mux.close()
     with pytest.raises(RuntimeError, match="IoMux is closed"):
-        mux.add(5, "in")
+        mux.add(5, Evt.IN)
     with pytest.raises(RuntimeError, match="IoMux is closed"):
         mux.wait(1.0)
