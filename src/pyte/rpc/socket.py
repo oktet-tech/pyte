@@ -3,6 +3,7 @@
 """RPC sockets: pythonic facade over tapi_rpc_socket."""
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 
 from pyte.errors import check
@@ -32,25 +33,33 @@ class RecvMsg:
 
 # inet6/local need sockaddr helpers not yet implemented (_mk_addr and
 # _parse_addr only handle AF_INET), so only inet is exposed for now.
-_FAMILIES = {
-    "inet": "PYTE_PF_INET",
-}
-_TYPES = {
-    "stream": "PYTE_SOCK_STREAM",
-    "dgram": "PYTE_SOCK_DGRAM",
-}
-# Minimal int-valued setsockopt surface.  To support another option,
-# add a PYTE_SO_* constant passthrough to shim/pyte_shim.{h,cdef.h}
-# (value = the matching RPC_SO_* from te_rpc_sys_socket.h) and a row
-# here; rpc_setsockopt_int() derives the level from the option itself.
-_SOCKOPTS = {
-    "SO_REUSEADDR": "PYTE_SO_REUSEADDR",
-    # IP_PKTINFO: enable receiving the destination address and incoming
-    # interface index as ancillary data (IPPROTO_IP / IP_PKTINFO cmsg).
-    # rpc_sockopt2level() derives the SOL_IP / IPPROTO_IP level from the
-    # RPC option constant, so no explicit level is needed here.
-    "IP_PKTINFO":   "PYTE_IP_PKTINFO",
-}
+class Family(enum.Enum):
+    """Socket address family; value is the PYTE_PF_* shim constant name."""
+
+    INET = "PYTE_PF_INET"
+
+
+class SockType(enum.Enum):
+    """Socket type; value is the PYTE_SOCK_* shim constant name."""
+
+    STREAM = "PYTE_SOCK_STREAM"
+    DGRAM = "PYTE_SOCK_DGRAM"
+
+
+class SockOpt(enum.Enum):
+    """Int-valued socket option for :meth:`RpcSocket.setsockopt`.
+
+    Value is the PYTE_* shim constant name.  To support another option,
+    add a PYTE_* constant passthrough to shim/pyte_shim.{h,cdef.h} (value =
+    the matching RPC_* from te_rpc_sys_socket.h) and a member here;
+    rpc_setsockopt_int() derives the level from the option itself.
+    """
+
+    SO_REUSEADDR = "PYTE_SO_REUSEADDR"
+    # IP_PKTINFO: receive dest address + incoming iface index as ancillary
+    # data (IPPROTO_IP / IP_PKTINFO cmsg). rpc_sockopt2level() derives the
+    # level from the RPC option constant, so no explicit level is needed.
+    IP_PKTINFO = "PYTE_IP_PKTINFO"
 
 
 def _mk_addr(ffi, lib, addr: tuple[str, int]):
@@ -79,16 +88,24 @@ class RpcSocket:
         self.fd = fd
 
     @classmethod
-    def open(cls, server, family: str = "inet",
-             type: str = "stream") -> "RpcSocket | None":
+    def open(cls, server, family: Family = Family.INET,
+             type: SockType = SockType.STREAM) -> "RpcSocket | None":
+        if not isinstance(family, Family):
+            raise TypeError(
+                f"family must be a Family, not "
+                f"{family.__class__.__name__}")
+        if not isinstance(type, SockType):
+            raise TypeError(
+                f"type must be a SockType, not "
+                f"{type.__class__.__name__}")
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
         rc = lib.pyte_rpc_socket(server._h,
-                                 getattr(lib, _FAMILIES[family]),
-                                 getattr(lib, _TYPES[type]),
+                                 getattr(lib, family.value),
+                                 getattr(lib, type.value),
                                  lib.PYTE_PROTO_DEF, out)
         ret = server._check_call(rc, out[0], lambda v: v >= 0,
-                                 f"socket({family}, {type})")
+                                 f"socket({family.name}, {type.name})")
         if ret is SUPPRESSED:
             return None
         return cls(server, out[0])
@@ -112,23 +129,23 @@ class RpcSocket:
         self.fd = -1
         self.server._check_call(rc, out[0], lambda v: v == 0, "close()")
 
-    def setsockopt(self, opt: str, value: int) -> None:
-        """Set an int-valued socket option, e.g. ("SO_REUSEADDR", 1).
+    def setsockopt(self, opt: SockOpt, value: int) -> None:
+        """Set an int-valued socket option, e.g.
+        ``setsockopt(SockOpt.SO_REUSEADDR, 1)``.
 
-        Only the options listed in ``_SOCKOPTS`` are supported; see
-        the comment there for how to extend the surface.
+        Only the options in :class:`SockOpt` are supported; see its
+        docstring for how to extend the surface.
         """
+        if not isinstance(opt, SockOpt):
+            raise TypeError(
+                f"opt must be a SockOpt, not {opt.__class__.__name__}")
         from pyte._shim import ffi, lib
-        try:
-            optname = getattr(lib, _SOCKOPTS[opt])
-        except KeyError:
-            raise ValueError(
-                f"unsupported socket option {opt!r}") from None
+        optname = getattr(lib, opt.value)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_setsockopt_int(self.server._h, self.fd,
                                          optname, value, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
-                                f"setsockopt({opt}, {value})")
+                                f"setsockopt({opt.name}, {value})")
 
     def bind(self, addr: tuple[str, int]) -> None:
         from pyte._shim import ffi, lib

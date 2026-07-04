@@ -4,8 +4,10 @@
 through `RpcSocket`.  Common usage pattern:
 
 ```python
+from pyte.rpc import Family, SockOpt, SockType
+
 pco = t.rpc_server("pco")
-with pco.socket("inet", "dgram") as s:
+with pco.socket(Family.INET, SockType.DGRAM) as s:
     s.bind(("127.0.0.1", 0))
     addr = s.getsockname()
 ```
@@ -52,7 +54,7 @@ msg = rx.recvmsg(bufsize=4096, ctrl_space=256)
 # msg.ancillary: [(level, type, data), ...]
 
 # Enable IP_PKTINFO to receive destination address
-rx.setsockopt("IP_PKTINFO", 1)
+rx.setsockopt(SockOpt.IP_PKTINFO, 1)
 msg = rx.recvmsg(64, ctrl_space=256)
 for level, ctype, data in msg.ancillary:
     ...  # level=IPPROTO_IP(0), ctype=IP_PKTINFO(8) on Linux

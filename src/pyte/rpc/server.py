@@ -187,9 +187,18 @@ class RpcServer:
         self._check_call(rc, out[0], lambda v: v == 0,
                          f"setenv({name}={value!r})")
 
-    def socket(self, family="inet", type="stream"):
-        from pyte.rpc.socket import RpcSocket
-        return RpcSocket.open(self, family, type)
+    def socket(self, family=None, type=None):
+        """Create an :class:`~pyte.rpc.socket.RpcSocket` on this server.
+
+        *family* is a :class:`~pyte.rpc.socket.Family` (default
+        ``Family.INET``); *type* a :class:`~pyte.rpc.socket.SockType`
+        (default ``SockType.STREAM``).
+        """
+        from pyte.rpc.socket import Family, RpcSocket, SockType
+        return RpcSocket.open(
+            self,
+            family if family is not None else Family.INET,
+            type if type is not None else SockType.STREAM)
 
     def iomux(self, kind=None):
         """Create an :class:`~pyte.rpc.iomux.IoMux` on this server.
