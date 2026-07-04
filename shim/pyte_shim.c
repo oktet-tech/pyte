@@ -262,21 +262,12 @@ pyte_rpc_getsockopt_int(rcf_rpc_server *rpcs, int s, int optname,
 te_errno
 pyte_sock_set_blocking(rcf_rpc_server *rpcs, int s, int blocking, int *out)
 {
-    int fl;
+    /* FIONBIO is a single unambiguous write (nonzero => non-blocking),
+     * unlike F_SETFL which must round-trip the whole status-flag word. */
+    int on = blocking ? 0 : 1;
 
     RPC_AWAIT_ERROR(rpcs);
-    PYTE_GUARD(fl = rpc_fcntl(rpcs, s, RPC_F_GETFL, 0));
-    if (fl < 0)
-    {
-        *out = -1;
-        return 0;
-    }
-    if (blocking)
-        fl &= ~RPC_O_NONBLOCK;
-    else
-        fl |= RPC_O_NONBLOCK;
-    RPC_AWAIT_ERROR(rpcs);
-    PYTE_GUARD(*out = rpc_fcntl(rpcs, s, RPC_F_SETFL, fl));
+    PYTE_GUARD(*out = rpc_ioctl(rpcs, s, RPC_FIONBIO, &on));
     return 0;
 }
 
