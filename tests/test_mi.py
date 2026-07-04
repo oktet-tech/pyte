@@ -12,6 +12,7 @@ import types
 import pytest
 
 from pyte import mi
+from pyte.mi import Aggr, Meas, Mult
 
 
 # ---------------------------------------------------------------------------
@@ -101,14 +102,24 @@ class FakeFfi:
 
 
 def _fake_shim(monkeypatch, lib):
-    """Inject fake shim into sys.modules and clear mi's lazy maps."""
+    """Inject fake shim into sys.modules and clear mi's lazy cache."""
     monkeypatch.setitem(
         sys.modules, "pyte._shim",
         types.SimpleNamespace(ffi=FakeFfi(), lib=lib))
-    # Clear lazy caches so each test starts fresh
-    mi._TYPES.clear()
-    mi._AGGRS.clear()
-    mi._MULTS.clear()
+    # Clear lazy cache so each test starts fresh
+    mi._BITS.clear()
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture: clear _BITS after every test so cached ints don't bleed.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _clear_bits():
+    """Clear pyte.mi._BITS before and after each test."""
+    mi._BITS.clear()
+    yield
+    mi._BITS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -128,13 +139,13 @@ def test_logger_create_and_destroy(monkeypatch):
     assert lib.calls.count(("destroy",)) == 1
 
 
-def test_add_meas_maps_names_to_ints(monkeypatch):
-    """add() maps friendly names to shim int constants and passes value."""
+def test_add_meas_maps_enums_to_ints(monkeypatch):
+    """add() maps Meas/Aggr/Mult enums to shim int constants and passes value."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
 
     with mi.Logger("fio") as logger:
-        logger.add("latency", "lat-mean", "mean", 12.5, "nano")
+        logger.add(Meas.LATENCY, "lat-mean", Aggr.MEAN, 12.5, Mult.NANO)
 
     add_calls = [c for c in lib.calls if c[0] == "add"]
     assert len(add_calls) == 1
@@ -146,18 +157,34 @@ def test_add_meas_maps_names_to_ints(monkeypatch):
     assert mult == lib.PYTE_MI_MULT_NANO
 
 
-def test_unknown_names_raise_value_error(monkeypatch):
-    """Unknown type / aggr / multiplier names raise ValueError listing valid names."""
+def test_string_type_raises_type_error(monkeypatch):
+    """add() raises TypeError when passed a string type instead of Meas."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
 
     with mi.Logger("fio") as logger:
-        with pytest.raises(ValueError, match="unknown.*type"):
-            logger.add("no_such_type", "x", "mean", 1.0)
-        with pytest.raises(ValueError, match="unknown.*aggr"):
-            logger.add("latency", "x", "no_such_aggr", 1.0)
-        with pytest.raises(ValueError, match="unknown.*multiplier"):
-            logger.add("latency", "x", "mean", 1.0, "no_such_mult")
+        with pytest.raises(TypeError, match="Meas"):
+            logger.add("latency", "n", Aggr.MEAN, 1.0)
+
+
+def test_string_aggr_raises_type_error(monkeypatch):
+    """add() raises TypeError when passed a string aggr instead of Aggr."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("fio") as logger:
+        with pytest.raises(TypeError, match="Aggr"):
+            logger.add(Meas.LATENCY, "n", "mean", 1.0)
+
+
+def test_string_multiplier_raises_type_error(monkeypatch):
+    """add() raises TypeError when passed a string multiplier instead of Mult."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("fio") as logger:
+        with pytest.raises(TypeError, match="Mult"):
+            logger.add(Meas.LATENCY, "n", Aggr.MEAN, 1.0, "nano")
 
 
 def test_add_after_close_raises_runtime_error(monkeypatch):
@@ -170,36 +197,35 @@ def test_add_after_close_raises_runtime_error(monkeypatch):
         pass  # CM exits, logger is closed
 
     with pytest.raises(RuntimeError, match="closed"):
-        logger.add("latency", "x", "mean", 1.0)
+        logger.add(Meas.LATENCY, "x", Aggr.MEAN, 1.0)
 
 
 def test_perf_meas_types_resolve(monkeypatch):
-    """retrans / rtt / percentage / rps map to their shim int constants."""
+    """Meas.RETRANS / RTT / PERCENTAGE / RPS map to their shim int constants."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
 
-    # (type_name, aggr, expected shim int) — aggr names must be valid
     cases = [
-        ("retrans",    "single", lib.PYTE_MI_MEAS_RETRANS),
-        ("rtt",        "mean",   lib.PYTE_MI_MEAS_RTT),
-        ("percentage", "single", lib.PYTE_MI_MEAS_PERCENTAGE),
-        ("rps",        "mean",   lib.PYTE_MI_MEAS_RPS),
+        (Meas.RETRANS,    Aggr.SINGLE, lib.PYTE_MI_MEAS_RETRANS),
+        (Meas.RTT,        Aggr.MEAN,   lib.PYTE_MI_MEAS_RTT),
+        (Meas.PERCENTAGE, Aggr.SINGLE, lib.PYTE_MI_MEAS_PERCENTAGE),
+        (Meas.RPS,        Aggr.MEAN,   lib.PYTE_MI_MEAS_RPS),
     ]
     with mi.Logger("perf") as logger:
-        for type_name, aggr, _ in cases:
-            logger.add(type_name, f"{type_name}-x", aggr, 1.0)
+        for meas, aggr, _ in cases:
+            logger.add(meas, f"{meas.name}-x", aggr, 1.0)
 
     add_calls = [c for c in lib.calls if c[0] == "add"]
     assert [c[1] for c in add_calls] == [expected for _, _, expected in cases]
 
 
 def test_median_aggr_and_mega_mult_resolve(monkeypatch):
-    """median aggregation and mega multiplier map to their shim constants."""
+    """Aggr.MEDIAN and Mult.MEGA map to their shim constants."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
 
     with mi.Logger("perf") as logger:
-        logger.add("throughput", "x", "median", 1.0, "mega")
+        logger.add(Meas.THROUGHPUT, "x", Aggr.MEDIAN, 1.0, Mult.MEGA)
 
     add = [c for c in lib.calls if c[0] == "add"][0]
     # add tuple: ("add", typ, name, aggr, val, mult)

@@ -272,18 +272,23 @@ class SfntPingpong:
         """
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         for row in self._report.rows:
             name = f"1/2 RTT latency [size={row.size}]"
             name99 = f"1/2 RTT latency (99) [size={row.size}]"
             with Logger(tool) as logger:
-                logger.add("latency", name, "mean",   row.mean,       "nano")
-                logger.add("latency", name, "min",    row.min,        "nano")
-                logger.add("latency", name, "median", row.median,     "nano")
-                logger.add("latency", name, "max",    row.max,        "nano")
-                logger.add("latency", name, "stdev",  row.stddev,     "nano")
-                logger.add("latency", name99, "percentile",
-                           row.percentile, "nano")
+                logger.add(Meas.LATENCY, name, Aggr.MEAN,
+                           row.mean, Mult.NANO)
+                logger.add(Meas.LATENCY, name, Aggr.MIN,
+                           row.min, Mult.NANO)
+                logger.add(Meas.LATENCY, name, Aggr.MEDIAN,
+                           row.median, Mult.NANO)
+                logger.add(Meas.LATENCY, name, Aggr.MAX,
+                           row.max, Mult.NANO)
+                logger.add(Meas.LATENCY, name, Aggr.STDEV,
+                           row.stddev, Mult.NANO)
+                logger.add(Meas.LATENCY, name99, Aggr.PERCENTILE,
+                           row.percentile, Mult.NANO)
 
     def close(self) -> None:
         """Stop the client (errors tolerated) and destroy the job (idempotent)."""

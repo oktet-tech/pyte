@@ -7,12 +7,13 @@ from pure Python without any C work.
 
 ```python
 from pyte import mi
+from pyte.mi import Aggr, Meas, Mult
 
 with mi.Logger("fio") as logger:
-    logger.add("throughput", "Read throughput", "mean", 29.6, "mebi")
-    logger.add("iops",       "Read iops",       "mean", 925550.0, "plain")
-    logger.add("latency",    "Read clat 99.00 percentile",
-               "percentile", 0.668, "micro")
+    logger.add(Meas.THROUGHPUT, "Read throughput", Aggr.MEAN, 29.6, Mult.MEBI)
+    logger.add(Meas.IOPS,       "Read iops",       Aggr.MEAN, 925550.0, Mult.PLAIN)
+    logger.add(Meas.LATENCY,    "Read clat 99.00 percentile",
+               Aggr.PERCENTILE, 0.668, Mult.MICRO)
 ```
 
 The *tool* string (`"fio"`) keys the MI artifact that TE's Logger
@@ -20,15 +21,16 @@ emits.  `destroy` (called on CM exit or explicit `close()`) flushes
 the artifact; no MI data is written if `add()` is never called.
 `close()` is idempotent.
 
-Recognised names:
+Measurement types, aggregations, and multipliers are represented by
+the `Meas`, `Aggr`, and `Mult` enums:
 
-| Kind        | Names |
-|-------------|-------|
-| **type**    | `latency`, `throughput`, `iops` |
-| **aggr**    | `single`, `min`, `max`, `mean`, `stdev`, `percentile` |
-| **multiplier** | `nano`, `micro`, `milli`, `plain`, `mebi` |
+| Enum   | Members |
+|--------|---------|
+| `Meas` | `LATENCY`, `THROUGHPUT`, `IOPS`, `RTT`, `RETRANS`, `RPS`, `PERCENTAGE` |
+| `Aggr` | `SINGLE`, `MIN`, `MAX`, `MEAN`, `STDEV`, `MEDIAN`, `PERCENTILE` |
+| `Mult` | `NANO`, `MICRO`, `MILLI`, `PLAIN`, `MEGA`, `MEBI` |
 
-Unknown names raise `ValueError` with the valid set listed.  `add()`
-on a closed logger raises `RuntimeError`.  The name→int maps are
-resolved lazily from shim constants on first use (same pattern as
-`pyte.rpc.iomux`'s `EVENT_BITS`).
+Passing a value of the wrong enum (or a plain string) raises `TypeError`.
+`add()` on a closed logger raises `RuntimeError`.  The enum→int
+resolution is lazy (cached from shim constants on first use, same
+pattern as `pyte.rpc.iomux`'s `EVENT_BITS`).

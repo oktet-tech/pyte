@@ -239,12 +239,14 @@ class Nptcp:
         """
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         for e in self._report.entries:
             name = f"[{e.bytes} bytes]"
             with Logger(tool) as logger:
-                logger.add("throughput", name, "single", e.throughput, "mebi")
-                logger.add("latency", name, "single", e.rtt, "micro")
+                logger.add(Meas.THROUGHPUT, name, Aggr.SINGLE,
+                           e.throughput, Mult.MEBI)
+                logger.add(Meas.LATENCY, name, Aggr.SINGLE,
+                           e.rtt, Mult.MICRO)
 
     def close(self) -> None:
         """Stop the transmitter (errors tolerated) and destroy the job."""

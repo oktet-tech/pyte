@@ -467,7 +467,7 @@ class Fio:
         """
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
 
         rep = self._report
 
@@ -475,18 +475,22 @@ class Fio:
             return x * 8 / 1000.0
 
         with Logger(tool) as logger:
-            logger.add("throughput", "Read throughput", "mean",
-                       kbyte2mbit(rep.read.bandwidth.mean), "mebi")
-            logger.add("iops", "Read iops", "mean",
-                       rep.read.iops.mean, "plain")
-            logger.add("latency", "Read clat 99.00 percentile", "percentile",
-                       rep.read.clatency.percentiles.p99_00 / 1000.0, "micro")
-            logger.add("throughput", "Write throughput", "mean",
-                       kbyte2mbit(rep.write.bandwidth.mean), "mebi")
-            logger.add("iops", "Write iops", "mean",
-                       rep.write.iops.mean, "plain")
-            logger.add("latency", "Write clat 99.00 percentile", "percentile",
-                       rep.write.clatency.percentiles.p99_00 / 1000.0, "micro")
+            logger.add(Meas.THROUGHPUT, "Read throughput", Aggr.MEAN,
+                       kbyte2mbit(rep.read.bandwidth.mean), Mult.MEBI)
+            logger.add(Meas.IOPS, "Read iops", Aggr.MEAN,
+                       rep.read.iops.mean, Mult.PLAIN)
+            logger.add(Meas.LATENCY, "Read clat 99.00 percentile",
+                       Aggr.PERCENTILE,
+                       rep.read.clatency.percentiles.p99_00 / 1000.0,
+                       Mult.MICRO)
+            logger.add(Meas.THROUGHPUT, "Write throughput", Aggr.MEAN,
+                       kbyte2mbit(rep.write.bandwidth.mean), Mult.MEBI)
+            logger.add(Meas.IOPS, "Write iops", Aggr.MEAN,
+                       rep.write.iops.mean, Mult.PLAIN)
+            logger.add(Meas.LATENCY, "Write clat 99.00 percentile",
+                       Aggr.PERCENTILE,
+                       rep.write.clatency.percentiles.p99_00 / 1000.0,
+                       Mult.MICRO)
 
     def close(self) -> None:
         """Stop fio (errors tolerated) and destroy the job (idempotent)."""

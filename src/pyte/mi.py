@@ -17,91 +17,68 @@ measurements were added.
 Design: thin and generic — pyte.tools.fio (and future perf tools) consume it from
 pure Python without any tapi_fio linkage.
 
-Friendly-name maps
-------------------
-Names are resolved lazily from shim constants (same pattern as
-``rpc/iomux.py``'s ``EVENT_BITS``).  Lookup tables are module-level dicts
-populated on first use; unit tests that inject a fake shim just need to
-define the matching ``PYTE_MI_*`` attributes.
+Measurement types, aggregations, and multipliers are represented by the
+:class:`Meas`, :class:`Aggr`, and :class:`Mult` enums.
 
-Measurement types exposed:
-    latency, throughput, iops, rtt, retrans, rps, percentage
+Example::
 
-Aggregation types:
-    single, min, max, mean, stdev, median, percentile
-
-Multipliers:
-    nano, micro, milli, plain, mega, mebi
+    with mi.Logger("fio") as logger:
+        logger.add(Meas.LATENCY, "clat-p99", Aggr.PERCENTILE, 42.0,
+                   Mult.MICRO)
 """
 from __future__ import annotations
 
+import enum
+
 from pyte.errors import check
 
-# ---------------------------------------------------------------------------
-# Lazy name → int maps (populated from shim on first use)
-# ---------------------------------------------------------------------------
 
-#: meas-type name → PYTE_MI_MEAS_* shim constant name
-_TYPE_CONSTS: dict[str, str] = {
-    "latency":    "PYTE_MI_MEAS_LATENCY",
-    "throughput": "PYTE_MI_MEAS_THROUGHPUT",
-    "iops":       "PYTE_MI_MEAS_IOPS",
-    "rtt":        "PYTE_MI_MEAS_RTT",
-    "retrans":    "PYTE_MI_MEAS_RETRANS",
-    "rps":        "PYTE_MI_MEAS_RPS",
-    "percentage": "PYTE_MI_MEAS_PERCENTAGE",
-}
+class Meas(enum.Enum):
+    """MI measurement type; value is the PYTE_MI_MEAS_* shim constant name."""
 
-#: aggr name → PYTE_MI_AGGR_* shim constant name
-_AGGR_CONSTS: dict[str, str] = {
-    "single":     "PYTE_MI_AGGR_SINGLE",
-    "min":        "PYTE_MI_AGGR_MIN",
-    "max":        "PYTE_MI_AGGR_MAX",
-    "mean":       "PYTE_MI_AGGR_MEAN",
-    "stdev":      "PYTE_MI_AGGR_STDEV",
-    "median":     "PYTE_MI_AGGR_MEDIAN",
-    "percentile": "PYTE_MI_AGGR_PERCENTILE",
-}
-
-#: multiplier name → PYTE_MI_MULT_* shim constant name
-_MULT_CONSTS: dict[str, str] = {
-    "nano":  "PYTE_MI_MULT_NANO",
-    "micro": "PYTE_MI_MULT_MICRO",
-    "milli": "PYTE_MI_MULT_MILLI",
-    "plain": "PYTE_MI_MULT_PLAIN",
-    "mega":  "PYTE_MI_MULT_MEGA",
-    "mebi":  "PYTE_MI_MULT_MEBI",
-}
-
-# Resolved int maps (populated lazily)
-_TYPES: dict[str, int] = {}
-_AGGRS: dict[str, int] = {}
-_MULTS: dict[str, int] = {}
+    LATENCY = "PYTE_MI_MEAS_LATENCY"
+    THROUGHPUT = "PYTE_MI_MEAS_THROUGHPUT"
+    IOPS = "PYTE_MI_MEAS_IOPS"
+    RTT = "PYTE_MI_MEAS_RTT"
+    RETRANS = "PYTE_MI_MEAS_RETRANS"
+    RPS = "PYTE_MI_MEAS_RPS"
+    PERCENTAGE = "PYTE_MI_MEAS_PERCENTAGE"
 
 
-def _ensure_maps() -> None:
-    """Populate the name→int maps lazily from the shim."""
-    if _TYPES and _AGGRS and _MULTS:
-        return
-    from pyte._shim import lib
-    if not _TYPES:
-        for name, const in _TYPE_CONSTS.items():
-            _TYPES[name] = int(getattr(lib, const))
-    if not _AGGRS:
-        for name, const in _AGGR_CONSTS.items():
-            _AGGRS[name] = int(getattr(lib, const))
-    if not _MULTS:
-        for name, const in _MULT_CONSTS.items():
-            _MULTS[name] = int(getattr(lib, const))
+class Aggr(enum.Enum):
+    """MI aggregation; value is the PYTE_MI_AGGR_* shim constant name."""
+
+    SINGLE = "PYTE_MI_AGGR_SINGLE"
+    MIN = "PYTE_MI_AGGR_MIN"
+    MAX = "PYTE_MI_AGGR_MAX"
+    MEAN = "PYTE_MI_AGGR_MEAN"
+    STDEV = "PYTE_MI_AGGR_STDEV"
+    MEDIAN = "PYTE_MI_AGGR_MEDIAN"
+    PERCENTILE = "PYTE_MI_AGGR_PERCENTILE"
 
 
-def _resolve(mapping: dict[str, int], kind: str, name: str) -> int:
-    """Look up *name* in *mapping*, raising ``ValueError`` on miss."""
-    if name not in mapping:
-        raise ValueError(
-            f"unknown {kind} {name!r}; "
-            f"valid names: {sorted(mapping)}")
-    return mapping[name]
+class Mult(enum.Enum):
+    """MI multiplier/scale; value is the PYTE_MI_MULT_* shim constant name."""
+
+    NANO = "PYTE_MI_MULT_NANO"
+    MICRO = "PYTE_MI_MULT_MICRO"
+    MILLI = "PYTE_MI_MULT_MILLI"
+    PLAIN = "PYTE_MI_MULT_PLAIN"
+    MEGA = "PYTE_MI_MULT_MEGA"
+    MEBI = "PYTE_MI_MULT_MEBI"
+
+
+#: Lazy cache: MI enum member -> integer value (populated from the shim on
+#: first use so unit tests with a fake shim can supply the values).
+_BITS: dict[enum.Enum, int] = {}
+
+
+def _const(member: enum.Enum) -> int:
+    """Resolve an MI enum member to its shim integer (cached)."""
+    if member not in _BITS:
+        from pyte._shim import lib
+        _BITS[member] = int(getattr(lib, member.value))
+    return _BITS[member]
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +100,8 @@ class Logger:
     Example::
 
         with mi.Logger("fio") as logger:
-            logger.add("latency", "clat-p99", "percentile", 42.0, "micro")
+            logger.add(Meas.LATENCY, "clat-p99", Aggr.PERCENTILE, 42.0,
+                       Mult.MICRO)
     """
 
     def __init__(self, tool: str) -> None:
@@ -140,45 +118,35 @@ class Logger:
         self._logger = out[0]
         self._lib    = lib
 
-    def add(self, type: str, name: str, aggr: str, value: float,
-            multiplier: str = "plain") -> None:
+    def add(self, type: Meas, name: str, aggr: Aggr, value: float,
+            multiplier: Mult = Mult.PLAIN) -> None:
         """Add one measurement to the logger.
 
-        Parameters
-        ----------
-        type:
-            Measurement type name: ``"latency"``, ``"throughput"``,
-            ``"iops"``.
-        name:
-            Free-form measurement name (e.g. ``"Read clat 99.00 percentile"``).
-        aggr:
-            Aggregation type: ``"single"``, ``"min"``, ``"max"``,
-            ``"mean"``, ``"stdev"``, ``"percentile"``.
-        value:
-            Measurement value (in the units defined by *type* × *multiplier*).
-        multiplier:
-            Scale factor: ``"nano"``, ``"micro"``, ``"milli"``, ``"plain"``,
-            ``"mebi"``  (default ``"plain"``).
-
-        Raises
-        ------
-        RuntimeError
-            If the logger has already been closed.
-        ValueError
-            If *type*, *aggr* or *multiplier* is not a recognised name.
-        TeError
-            If the underlying C call fails.
+        :param type:       a :class:`Meas` member (e.g. ``Meas.LATENCY``).
+        :param name:       free-form measurement name.
+        :param aggr:       an :class:`Aggr` member (e.g. ``Aggr.MEAN``).
+        :param value:      measurement value (units = *type* × *multiplier*).
+        :param multiplier: a :class:`Mult` member (default ``Mult.PLAIN``).
+        :raises RuntimeError: if the logger is already closed.
+        :raises TypeError:    if type/aggr/multiplier are the wrong enum.
+        :raises TeError:      if the underlying C call fails.
         """
         if self._closed:
             raise RuntimeError(
                 f"mi.Logger({self._tool!r}) is already closed")
-        _ensure_maps()
-        typ_int  = _resolve(_TYPES, "type",       type)
-        aggr_int = _resolve(_AGGRS, "aggr",       aggr)
-        mult_int = _resolve(_MULTS, "multiplier", multiplier)
+        if not isinstance(type, Meas):
+            raise TypeError(
+                f"type must be a Meas, not {type.__class__.__name__}")
+        if not isinstance(aggr, Aggr):
+            raise TypeError(
+                f"aggr must be an Aggr, not {aggr.__class__.__name__}")
+        if not isinstance(multiplier, Mult):
+            raise TypeError(
+                "multiplier must be a Mult, not "
+                f"{multiplier.__class__.__name__}")
         rc = self._lib.pyte_mi_add_meas(
-            self._logger, typ_int, name.encode(), aggr_int,
-            float(value), mult_int)
+            self._logger, _const(type), name.encode(), _const(aggr),
+            float(value), _const(multiplier))
         check(rc, f"mi.Logger.add({name!r})")
 
     def close(self) -> None:

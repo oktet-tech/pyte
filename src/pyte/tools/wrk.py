@@ -410,23 +410,24 @@ class Wrk:
         """
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         rep = self._report
         with Logger(tool) as logger:
-            logger.add("throughput", "", "mean", rep.bps * 8.0 / 1e6, "mega")
-            logger.add("rps", "", "mean", rep.req_per_sec, "plain")
-            logger.add("latency", "per-thread", "mean",
-                       rep.thread_latency.mean, "micro")
-            logger.add("latency", "per-thread", "max",
-                       rep.thread_latency.max, "micro")
-            logger.add("latency", "per-thread", "stdev",
-                       rep.thread_latency.stdev, "micro")
-            logger.add("rps", "per-thread", "mean",
-                       rep.thread_req_per_sec.mean, "plain")
-            logger.add("rps", "per-thread", "max",
-                       rep.thread_req_per_sec.max, "plain")
-            logger.add("rps", "per-thread", "stdev",
-                       rep.thread_req_per_sec.stdev, "plain")
+            logger.add(Meas.THROUGHPUT, "", Aggr.MEAN,
+                       rep.bps * 8.0 / 1e6, Mult.MEGA)
+            logger.add(Meas.RPS, "", Aggr.MEAN, rep.req_per_sec, Mult.PLAIN)
+            logger.add(Meas.LATENCY, "per-thread", Aggr.MEAN,
+                       rep.thread_latency.mean, Mult.MICRO)
+            logger.add(Meas.LATENCY, "per-thread", Aggr.MAX,
+                       rep.thread_latency.max, Mult.MICRO)
+            logger.add(Meas.LATENCY, "per-thread", Aggr.STDEV,
+                       rep.thread_latency.stdev, Mult.MICRO)
+            logger.add(Meas.RPS, "per-thread", Aggr.MEAN,
+                       rep.thread_req_per_sec.mean, Mult.PLAIN)
+            logger.add(Meas.RPS, "per-thread", Aggr.MAX,
+                       rep.thread_req_per_sec.max, Mult.PLAIN)
+            logger.add(Meas.RPS, "per-thread", Aggr.STDEV,
+                       rep.thread_req_per_sec.stdev, Mult.PLAIN)
 
     def close(self) -> None:
         """Stop wrk (errors tolerated) and destroy the job (idempotent)."""

@@ -25,7 +25,7 @@ it derives with_rtt from whether the rtt line is present — a deliberate,
 faithful-enough deviation (cf. fio's stdout/stderr inversion).
 
 MI (tapi_ping_report_mi_log, only when with_rtt):
-    RTT MIN/MEAN/MAX/STDEV in MILLI  ->  Logger.add("rtt", ..., "milli")
+    RTT MIN/MEAN/MAX/STDEV in MILLI  ->  Logger.add(Meas.RTT, ..., Mult.MILLI)
 """
 from __future__ import annotations
 
@@ -195,12 +195,13 @@ class Ping:
         rep = self._report
         if not rep.with_rtt or rep.rtt is None:
             return
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         with Logger(tool) as logger:
-            logger.add("rtt", "Min RTT", "min", rep.rtt.min, "milli")
-            logger.add("rtt", "Mean RTT", "mean", rep.rtt.avg, "milli")
-            logger.add("rtt", "Max RTT", "max", rep.rtt.max, "milli")
-            logger.add("rtt", "RTT stdev", "stdev", rep.rtt.mdev, "milli")
+            logger.add(Meas.RTT, "Min RTT", Aggr.MIN, rep.rtt.min, Mult.MILLI)
+            logger.add(Meas.RTT, "Mean RTT", Aggr.MEAN, rep.rtt.avg, Mult.MILLI)
+            logger.add(Meas.RTT, "Max RTT", Aggr.MAX, rep.rtt.max, Mult.MILLI)
+            logger.add(Meas.RTT, "RTT stdev", Aggr.STDEV, rep.rtt.mdev,
+                       Mult.MILLI)
 
     def close(self) -> None:
         """Stop ping (errors tolerated) and destroy the job (idempotent)."""

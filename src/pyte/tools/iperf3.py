@@ -279,12 +279,12 @@ class Iperf3:
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
         rep = self._report
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         with Logger(tool) as logger:
-            logger.add("throughput", "Per-stream", "min",
-                       rep.min_bps_per_stream, "plain")
-            logger.add("throughput", "Transfer", "single",
-                       rep.sent.bits_per_second, "plain")
+            logger.add(Meas.THROUGHPUT, "Per-stream", Aggr.MIN,
+                       rep.min_bps_per_stream, Mult.PLAIN)
+            logger.add(Meas.THROUGHPUT, "Transfer", Aggr.SINGLE,
+                       rep.sent.bits_per_second, Mult.PLAIN)
 
     def close(self) -> None:
         """Stop the client (errors tolerated) and destroy the job."""

@@ -284,16 +284,16 @@ class Netperf:
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
         rep = self._report
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         with Logger(tool) as logger:
             if rep.test_type == "stream":
-                logger.add("throughput", "Sending", "single",
-                           rep.mbps_send, "mega")
-                logger.add("throughput", "Receiving", "single",
-                           rep.mbps_recv, "mega")
+                logger.add(Meas.THROUGHPUT, "Sending", Aggr.SINGLE,
+                           rep.mbps_send, Mult.MEGA)
+                logger.add(Meas.THROUGHPUT, "Receiving", Aggr.SINGLE,
+                           rep.mbps_recv, Mult.MEGA)
             else:
-                logger.add("rps", "Transactions per second", "single",
-                           rep.trps, "plain")
+                logger.add(Meas.RPS, "Transactions per second", Aggr.SINGLE,
+                           rep.trps, Mult.PLAIN)
 
     def close(self) -> None:
         """Stop netperf (errors tolerated) and destroy the job (idempotent)."""

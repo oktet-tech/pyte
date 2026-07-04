@@ -129,18 +129,19 @@ class Client:
         ports = self._ports if ports is None else ports
         stats = self.get_stats(ports=ports)
         lat = self.get_pgid_stats(pg_ids) if pg_ids else {}
-        from pyte.mi import Logger
+        from pyte.mi import Aggr, Logger, Meas, Mult
         with Logger(tool) as logger:
             for p in ports:
                 s = stats[p]
-                logger.add("throughput", f"Port {p} Tx", "mean",
-                           s.tx_bps, "plain")
-                logger.add("throughput", f"Port {p} Rx", "mean",
-                           s.rx_bps, "plain")
+                logger.add(Meas.THROUGHPUT, f"Port {p} Tx", Aggr.MEAN,
+                           s.tx_bps, Mult.PLAIN)
+                logger.add(Meas.THROUGHPUT, f"Port {p} Rx", Aggr.MEAN,
+                           s.rx_bps, Mult.PLAIN)
             for pg, ls in lat.items():
-                logger.add("latency", f"pg {pg} avg", "mean", ls.avg, "micro")
-                logger.add("latency", f"pg {pg} jitter", "mean",
-                           ls.jitter, "micro")
+                logger.add(Meas.LATENCY, f"pg {pg} avg", Aggr.MEAN,
+                           ls.avg, Mult.MICRO)
+                logger.add(Meas.LATENCY, f"pg {pg} jitter", Aggr.MEAN,
+                           ls.jitter, Mult.MICRO)
 
 
 @contextmanager
