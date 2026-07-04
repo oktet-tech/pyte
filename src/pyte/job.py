@@ -3,6 +3,7 @@
 """tapi_job wrapper: jobs, output channels, filters, messages."""
 from __future__ import annotations
 
+import signal
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Iterator
@@ -23,19 +24,18 @@ def _ms(timeout: float) -> int:
     return int(timeout * 1000)
 
 
-def _signo(sig: int | str) -> int:
-    """Map "SIGTERM"-style names (or raw ints) to host signal numbers.
+def _signo(sig: int | signal.Signals) -> int:
+    """Return the host signal number for *sig*.
 
-    tapi_job takes host signal numbers (its RPC backend converts them
-    with signum_h2rpc() itself).
+    Accepts a raw int or a :class:`signal.Signals` member (the stdlib
+    enum, whose values already are the host signal numbers).  tapi_job
+    takes host numbers and its RPC backend converts them itself.
     """
-    if isinstance(sig, int):
-        return sig
-    from pyte._shim import lib
-    try:
-        return getattr(lib, f"PYTE_{sig}")
-    except AttributeError:
-        raise ValueError(f"unknown signal {sig!r}") from None
+    if not isinstance(sig, int):
+        raise TypeError(
+            "signal must be an int or signal.Signals, not "
+            f"{sig.__class__.__name__}")
+    return int(sig)
 
 
 def _log_level(level: int | str | None) -> int:
@@ -451,14 +451,14 @@ class Job:
         return JobStatus(kind, oval[0])
 
     def stop(self, timeout: float = DEFAULT_TIMEOUT,
-             signal: int | str = "SIGTERM") -> None:
+             signal: int | signal.Signals = signal.SIGTERM) -> None:
         """Terminate gracefully; SIGKILL after timeout expires."""
         from pyte._shim import lib
         check(lib.pyte_job_stop(self._h, _signo(signal), _ms(timeout)),
               f"job.stop({self.program})")
 
     def restart(self, timeout: float = DEFAULT_TIMEOUT,
-                signal: int | str = "SIGTERM") -> None:
+                signal: int | signal.Signals = signal.SIGTERM) -> None:
         """Stop the job if it is running, then start it again.
 
         tapi_job has no restart call (tapi_job.h documents stopping
@@ -476,7 +476,7 @@ class Job:
             pass
         self.start()
 
-    def kill(self, signal: int | str = "SIGKILL") -> None:
+    def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""
         from pyte._shim import lib
         check(lib.pyte_job_kill(self._h, _signo(signal)),
