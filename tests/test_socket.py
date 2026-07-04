@@ -3,7 +3,7 @@
 """RpcSocket enum-API unit tests (type guards need no shim)."""
 import pytest
 
-from pyte.rpc.socket import Family, RpcSocket, SockOpt, SockType
+from pyte.rpc.socket import Family, RpcSocket, Shut, SockOpt, SockType
 
 
 def test_enum_values_map_to_shim_consts():
@@ -26,3 +26,20 @@ def test_setsockopt_rejects_non_enum():
     sock = RpcSocket(object(), 5)
     with pytest.raises(TypeError, match="opt must be a SockOpt"):
         sock.setsockopt("SO_REUSEADDR", 1)
+
+
+def test_new_enum_values():
+    assert Shut.RD.value == "PYTE_SHUT_RD"
+    assert Shut.RDWR.value == "PYTE_SHUT_RDWR"
+    assert SockOpt.SO_RCVBUF.value == "PYTE_SO_RCVBUF"
+    assert SockOpt.TCP_NODELAY.value == "PYTE_TCP_NODELAY"
+
+
+def test_shutdown_rejects_non_enum():
+    with pytest.raises(TypeError, match="how must be a Shut"):
+        RpcSocket(object(), 5).shutdown("rdwr")
+
+
+def test_getsockopt_rejects_non_enum():
+    with pytest.raises(TypeError, match="opt must be a SockOpt"):
+        RpcSocket(object(), 5).getsockopt("SO_ERROR")

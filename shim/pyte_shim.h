@@ -95,7 +95,17 @@
     (RPC_S_IRUSR | RPC_S_IWUSR | RPC_S_IRGRP | RPC_S_IROTH)
 /* Socket options for pyte_rpc_setsockopt_int() (rpc_sockopt values) */
 #define PYTE_SO_REUSEADDR RPC_SO_REUSEADDR
+#define PYTE_SO_REUSEPORT RPC_SO_REUSEPORT
+#define PYTE_SO_KEEPALIVE RPC_SO_KEEPALIVE
+#define PYTE_SO_BROADCAST RPC_SO_BROADCAST
+#define PYTE_SO_RCVBUF    RPC_SO_RCVBUF
+#define PYTE_SO_SNDBUF    RPC_SO_SNDBUF
+#define PYTE_SO_ERROR     RPC_SO_ERROR
+#define PYTE_TCP_NODELAY  RPC_TCP_NODELAY
 #define PYTE_IP_PKTINFO   RPC_IP_PKTINFO
+#define PYTE_SHUT_RD      RPC_SHUT_RD
+#define PYTE_SHUT_WR      RPC_SHUT_WR
+#define PYTE_SHUT_RDWR    RPC_SHUT_RDWR
 
 /* Configurator value-type passthrough */
 #define PYTE_CVT_NONE CVT_NONE
@@ -165,6 +175,17 @@ extern te_errno pyte_rpc_setsockopt_int(rcf_rpc_server *rpcs, int s,
 extern te_errno pyte_rpc_getsockname(rcf_rpc_server *rpcs, int s,
                                      struct sockaddr *name,
                                      socklen_t *namelen, int *out);
+extern te_errno pyte_rpc_shutdown(rcf_rpc_server *rpcs, int s, int how,
+                                  int *out);
+extern te_errno pyte_rpc_getpeername(rcf_rpc_server *rpcs, int s,
+                                     struct sockaddr *name,
+                                     socklen_t *namelen, int *out);
+extern te_errno pyte_rpc_getsockopt_int(rcf_rpc_server *rpcs, int s,
+                                        int optname, int *value, int *out);
+extern te_errno pyte_sock_set_blocking(rcf_rpc_server *rpcs, int s,
+                                       int blocking, int *out);
+extern te_errno pyte_sock_get_blocking(rcf_rpc_server *rpcs, int s,
+                                       int *blocking, int *out);
 extern te_errno pyte_rpc_close(rcf_rpc_server *rpcs, int fd, int *out);
 extern te_errno pyte_rpc_open(rcf_rpc_server *rpcs, const char *path,
                               int flags, int mode, int *out);

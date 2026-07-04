@@ -3,8 +3,8 @@
 from pyte.rpc.files import RpcFile, file_get, file_put, open_file, unlink
 from pyte.rpc.iomux import Evt, IoMux, Kind
 from pyte.rpc.server import RpcServer
-from pyte.rpc.socket import Family, RpcSocket, SockOpt, SockType
+from pyte.rpc.socket import Family, RpcSocket, Shut, SockOpt, SockType
 
 __all__ = ["RpcServer", "RpcSocket", "RpcFile", "IoMux", "Evt", "Kind",
-           "Family", "SockType", "SockOpt",
+           "Family", "SockType", "SockOpt", "Shut",
            "open_file", "unlink", "file_put", "file_get"]

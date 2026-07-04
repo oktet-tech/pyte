@@ -56,10 +56,25 @@ class SockOpt(enum.Enum):
     """
 
     SO_REUSEADDR = "PYTE_SO_REUSEADDR"
+    SO_REUSEPORT = "PYTE_SO_REUSEPORT"
+    SO_KEEPALIVE = "PYTE_SO_KEEPALIVE"
+    SO_BROADCAST = "PYTE_SO_BROADCAST"
+    SO_RCVBUF = "PYTE_SO_RCVBUF"
+    SO_SNDBUF = "PYTE_SO_SNDBUF"
+    SO_ERROR = "PYTE_SO_ERROR"
+    TCP_NODELAY = "PYTE_TCP_NODELAY"
     # IP_PKTINFO: receive dest address + incoming iface index as ancillary
     # data (IPPROTO_IP / IP_PKTINFO cmsg). rpc_sockopt2level() derives the
     # level from the RPC option constant, so no explicit level is needed.
     IP_PKTINFO = "PYTE_IP_PKTINFO"
+
+
+class Shut(enum.Enum):
+    """shutdown() direction; value is the PYTE_SHUT_* shim constant name."""
+
+    RD = "PYTE_SHUT_RD"
+    WR = "PYTE_SHUT_WR"
+    RDWR = "PYTE_SHUT_RDWR"
 
 
 def _mk_addr(ffi, lib, addr: tuple[str, int]):
@@ -199,6 +214,70 @@ class RpcSocket:
         if ret is SUPPRESSED:
             return None
         return _parse_addr(ffi, lib, sa)
+
+    def getpeername(self) -> tuple[str, int] | None:
+        from pyte._shim import ffi, lib
+        ss = ffi.new("struct sockaddr_storage *")
+        sslen = ffi.new("socklen_t *",
+                        ffi.sizeof("struct sockaddr_storage"))
+        sa = ffi.cast("struct sockaddr *", ss)
+        out = ffi.new("int *")
+        rc = lib.pyte_rpc_getpeername(self.server._h, self.fd, sa, sslen,
+                                      out)
+        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+                                      "getpeername()")
+        if ret is SUPPRESSED:
+            return None
+        return _parse_addr(ffi, lib, sa)
+
+    def getsockopt(self, opt: SockOpt) -> int | None:
+        """Read an int-valued socket option."""
+        if not isinstance(opt, SockOpt):
+            raise TypeError(
+                f"opt must be a SockOpt, not {opt.__class__.__name__}")
+        from pyte._shim import ffi, lib
+        val = ffi.new("int *")
+        out = ffi.new("int *")
+        rc = lib.pyte_rpc_getsockopt_int(self.server._h, self.fd,
+                                         getattr(lib, opt.value), val, out)
+        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+                                      f"getsockopt({opt.name})")
+        if ret is SUPPRESSED:
+            return None
+        return val[0]
+
+    def shutdown(self, how: Shut = Shut.RDWR) -> None:
+        """Shut down part or all of a full-duplex connection."""
+        if not isinstance(how, Shut):
+            raise TypeError(
+                f"how must be a Shut, not {how.__class__.__name__}")
+        from pyte._shim import ffi, lib
+        out = ffi.new("int *")
+        rc = lib.pyte_rpc_shutdown(self.server._h, self.fd,
+                                   getattr(lib, how.value), out)
+        self.server._check_call(rc, out[0], lambda v: v == 0,
+                                f"shutdown({how.name})")
+
+    def set_blocking(self, blocking: bool) -> None:
+        """Set blocking (True) or non-blocking (False) mode (via fcntl)."""
+        from pyte._shim import ffi, lib
+        out = ffi.new("int *")
+        rc = lib.pyte_sock_set_blocking(self.server._h, self.fd,
+                                        1 if blocking else 0, out)
+        self.server._check_call(rc, out[0], lambda v: v == 0,
+                                f"set_blocking({blocking})")
+
+    def get_blocking(self) -> bool | None:
+        """Return True if the socket is in blocking mode."""
+        from pyte._shim import ffi, lib
+        blk = ffi.new("int *")
+        out = ffi.new("int *")
+        rc = lib.pyte_sock_get_blocking(self.server._h, self.fd, blk, out)
+        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                      "get_blocking()")
+        if ret is SUPPRESSED:
+            return None
+        return bool(blk[0])
 
     def send(self, data: bytes, flags: int = 0) -> int | None:
         from pyte._shim import ffi, lib

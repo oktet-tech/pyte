@@ -234,6 +234,66 @@ pyte_rpc_getsockname(rcf_rpc_server *rpcs, int s, struct sockaddr *name,
 }
 
 te_errno
+pyte_rpc_shutdown(rcf_rpc_server *rpcs, int s, int how, int *out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_shutdown(rpcs, s, (rpc_shut_how)how));
+    return 0;
+}
+
+te_errno
+pyte_rpc_getpeername(rcf_rpc_server *rpcs, int s, struct sockaddr *name,
+                     socklen_t *namelen, int *out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_getpeername(rpcs, s, name, namelen));
+    return 0;
+}
+
+te_errno
+pyte_rpc_getsockopt_int(rcf_rpc_server *rpcs, int s, int optname,
+                        int *value, int *out)
+{
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_getsockopt(rpcs, s, (rpc_sockopt)optname, value));
+    return 0;
+}
+
+te_errno
+pyte_sock_set_blocking(rcf_rpc_server *rpcs, int s, int blocking, int *out)
+{
+    int fl;
+
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(fl = rpc_fcntl(rpcs, s, RPC_F_GETFL, 0));
+    if (fl < 0)
+    {
+        *out = -1;
+        return 0;
+    }
+    if (blocking)
+        fl &= ~RPC_O_NONBLOCK;
+    else
+        fl |= RPC_O_NONBLOCK;
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_fcntl(rpcs, s, RPC_F_SETFL, fl));
+    return 0;
+}
+
+te_errno
+pyte_sock_get_blocking(rcf_rpc_server *rpcs, int s, int *blocking, int *out)
+{
+    int fl;
+
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(fl = rpc_fcntl(rpcs, s, RPC_F_GETFL, 0));
+    *out = fl;
+    if (fl >= 0)
+        *blocking = (fl & RPC_O_NONBLOCK) ? 0 : 1;
+    return 0;
+}
+
+te_errno
 pyte_rpc_close(rcf_rpc_server *rpcs, int fd, int *out)
 {
     RPC_AWAIT_ERROR(rpcs);

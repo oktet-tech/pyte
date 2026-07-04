@@ -12,6 +12,22 @@ with pco.socket(Family.INET, SockType.DGRAM) as s:
     addr = s.getsockname()
 ```
 
+### Socket operations — shutdown, peer address, options, blocking mode
+
+`Shut` (importable from `pyte.rpc`) enumerates shutdown directions:
+
+- `sock.shutdown(Shut.RDWR)` — shut down sending, receiving, or both
+  (`Shut.RD`, `Shut.WR`, `Shut.RDWR`).
+- `sock.getpeername()` — return `(ip, port)` of the connected peer, or
+  `None` when the call was suppressed.
+- `sock.getsockopt(SockOpt.SO_RCVBUF) -> int` — read an int-valued
+  socket option; round-trips with `setsockopt`.  Supported options
+  include `SO_REUSEADDR`, `SO_REUSEPORT`, `SO_KEEPALIVE`,
+  `SO_BROADCAST`, `SO_RCVBUF`, `SO_SNDBUF`, `SO_ERROR`,
+  `TCP_NODELAY`, `IP_PKTINFO`.
+- `sock.set_blocking(False)` / `sock.get_blocking() -> bool` — toggle
+  non-blocking mode via `fcntl(F_GETFL/F_SETFL, O_NONBLOCK)`.
+
 ### IoMux — multiplexed waiting (select/poll/epoll)
 
 `pco.iomux(kind)` returns an `IoMux` context manager backed by
