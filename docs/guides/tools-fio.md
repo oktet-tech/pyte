@@ -18,11 +18,11 @@ opts = fio.Opts(
     filename="/tmp/pyte_fio.dat",
     size="16m",
     blocksize=4096,
-    rwtype="rand",       # "rand"→randrw, "seq"→rw, or raw fio names
+    rwtype="rand",              # string name (case-insensitive); fio.RwType.RAND also works
     rwmixread=50,
     iodepth=4,
     runtime=5,
-    ioengine="psync",
+    ioengine=fio.IoEngine.PSYNC,  # enum member; the string "psync" also works
     direct=False,
 )
 
@@ -33,6 +33,13 @@ with fio.run(pco, opts) as f:
     print(rep.read.clatency.percentiles.p99_00)  # ns
     f.mi_report()                       # emit via pyte.mi
 ```
+
+`rwtype` accepts a `fio.RwType` enum member (e.g. `fio.RwType.RAND`) or
+a lowercase name string (e.g. `"rand"`); the enum value is the fio
+`--readwrite=` token (`"randrw"`).  Likewise, `ioengine` accepts a
+`fio.IoEngine` member (e.g. `fio.IoEngine.LIBAIO`) or a lowercase name
+string (e.g. `"libaio"`).  An unrecognised string raises `ValueError`;
+a non-string non-enum value raises `TypeError`.
 
 `Report` is a frozen dataclass: `rep.read` and `rep.write` are
 `IoStats`, each with `bandwidth` (`Bw`), `iops` (`Iops`), `latency`

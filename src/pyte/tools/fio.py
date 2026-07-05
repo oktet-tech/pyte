@@ -92,6 +92,7 @@ Pinned mappings (derived from te/lib/tapi_fio/fio.c + fio_internal.c)
 """
 from __future__ import annotations
 
+import enum
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -104,27 +105,46 @@ if TYPE_CHECKING:
 # Opts
 # ---------------------------------------------------------------------------
 
-#: Valid ioengine names (subset of tapi_fio_ioengine_mapping; rbd omitted
-#: because its extra options are out of scope here).
-_VALID_IOENGINES = frozenset({
-    "sync", "psync", "vsync", "pvsync", "pvsync2",
-    "libaio", "posixaio",
-})
+class RwType(enum.Enum):
+    """fio workload type; value is the fio ``--readwrite=`` token."""
 
-#: rwtype → fio --readwrite= value (mirrors tapi_fio_rwtype_mapping)
-_RWTYPE_MAP: dict[str, str] = {
-    "rand":       "randrw",
-    "seq":        "rw",
-    "read":       "read",
-    "write":      "write",
-    "trim":       "trim",
-    "randread":   "randread",
-    "randwrite":  "randwrite",
-    "randtrim":   "randtrim",
-    "trimwrite":  "trimwrite",
-}
+    RAND = "randrw"
+    SEQ = "rw"
+    READ = "read"
+    WRITE = "write"
+    TRIM = "trim"
+    RANDREAD = "randread"
+    RANDWRITE = "randwrite"
+    RANDTRIM = "randtrim"
+    TRIMWRITE = "trimwrite"
 
-_VALID_RWTYPES = frozenset(_RWTYPE_MAP)
+
+class IoEngine(enum.Enum):
+    """fio I/O engine; value is the fio ``--ioengine=`` token."""
+
+    SYNC = "sync"
+    PSYNC = "psync"
+    VSYNC = "vsync"
+    PVSYNC = "pvsync"
+    PVSYNC2 = "pvsync2"
+    LIBAIO = "libaio"
+    POSIXAIO = "posixaio"
+
+
+def _coerce(cls, field, v):
+    """Accept an enum member or a (case-insensitive) member-name string."""
+    if isinstance(v, cls):
+        return v
+    if isinstance(v, str):
+        try:
+            return cls[v.upper()]
+        except KeyError:
+            valid = [m.name.lower() for m in cls]
+            raise ValueError(
+                f"unknown {field} {v!r}; valid: {valid}") from None
+    raise TypeError(
+        f"{field} must be {cls.__name__} or str, not "
+        f"{v.__class__.__name__}")
 
 
 def _parse_size(size: str | int | None) -> int | None:
@@ -192,13 +212,16 @@ class Opts:
     rwmixread:
         Read percentage for mixed workloads (default 50).
     rwtype:
-        Workload type; one of: ``rand``, ``seq``, ``read``, ``write``,
-        ``trim``, ``randread``, ``randwrite``, ``randtrim``, ``trimwrite``.
-        Maps to fio's ``--readwrite=`` value via _RWTYPE_MAP.
+        Workload type; a :class:`RwType` member (e.g. ``RwType.RAND``)
+        or the equivalent lowercase name string (e.g. ``"rand"``).
+        Valid names: ``rand``, ``seq``, ``read``, ``write``, ``trim``,
+        ``randread``, ``randwrite``, ``randtrim``, ``trimwrite``.
     ioengine:
-        I/O engine; one of: sync, psync, vsync, pvsync, pvsync2,
-        libaio, posixaio.  (rbd is excluded: its extra options are
-        out of scope.)
+        I/O engine; an :class:`IoEngine` member (e.g. ``IoEngine.PSYNC``)
+        or the equivalent lowercase name string (e.g. ``"psync"``).
+        Valid names: sync, psync, vsync, pvsync, pvsync2, libaio,
+        posixaio.  (rbd is excluded: its extra options are out of
+        scope.)
     direct:
         Use O_DIRECT (default False).
     size:
@@ -215,8 +238,8 @@ class Opts:
     iodepth: int = 1
     runtime: int = 0
     rwmixread: int = 50
-    rwtype: str = "seq"
-    ioengine: str = "psync"
+    rwtype: "RwType | str" = RwType.SEQ
+    ioengine: "IoEngine | str" = IoEngine.PSYNC
     direct: bool = False
     size: str | int | None = None
     extra_args: list[str] = field(default_factory=list)
@@ -224,14 +247,10 @@ class Opts:
     def __post_init__(self) -> None:
         if not self.filename:
             raise ValueError("Opts.filename is required")
-        if self.rwtype not in _VALID_RWTYPES:
-            raise ValueError(
-                f"unknown rwtype {self.rwtype!r}; "
-                f"valid: {sorted(_VALID_RWTYPES)}")
-        if self.ioengine not in _VALID_IOENGINES:
-            raise ValueError(
-                f"unknown ioengine {self.ioengine!r}; "
-                f"valid: {sorted(_VALID_IOENGINES)}")
+        object.__setattr__(self, "rwtype",
+                           _coerce(RwType, "rwtype", self.rwtype))
+        object.__setattr__(self, "ioengine",
+                           _coerce(IoEngine, "ioengine", self.ioengine))
         # Validate size format (parse and discard)
         _parse_size(self.size)
 
@@ -253,8 +272,8 @@ class Opts:
         argv.append("--group_reporting")
         if self.direct:
             argv.append("--direct=1")
-        argv.append(f"--readwrite={_RWTYPE_MAP[self.rwtype]}")
-        argv.append(f"--ioengine={self.ioengine}")
+        argv.append(f"--readwrite={self.rwtype.value}")
+        argv.append(f"--ioengine={self.ioengine.value}")
         argv.append(f"--numjobs={self.numjobs}")
         argv.append("--thread")
         # user_argument: space-split extra args appended verbatim

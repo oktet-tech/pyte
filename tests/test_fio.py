@@ -18,8 +18,10 @@ import pytest
 from pyte.errors import FioError
 from pyte.tools import fio
 from pyte.tools.fio import (
+    IoEngine,
     Opts,
     Report,
+    RwType,
     _parse_report,
 )
 
@@ -97,6 +99,24 @@ def test_opts_ioengine_rbd_rejected():
     """rbd is not an accepted ioengine (its extra options are out of scope)."""
     with pytest.raises(ValueError, match="unknown ioengine"):
         Opts(filename="/tmp/f", ioengine="rbd")
+
+
+def test_opts_enum_form():
+    """Enum members accepted; produce identical argv to string form."""
+    opts_enum = Opts(
+        filename="/tmp/f",
+        rwtype=RwType.RAND,
+        ioengine=IoEngine.LIBAIO,
+    )
+    argv = opts_enum.to_argv()
+    assert "--readwrite=randrw" in argv
+    assert "--ioengine=libaio" in argv
+
+
+def test_opts_wrong_type_raises():
+    """Non-string, non-enum rwtype raises TypeError."""
+    with pytest.raises(TypeError):
+        Opts(filename="/tmp/f", rwtype=123)
 
 
 # ---------------------------------------------------------------------------
