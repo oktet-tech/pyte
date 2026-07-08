@@ -316,6 +316,29 @@ def poll(items: list[Channel | InputChannel | Filter],
     check(lib.pyte_job_poll(arr, len(items), _ms(timeout)), "job.poll")
 
 
+class Wrapper:
+    """A tapi_job wrapper (command-line prefix) attached to a Job.
+
+    Deleting is optional: TE removes all wrappers together with the
+    job.  delete() is idempotent.
+    """
+
+    def __init__(self, handle):
+        self._h = handle
+        self._deleted = False
+
+    def delete(self) -> None:
+        if self._deleted:
+            return
+        self._deleted = True
+        from pyte._shim import lib
+        check(lib.pyte_job_wrapper_delete(self._h), "job.wrapper_delete")
+
+    def __repr__(self) -> str:
+        state = "deleted" if self._deleted else "active"
+        return f"<Wrapper {state}>"
+
+
 class Job:
     """A process run via tapi_job on an RPC server.
 
@@ -475,6 +498,28 @@ class Job:
         except TeError:
             pass
         self.start()
+
+    def wrap(self, tool: str, args: list[str] | None = None,
+             priority: str = "default") -> Wrapper:
+        """Prefix the job's command line with tool (tapi_job_wrapper_add).
+
+        Must be called before start().  args are the wrapper tool's
+        arguments (argv[0] = tool is added here, mirroring create()).
+        priority is "low", "default" or "high"; wrappers stack right
+        to left within a priority level.
+        """
+        from pyte._shim import ffi, lib
+        prio = {"low": lib.PYTE_JOB_WRAPPER_PRIORITY_LOW,
+                "default": lib.PYTE_JOB_WRAPPER_PRIORITY_DEFAULT,
+                "high": lib.PYTE_JOB_WRAPPER_PRIORITY_HIGH}[priority]
+        # Keep the cdata strings alive in locals across the call.
+        argv_strs = [ffi.new("char[]", _enc(a))
+                     for a in [tool, *(args or [])]]
+        argv = ffi.new("const char *[]", [*argv_strs, ffi.NULL])
+        out = ffi.new("tapi_job_wrapper_t **")
+        check(lib.pyte_job_wrapper_add(self._h, _enc(tool), argv, prio, out),
+              f"job.wrap({tool})")
+        return Wrapper(out[0])
 
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""

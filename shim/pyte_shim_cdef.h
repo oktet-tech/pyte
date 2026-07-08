@@ -168,6 +168,18 @@ te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
 te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                        int timeout_ms);
 
+/* tapi_job wrappers (command-line prefixes, e.g. accel launchers) */
+typedef struct tapi_job_wrapper_t tapi_job_wrapper_t;
+
+#define PYTE_JOB_WRAPPER_PRIORITY_LOW ...
+#define PYTE_JOB_WRAPPER_PRIORITY_DEFAULT ...
+#define PYTE_JOB_WRAPPER_PRIORITY_HIGH ...
+
+te_errno pyte_job_wrapper_add(tapi_job_t *job, const char *tool,
+                              const char **argv, int priority,
+                              tapi_job_wrapper_t **out);
+te_errno pyte_job_wrapper_delete(tapi_job_wrapper_t *wrap);
+
 typedef struct pyte_pkts {
     void        **pkts;
     unsigned int  n;
@@ -339,6 +351,14 @@ te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,
 te_errno pyte_allocate_port(rcf_rpc_server *rpcs, unsigned int *port);
 te_errno pyte_cfg_net_all_assign_ip(int ipv6);
 te_errno pyte_cfg_net_assign_subnet(const char *net_name, int ipv6);
+
+/* tapi_cfg_net facades for suite prologues */
+te_errno pyte_cfg_net_remove_empty(void);
+te_errno pyte_cfg_net_reserve_all(void);
+te_errno pyte_cfg_net_all_up(int force);
+te_errno pyte_cfg_net_delete_all_ip4_addresses(void);
+te_errno pyte_cfg_net_update_pci_fn_to_interface(void);
+te_errno pyte_cfg_alloc_net_addr(const char *net_pool_oid, char **addr_str);
 
 /* ---- sendmsg / recvmsg ---- */
 te_errno pyte_rpc_sendmsg(rcf_rpc_server *rpcs, int s,

@@ -17,3 +17,9 @@ def test_signo_accepts_int_and_stdlib_signal():
 def test_signo_rejects_string():
     with pytest.raises(TypeError, match="signal must be an int or signal"):
         _signo("SIGKILL")
+
+
+def test_job_wrap_surface():
+    from pyte.job import Job, Wrapper
+    assert callable(Job.wrap)
+    assert callable(Wrapper.delete)

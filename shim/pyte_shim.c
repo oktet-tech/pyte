@@ -1254,6 +1254,23 @@ pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
     return 0;
 }
 
+te_errno
+pyte_job_wrapper_add(tapi_job_t *job, const char *tool, const char **argv,
+                     int priority, tapi_job_wrapper_t **out)
+{
+    PYTE_GUARD_RC(tapi_job_wrapper_add(job, tool, argv,
+                                       (tapi_job_wrapper_priority_t)priority,
+                                       out));
+    return 0;
+}
+
+te_errno
+pyte_job_wrapper_delete(tapi_job_wrapper_t *wrap)
+{
+    PYTE_GUARD_RC(tapi_job_wrapper_delete(wrap));
+    return 0;
+}
+
 /*
  * TAD section.  NDN values cross the boundary as ASN.1 text; parsing
  * happens here so Python never holds an asn_value it did not create.
@@ -1901,6 +1918,67 @@ te_errno
 pyte_cfg_net_assign_subnet(const char *net_name, int ipv6)
 {
     PYTE_GUARD_RC(pyte_cfg_net_assign_subnet_nojmp(net_name, ipv6));
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_remove_empty(void)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_remove_empty());
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_reserve_all(void)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_reserve_all());
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_all_up(int force)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_all_up(force != 0));
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_delete_all_ip4_addresses(void)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_delete_all_ip4_addresses());
+    return 0;
+}
+
+te_errno
+pyte_cfg_net_update_pci_fn_to_interface(void)
+{
+    PYTE_GUARD_RC(tapi_cfg_net_nodes_update_pci_fn_to_interface(
+                      NET_NODE_TYPE_INVALID));
+    return 0;
+}
+
+static te_errno
+pyte_cfg_alloc_net_addr_nojmp(const char *net_pool_oid, char **addr_str)
+{
+    te_errno rc;
+    cfg_handle pool = CFG_HANDLE_INVALID;
+    struct sockaddr *addr = NULL;
+
+    rc = cfg_find_str(net_pool_oid, &pool);
+    if (rc != 0)
+        return rc;
+    rc = tapi_cfg_alloc_net_addr(pool, NULL, &addr);
+    if (rc != 0)
+        return rc;
+    rc = te_sockaddr_h2str(addr, addr_str);
+    free(addr);
+    return rc;
+}
+
+te_errno
+pyte_cfg_alloc_net_addr(const char *net_pool_oid, char **addr_str)
+{
+    PYTE_GUARD_RC(pyte_cfg_alloc_net_addr_nojmp(net_pool_oid, addr_str));
     return 0;
 }
 

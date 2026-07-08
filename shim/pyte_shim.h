@@ -65,6 +65,11 @@
 #define PYTE_JOB_SIGNALED TAPI_JOB_STATUS_SIGNALED
 #define PYTE_JOB_UNKNOWN TAPI_JOB_STATUS_UNKNOWN
 
+/* Job wrapper priority passthrough */
+#define PYTE_JOB_WRAPPER_PRIORITY_LOW TAPI_JOB_WRAPPER_PRIORITY_LOW
+#define PYTE_JOB_WRAPPER_PRIORITY_DEFAULT TAPI_JOB_WRAPPER_PRIORITY_DEFAULT
+#define PYTE_JOB_WRAPPER_PRIORITY_HIGH TAPI_JOB_WRAPPER_PRIORITY_HIGH
+
 /*
  * Signal numbers for tapi_job_kill()/tapi_job_stop().  The job TAPI
  * takes HOST signal numbers and converts them itself (rpc_job.c uses
@@ -308,6 +313,19 @@ extern te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
                               size_t len);
 extern te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                               int timeout_ms);
+
+/*
+ * Job wrappers: prefix the job's command line with a launcher tool
+ * (tapi_job_wrapper_add).  Must be called after job creation and
+ * before start; only RPC-factory jobs are supported.  argv is the
+ * NULL-terminated wrapper argv with argv[0] = tool (same convention
+ * as pyte_job_create).  Wrappers are removed automatically with the
+ * job, so deleting them explicitly is optional.
+ */
+extern te_errno pyte_job_wrapper_add(tapi_job_t *job, const char *tool,
+                                     const char **argv, int priority,
+                                     tapi_job_wrapper_t **out);
+extern te_errno pyte_job_wrapper_delete(tapi_job_wrapper_t *wrap);
 
 /*
  * TAD/CSAP wrappers.  All NDN values cross the boundary as ASN.1 text
@@ -836,6 +854,27 @@ extern te_errno pyte_cfg_net_all_assign_ip(int ipv6);
  * addresses (works without root; enough for fake/alien env addresses).
  */
 extern te_errno pyte_cfg_net_assign_subnet(const char *net_name, int ipv6);
+
+/*
+ * tapi_cfg_net facades for suite prologues: 1:1 delegation to the
+ * same-named tapi_cfg_net calls operating on every /net at once.
+ * update_pci_fn_to_interface switches all network nodes
+ * (NET_NODE_TYPE_INVALID) from PCI function to interface references.
+ */
+extern te_errno pyte_cfg_net_remove_empty(void);
+extern te_errno pyte_cfg_net_reserve_all(void);
+extern te_errno pyte_cfg_net_all_up(int force);
+extern te_errno pyte_cfg_net_delete_all_ip4_addresses(void);
+extern te_errno pyte_cfg_net_update_pci_fn_to_interface(void);
+
+/**
+ * Allocate the next IPv4 address from the subnet pool entry named by
+ * its OID (e.g. "/net_pool:ip4/entry:10.38.10.0").  The address is
+ * returned as text (malloc'ed, pyte_free_string); consecutive calls
+ * hand out consecutive addresses.
+ */
+extern te_errno pyte_cfg_alloc_net_addr(const char *net_pool_oid,
+                                        char **addr_str);
 
 /*
  * Trampoline guard: confines any tapi longjmp to this C frame and

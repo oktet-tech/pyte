@@ -326,6 +326,78 @@ def agent(name: str) -> AgentNet:
     return AgentNet(name)
 
 
+# -- /net topology operations (tapi_cfg_net, suite prologues) ----------
+
+def net_remove_empty() -> None:
+    """Remove /net networks with no nodes (tapi_cfg_net_remove_empty)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_remove_empty(), "net.remove_empty", CfgError)
+
+
+def net_reserve_all() -> None:
+    """Reserve every /net node as an agent resource
+    (tapi_cfg_net_reserve_all)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_reserve_all(), "net.reserve_all", CfgError)
+
+
+def net_all_up(force: bool = False) -> None:
+    """Bring every /net node interface up (tapi_cfg_net_all_up)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_all_up(1 if force else 0),
+          f"net.all_up(force={force})", CfgError)
+
+
+def net_delete_all_ip4() -> None:
+    """Delete all IPv4 addresses on /net node interfaces
+    (tapi_cfg_net_delete_all_ip4_addresses)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_delete_all_ip4_addresses(),
+          "net.delete_all_ip4", CfgError)
+
+
+def net_all_assign_ip(af: str = "inet") -> None:
+    """Assign subnets + node addresses to every /net (needs root TAs).
+
+    Delegates to :func:`pyte.cfg.net_all_assign_ip` (same shim call).
+    """
+    cfg.net_all_assign_ip(af)
+
+
+def net_update_pci_fn_to_interface() -> None:
+    """Switch all /net nodes from PCI function to interface references
+    (tapi_cfg_net_nodes_update_pci_fn_to_interface, all node types)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_net_update_pci_fn_to_interface(),
+          "net.update_pci_fn_to_interface", CfgError)
+
+
+def alloc_net_addr(pool_oid: str) -> str:
+    """Allocate the next IPv4 address from the subnet pool entry.
+
+    pool_oid names the /net_pool entry (e.g. the OID behind a bound
+    net's ip4 subnet); consecutive calls hand out consecutive
+    addresses.
+    """
+    from pyte._shim import ffi, lib
+    out = ffi.new("char **")
+    check(lib.pyte_cfg_alloc_net_addr(_enc(pool_oid), out),
+          f"net.alloc_net_addr({pool_oid})", CfgError)
+    try:
+        return ffi.string(out[0]).decode()
+    finally:
+        lib.pyte_free_string(out[0])
+
+
+def if_add_net_addr(ta: str, ifname: str, addr: str, prefix: int) -> None:
+    """Add an IPv4 address to an agent interface, no broadcast
+    (tapi_cfg_base_if_add_net_addr with set_bcast=false)."""
+    from pyte._shim import lib
+    check(lib.pyte_cfg_if_addr_add(_enc(ta), _enc(ifname), _enc(addr),
+                                   prefix, 0),
+          f"net.if_add_net_addr({addr}/{prefix})", CfgError)
+
+
 @contextmanager
 def borrowed_iface(owner_agent: str, borrower_agent: str, name: str):
     """Temporarily move interface ``name`` between same-host agents.
