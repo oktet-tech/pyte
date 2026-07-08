@@ -46,3 +46,39 @@ def test_pick_last_empty_raises():
     from pyte.errors import MemaslapError
     with pytest.raises(MemaslapError, match="TPS"):
         memaslap._pick_last([], "TPS")
+
+
+def test_argv_suffixes():
+    opts = memaslap.Opts(win_size=10, stat_freq=5, expected_tps=20)
+    argv = opts.argv()
+    assert "--win_size=10k" in argv
+    assert "--stat_freq=5s" in argv
+    assert "--tps=20k" in argv
+
+
+def test_multi_server_and_addr():
+    class _Addr:
+        pair = ("b", 2)
+
+    opts = memaslap.Opts(servers=(("a", 1), _Addr()))
+    argv = opts.argv()
+    assert argv[0] == "--servers=a:1,b:2"
+
+
+def test_make_report_good():
+    r = memaslap._make_report("17891", "10.5", "memaslap --servers=x:1")
+    assert r.tps == 17891
+    assert abs(r.net_rate - 84.0) < 1e-6
+    assert r.cmd == "memaslap --servers=x:1"
+
+
+def test_make_report_malformed_tps():
+    from pyte.errors import MemaslapError
+    with pytest.raises(MemaslapError, match="TPS"):
+        memaslap._make_report("bad", "10.5", "cmd")
+
+
+def test_make_report_malformed_net_rate():
+    from pyte.errors import MemaslapError
+    with pytest.raises(MemaslapError, match="Net_rate"):
+        memaslap._make_report("17891", "bad", "cmd")

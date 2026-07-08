@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 __all__ = ["CfgOpts", "Opts", "Report", "Memaslap", "run", "replace"]
 
 _RE_TPS = re.compile(r"TPS:\s*([0-9]+)\s")
-_RE_NET_RATE = re.compile(r"Net_rate:\s*([0-9]+.[0-9]+)M")
+_RE_NET_RATE = re.compile(r"Net_rate:\s*([0-9]+.[0-9]+)M")  # unescaped '.' mirrors tapi_memaslap.c:291 verbatim (kept for parity)
 
 
 @dataclass(frozen=True)
@@ -147,6 +147,21 @@ class Report:
     cmd: str
 
 
+def _make_report(tps_s: str, net_s: str, cmd: str) -> Report:
+    """Convert raw filter strings to a Report; raise MemaslapError if malformed."""
+    from pyte.errors import MemaslapError
+    try:
+        tps = int(tps_s)
+    except ValueError:
+        raise MemaslapError(f"malformed TPS value: {tps_s!r}") from None
+    try:
+        net_rate = float(net_s) * 8
+    except ValueError:
+        raise MemaslapError(
+            f"malformed Net_rate value: {net_s!r}") from None
+    return Report(tps=tps, net_rate=net_rate, cmd=cmd)
+
+
 class Memaslap:
     """A running memaslap client job (from run())."""
 
@@ -158,6 +173,7 @@ class Memaslap:
         self._pco = pco
         self._cfg_fn = cfg_fn
         self._report: Report | None = None
+        self._closed = False
 
     def wait(self, timeout: float = 600.0) -> Report:
         from pyte.errors import MemaslapError
@@ -174,20 +190,18 @@ class Memaslap:
         net_vals = [m.data for m in self._net_flt.messages(timeout=10.0)]
         tps_s = _pick_last(tps_vals, "TPS")
         net_s = _pick_last(net_vals, "Net_rate")
-        try:
-            tps = int(tps_s)
-        except ValueError:
-            raise MemaslapError(f"malformed TPS value: {tps_s!r}") from None
-        try:
-            net_rate = float(net_s) * 8
-        except ValueError:
-            raise MemaslapError(
-                f"malformed Net_rate value: {net_s!r}") from None
-        self._report = Report(tps=tps, net_rate=net_rate, cmd=self._cmd)
+        self._report = _make_report(tps_s, net_s, self._cmd)
         return self._report
 
     def wait_silent(self, timeout: float = 600.0) -> None:
-        """Wait for completion without parsing a report (pre-runs)."""
+        """Wait for completion without parsing a report (pre-runs).
+
+        The tps/net_rate filters are left undrained; this is harmless because
+        pre-runs use a separate run() context manager and the Memaslap object
+        is discarded on exit.  (If wait() were called on the same object after
+        wait_silent(), it would read those buffered filter messages, but that
+        pattern does not arise in practice.)
+        """
         from pyte.errors import MemaslapError
         status = self._job.wait(timeout=timeout)
         if not status.ok:
@@ -209,6 +223,9 @@ class Memaslap:
                        self._report.net_rate, Mult.MEBI)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         from pyte.errors import TeError
         try:
             self._job.stop()
@@ -230,17 +247,18 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
     import os
     from pyte import log
     cfg_fn = None
-    if cfg_opts is not None:
-        cfg_fn = (f"/tmp/pyte_memaslap_{os.getpid()}"
-                  f"_{uuid.uuid4().hex[:8]}.cfg")
-        log.ring(f"memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
-        pco.file_put(cfg_fn, cfg_opts.render().encode())
-        opts = replace(opts, cfg_cmd=cfg_fn)
-    argv = opts.argv()
-    cmd = " ".join([opts.memaslap_path, *argv])
-    job = pco.job(opts.memaslap_path, argv)
+    job = None
     m = None
     try:
+        if cfg_opts is not None:
+            cfg_fn = (f"/tmp/pyte_memaslap_{os.getpid()}"
+                      f"_{uuid.uuid4().hex[:8]}.cfg")
+            log.ring(f"memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
+            pco.file_put(cfg_fn, cfg_opts.render().encode())
+            opts = replace(opts, cfg_cmd=cfg_fn)
+        argv = opts.argv()
+        cmd = " ".join([opts.memaslap_path, *argv])
+        job = pco.job(opts.memaslap_path, argv)
         tps_flt = job.filter(stdout=True, regex=r"TPS:\s*([0-9]+)\s",
                              group=1, name="tps")
         net_flt = job.filter(stdout=True,
@@ -260,4 +278,7 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
         if m is not None:
             m.close()
         else:
-            job.destroy()
+            if job is not None:
+                job.destroy()
+            if cfg_fn is not None:
+                pco.unlink(cfg_fn)
