@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.memcached argv-builder and stats-parser tests (no testbed)."""
 import pytest
+from pyte.errors import MemcachedError
 from pyte.tools import memcached
 
 
@@ -50,5 +51,26 @@ def test_stats_parse():
 
 
 def test_stats_parse_missing_field_raises():
-    with pytest.raises(Exception):
+    with pytest.raises(MemcachedError, match="cmd_set"):
         memcached.parse_stats("STAT pid 1\n")
+
+
+def test_addr_duck_type():
+    # Duck-typed Addr object with .pair => port extracted from pair[1].
+    class FakeAddr:
+        pair = ("192.0.2.1", 11211)
+
+    opts = memcached.Opts(tcp_port=FakeAddr())
+    assert "--port=11211" in opts.argv()
+
+
+def test_unix_mask_octal():
+    # unix_mask emitted as octal digits (0o755 -> "755").
+    opts = memcached.Opts(unix_mask=0o755)
+    assert "--unix-mask=755" in opts.argv()
+
+
+def test_delimiter_flag():
+    # delimiter emits -D<char> (tapi_memcached.c option "-D").
+    opts = memcached.Opts(delimiter=":")
+    assert "-D:" in opts.argv()

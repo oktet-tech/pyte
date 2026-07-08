@@ -41,7 +41,7 @@ from __future__ import annotations
 import enum
 import re
 from contextlib import contextmanager
-from dataclasses import dataclass, replace  # noqa: F401 (replace re-export)
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -261,14 +261,18 @@ class Memcached:
         one-shot job whose full stdout is read and scraped for the
         seven counters.
         """
+        from pyte.errors import MemcachedError
         port = _addr_port(self.opts.tcp_port)
         j = self._pco.job(program, [port])
+        # Filter names match app-perf-ts mem-db/memcached.c:462,478 for log parity.
         flt = j.filter(stdout=True, readable=True, name="stat stdout")
         j.filter(stderr=True, readable=False, log_level="WARN",
                  name="stat stderr")
         try:
             j.start()
-            j.wait(timeout=timeout)
+            status = j.wait(timeout=timeout)
+            if not status.ok:
+                raise MemcachedError(f"mc-stats exited with {status}")
             return parse_stats(flt.read_all(timeout=timeout))
         finally:
             j.destroy()
