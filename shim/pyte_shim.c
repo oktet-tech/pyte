@@ -2597,6 +2597,32 @@ pyte_mi_add_meas(te_mi_logger *logger, int type, const char *name,
 }
 
 te_errno
+pyte_mi_add_view(te_mi_logger *logger, int view_type, const char *name,
+                 const char *title)
+{
+    te_errno retval = 0;
+
+    te_mi_logger_add_meas_view(logger, &retval,
+                               (te_mi_meas_view_type)view_type,
+                               name, title);
+    return retval;
+}
+
+te_errno
+pyte_mi_graph_axis_add(te_mi_logger *logger, int view_type,
+                       const char *view_name, int axis, int meas_type)
+{
+    te_errno retval = 0;
+
+    te_mi_logger_meas_graph_axis_add_type(logger, &retval,
+                                          (te_mi_meas_view_type)view_type,
+                                          view_name,
+                                          (te_mi_graph_axis)axis,
+                                          (te_mi_meas_type)meas_type);
+    return retval;
+}
+
+te_errno
 pyte_mi_destroy(te_mi_logger *logger)
 {
     te_mi_logger_destroy(logger);

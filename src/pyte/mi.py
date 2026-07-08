@@ -43,6 +43,7 @@ class Meas(enum.Enum):
     RETRANS = "PYTE_MI_MEAS_RETRANS"
     RPS = "PYTE_MI_MEAS_RPS"
     PERCENTAGE = "PYTE_MI_MEAS_PERCENTAGE"
+    TIME = "PYTE_MI_MEAS_TIME"
 
 
 class Aggr(enum.Enum):
@@ -117,13 +118,16 @@ class Logger:
         check(rc, f"mi.Logger({self._tool!r})")
         self._logger = out[0]
         self._lib    = lib
+        self._ffi    = ffi
 
-    def add(self, type: Meas, name: str, aggr: Aggr, value: float,
+    def add(self, type: Meas, name: str | None, aggr: Aggr, value: float,
             multiplier: Mult = Mult.PLAIN) -> None:
         """Add one measurement to the logger.
 
         :param type:       a :class:`Meas` member (e.g. ``Meas.LATENCY``).
-        :param name:       free-form measurement name.
+        :param name:       free-form measurement name; ``None`` maps to
+                           C ``NULL`` (an unnamed measurement — required
+                           by graph views keyed on measurement type).
         :param aggr:       an :class:`Aggr` member (e.g. ``Aggr.MEAN``).
         :param value:      measurement value (units = *type* × *multiplier*).
         :param multiplier: a :class:`Mult` member (default ``Mult.PLAIN``).
@@ -144,10 +148,45 @@ class Logger:
             raise TypeError(
                 "multiplier must be a Mult, not "
                 f"{multiplier.__class__.__name__}")
+        cname = self._ffi.NULL if name is None else name.encode()
         rc = self._lib.pyte_mi_add_meas(
-            self._logger, _const(type), name.encode(), _const(aggr),
+            self._logger, _const(type), cname, _const(aggr),
             float(value), _const(multiplier))
         check(rc, f"mi.Logger.add({name!r})")
+
+    def line_graph(self, name: str, title: str, x_axis: Meas) -> None:
+        """Add a line-graph view over the logged measurements.
+
+        Wraps te_mi_logger_add_meas_view(TE_MI_MEAS_VIEW_LINE_GRAPH) +
+        te_mi_logger_meas_graph_axis_add_type(TE_MI_GRAPH_AXIS_X): the
+        X axis is keyed on the (single, unnamed) measurement of type
+        *x_axis*; all other measurements become Y-axis lines.
+
+        :param name:   view name (unique per view type).
+        :param title:  view title shown when the graph is displayed.
+        :param x_axis: a :class:`Meas` member whose (single, unnamed)
+                       measurement supplies the X coordinates.
+        :raises RuntimeError: if the logger is already closed.
+        :raises TypeError:    if *x_axis* is not a :class:`Meas`.
+        :raises TeError:      if the underlying C call fails.
+        """
+        if self._closed:
+            raise RuntimeError(
+                f"mi.Logger({self._tool!r}) is already closed")
+        if not isinstance(x_axis, Meas):
+            raise TypeError(
+                f"x_axis must be a Meas, not {x_axis.__class__.__name__}")
+        lib = self._lib
+        rc = lib.pyte_mi_add_view(self._logger,
+                                  int(lib.PYTE_MI_VIEW_LINE_GRAPH),
+                                  name.encode(), title.encode())
+        check(rc, f"mi.Logger.line_graph({name!r})")
+        rc = lib.pyte_mi_graph_axis_add(self._logger,
+                                        int(lib.PYTE_MI_VIEW_LINE_GRAPH),
+                                        name.encode(),
+                                        int(lib.PYTE_MI_GRAPH_AXIS_X),
+                                        _const(x_axis))
+        check(rc, f"mi.Logger.line_graph({name!r}) x-axis")
 
     def close(self) -> None:
         """Flush MI data and destroy the logger (idempotent)."""

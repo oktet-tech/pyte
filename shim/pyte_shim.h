@@ -641,6 +641,7 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_MEAS_RETRANS    TE_MI_MEAS_RETRANS
 #define PYTE_MI_MEAS_RPS        TE_MI_MEAS_RPS
 #define PYTE_MI_MEAS_PERCENTAGE TE_MI_MEAS_PERCENTAGE
+#define PYTE_MI_MEAS_TIME       TE_MI_MEAS_TIME
 
 /*
  * Aggr constants (SINGLE through PERCENTILE, covering all fio aggrs plus
@@ -666,6 +667,14 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_MULT_MEBI  TE_MI_MEAS_MULTIPLIER_MEBI
 #define PYTE_MI_MULT_MEGA  TE_MI_MEAS_MULTIPLIER_MEGA
 
+/*
+ * View type and graph axis constants (te_mi_meas_view_type /
+ * te_mi_graph_axis) for MI measurement views:
+ */
+#define PYTE_MI_VIEW_LINE_GRAPH TE_MI_MEAS_VIEW_LINE_GRAPH
+#define PYTE_MI_GRAPH_AXIS_X    TE_MI_GRAPH_AXIS_X
+#define PYTE_MI_GRAPH_AXIS_Y    TE_MI_GRAPH_AXIS_Y
+
 /**
  * Create a te_mi measurements logger for the named tool.
  * Wraps te_mi_logger_meas_create().
@@ -681,6 +690,25 @@ extern te_errno pyte_mi_meas_create(const char *tool, te_mi_logger **out);
 extern te_errno pyte_mi_add_meas(te_mi_logger *logger, int type,
                                  const char *name, int aggr, double val,
                                  int multiplier);
+
+/**
+ * Add a measurement view (e.g. a line graph) to an existing logger.
+ *
+ * te_mi_logger_add_meas_view() reports errors via the retval
+ * out-pointer; this wrapper captures that value and returns it so
+ * Python can raise TeError.
+ */
+extern te_errno pyte_mi_add_view(te_mi_logger *logger, int view_type,
+                                 const char *name, const char *title);
+
+/**
+ * Assign the (unique, NULL-named) measurement of the given type to a
+ * graph axis of an existing view.
+ * Wraps te_mi_logger_meas_graph_axis_add_type() with retval capture.
+ */
+extern te_errno pyte_mi_graph_axis_add(te_mi_logger *logger, int view_type,
+                                       const char *view_name, int axis,
+                                       int meas_type);
 
 /**
  * Flush and free the logger (calls te_mi_logger_destroy()).

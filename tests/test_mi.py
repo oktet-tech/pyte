@@ -31,6 +31,12 @@ class FakeLib:
     PYTE_MI_MEAS_RPS        = 7
     PYTE_MI_MEAS_RTT        = 8
     PYTE_MI_MEAS_RETRANS    = 9
+    PYTE_MI_MEAS_TIME       = 13
+
+    # View type / graph axis constants (mirror PYTE_MI_VIEW_* / AXIS_*)
+    PYTE_MI_VIEW_LINE_GRAPH = 0
+    PYTE_MI_GRAPH_AXIS_X    = 0
+    PYTE_MI_GRAPH_AXIS_Y    = 1
 
     # Aggr constants (mirror PYTE_MI_AGGR_*)
     PYTE_MI_AGGR_SINGLE     = 1
@@ -66,8 +72,19 @@ class FakeLib:
         return self.create_rc
 
     def pyte_mi_add_meas(self, logger, typ, name, aggr, val, mult):
-        self.calls.append(("add", typ, bytes(name), aggr, float(val), mult))
+        dname = None if name is FakeFfi.NULL else bytes(name)
+        self.calls.append(("add", typ, dname, aggr, float(val), mult))
         return self.add_rc
+
+    def pyte_mi_add_view(self, logger, view_type, name, title):
+        self.calls.append(("view", view_type, bytes(name), bytes(title)))
+        return 0
+
+    def pyte_mi_graph_axis_add(self, logger, view_type, view_name, axis,
+                               meas_type):
+        self.calls.append(("axis", view_type, bytes(view_name), axis,
+                           meas_type))
+        return 0
 
     def pyte_mi_destroy(self, logger):
         self.calls.append(("destroy",))
@@ -89,6 +106,9 @@ class FakeLib:
 
 class FakeFfi:
     """Minimal cffi-like façade used by pyte.mi."""
+
+    #: NULL sentinel (cffi exposes ffi.NULL; a unique object suffices here).
+    NULL = object()
 
     def new(self, spec):
         """Return a tiny mutable container that supports ptr[0] = val."""
@@ -231,3 +251,58 @@ def test_median_aggr_and_mega_mult_resolve(monkeypatch):
     # add tuple: ("add", typ, name, aggr, val, mult)
     assert add[3] == lib.PYTE_MI_AGGR_MEDIAN
     assert add[5] == lib.PYTE_MI_MULT_MEGA
+
+
+def test_add_none_name_passes_null(monkeypatch):
+    """add(name=None) passes ffi.NULL (an unnamed measurement)."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("ifstat") as logger:
+        logger.add(Meas.TIME, None, Aggr.SINGLE, 1.5)
+
+    add = [c for c in lib.calls if c[0] == "add"][0]
+    assert add[1] == lib.PYTE_MI_MEAS_TIME
+    assert add[2] is None          # fake decodes ffi.NULL to None
+    assert add[4] == 1.5
+
+
+def test_line_graph_adds_view_and_x_axis(monkeypatch):
+    """line_graph() creates a LINE_GRAPH view and keys X on the Meas type."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("ifstat") as logger:
+        logger.line_graph("ifstat-throughputs",
+                          "ifstat throughput statistics, bps",
+                          x_axis=Meas.TIME)
+
+    view = [c for c in lib.calls if c[0] == "view"][0]
+    axis = [c for c in lib.calls if c[0] == "axis"][0]
+    assert view == ("view", lib.PYTE_MI_VIEW_LINE_GRAPH,
+                    b"ifstat-throughputs",
+                    b"ifstat throughput statistics, bps")
+    assert axis == ("axis", lib.PYTE_MI_VIEW_LINE_GRAPH,
+                    b"ifstat-throughputs", lib.PYTE_MI_GRAPH_AXIS_X,
+                    lib.PYTE_MI_MEAS_TIME)
+
+
+def test_line_graph_after_close_raises(monkeypatch):
+    """line_graph() on a closed Logger raises RuntimeError."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    logger = mi.Logger("ifstat")
+    logger.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        logger.line_graph("g", "t", x_axis=Meas.TIME)
+
+
+def test_line_graph_wrong_x_axis_type_raises(monkeypatch):
+    """line_graph() raises TypeError for a non-Meas x_axis."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("ifstat") as logger:
+        with pytest.raises(TypeError, match="Meas"):
+            logger.line_graph("g", "t", x_axis="time")
