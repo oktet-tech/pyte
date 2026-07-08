@@ -380,6 +380,27 @@ pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
     return 0;
 }
 
+te_errno
+pyte_rpc_system(rcf_rpc_server *rpcs, int timeout_ms, const char *cmd,
+                int *out_flag, int *out_value)
+{
+    rpc_wait_status st;
+
+    RPC_AWAIT_ERROR(rpcs);
+    /*
+     * Unlike rpc_shell_get_all() (spawn + read loop + waitpid, where a
+     * raised rpcs->timeout only covers the first RPC), rpc_system() is
+     * a single RPC, so the per-call timeout covers the whole command.
+     * rcf_rpc resets rpcs->timeout to the default after the call.
+     */
+    if (timeout_ms > 0)
+        rpcs->timeout = (uint32_t)timeout_ms;
+    PYTE_GUARD(st = rpc_system(rpcs, cmd));
+    *out_flag = st.flag;
+    *out_value = st.value;
+    return 0;
+}
+
 /*
  * Configurator section.  cfg_* calls do not longjmp today, but every
  * entry point is still wrapped in PYTE_GUARD so a surprise jump cannot

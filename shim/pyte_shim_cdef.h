@@ -86,6 +86,8 @@ te_errno pyte_rpc_setenv(rcf_rpc_server *rpcs, const char *name,
 te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                 const char *cmd, int *out_flag,
                                 int *out_value);
+te_errno pyte_rpc_system(rcf_rpc_server *rpcs, int timeout_ms,
+                         const char *cmd, int *out_flag, int *out_value);
 
 typedef uint64_t cfg_handle;
 

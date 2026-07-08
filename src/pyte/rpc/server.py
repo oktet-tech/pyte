@@ -144,6 +144,37 @@ class RpcServer:
             if pbuf[0] != ffi.NULL:
                 lib.pyte_free_string(pbuf[0])
 
+    def system(self, cmd: str, timeout: float | None = None) -> int | None:
+        """Run cmd via a single rpc_system() call, return its exit status.
+
+        A non-zero exit status is RETURNED, not raised — matching C
+        rpc_system() semantics under RPC_AWAIT_IUT_ERROR, where callers
+        inspect the wait status themselves.  RpcError is raised only
+        when the RPC itself fails (e.g. times out) or the command did
+        not exit normally (killed by a signal).
+
+        ``timeout`` (seconds) raises the RPC timeout for this one call;
+        because rpc_system() is a single RPC (unlike the multi-RPC
+        :meth:`sh`), the timeout covers the whole command.  rcf_rpc
+        resets the timeout to the default afterwards.
+        """
+        from pyte._shim import ffi, lib
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be > 0")
+        flag = ffi.new("int *")
+        value = ffi.new("int *")
+        rc = lib.pyte_rpc_system(
+            self._h, 0 if timeout is None else int(timeout * 1000),
+            _enc(cmd), flag, value)
+        # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED
+        # == 0); its exit status is reported via the return value.
+        ret = self._check_call(rc, (flag[0], value[0]),
+                               lambda fv: fv[0] == 0,
+                               f"system({cmd!r})")
+        if ret is SUPPRESSED:
+            return None
+        return value[0]
+
     def sleep(self, seconds: float) -> None:
         """Sleep on the agent side (a remote, not engine-side, delay).
 

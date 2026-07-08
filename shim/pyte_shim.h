@@ -211,6 +211,17 @@ extern te_errno pyte_rpc_setenv(rcf_rpc_server *rpcs, const char *name,
 extern te_errno pyte_rpc_shell_get_all(rcf_rpc_server *rpcs, char **out_buf,
                                        const char *cmd, int *out_flag,
                                        int *out_value);
+/*
+ * Single-RPC rpc_system(): timeout_ms > 0 raises rpcs->timeout for this
+ * one call (a real end-to-end timeout, unlike the multi-RPC
+ * rpc_shell_get_all where only the first RPC is covered).  On success
+ * *out_flag/*out_value hold the rpc_wait_status flag/value; the RPC
+ * failing (e.g. timing out) is reported via RPC_ERRNO, with flag
+ * RPC_WAIT_STATUS_UNKNOWN and value -1.
+ */
+extern te_errno pyte_rpc_system(rcf_rpc_server *rpcs, int timeout_ms,
+                                const char *cmd, int *out_flag,
+                                int *out_value);
 
 /*
  * Configurator wrappers: everything crosses the boundary as text,
