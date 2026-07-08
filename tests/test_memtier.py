@@ -59,3 +59,29 @@ def test_parse_report_empty_raises():
     from pyte.errors import MemtierError
     with pytest.raises(MemtierError, match="statistics"):
         memtier.parse_report([], cmd="x")
+
+
+def test_parse_row_malformed():
+    from pyte.errors import MemtierError
+    with pytest.raises(MemtierError, match="malformed"):
+        memtier.parse_row("Sets --- ---")
+
+
+def test_argv_stub_server_extra_flags():
+    """Addr-like stub with .pair, run_count, pipeline, random_data, debug."""
+
+    class _Addr:
+        pair = ("192.0.2.7", 6379)
+
+    opts = memtier.Opts(server=_Addr(), run_count=2, requests=100,
+                        pipeline=8, random_data=True, debug=True)
+    argv = opts.argv()
+    assert "--server=192.0.2.7" in argv
+    assert "--port=6379" in argv
+    assert "--run-count=2" in argv
+    assert "--requests=100" in argv
+    assert "--pipeline=8" in argv
+    assert "--random-data" in argv
+    assert "--debug" in argv
+    # order: server flags come first, --random-data before --debug
+    assert argv.index("--random-data") < argv.index("--debug")

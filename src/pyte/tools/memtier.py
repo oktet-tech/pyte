@@ -45,25 +45,25 @@ class Proto(enum.Enum):
 @dataclass(frozen=True)
 class Opts:
     server: object = None            # (host, port) | pyte.env.Addr
-    protocol: "Proto | None" = None
-    run_count: "int | None" = None
-    requests: "int | None" = None
-    clients: "int | None" = None
-    threads: "int | None" = None
-    pipeline: "int | None" = None
-    test_time: "int | None" = None
-    data_size: "int | None" = None
+    protocol: Proto | None = None
+    run_count: int | None = None
+    requests: int | None = None
+    clients: int | None = None
+    threads: int | None = None
+    pipeline: int | None = None
+    test_time: int | None = None
+    data_size: int | None = None
     random_data: bool = False
-    ratio: "str | None" = None
-    key_prefix: "str | None" = None
-    key_pattern: "str | None" = None
-    key_minimum: "int | None" = None
-    key_maximum: "int | None" = None
+    ratio: str | None = None
+    key_prefix: str | None = None
+    key_pattern: str | None = None
+    key_minimum: int | None = None
+    key_maximum: int | None = None
     hide_histogram: bool = False
     debug: bool = False
     memtier_path: str = "memtier_benchmark"
 
-    def argv(self) -> list:
+    def argv(self) -> list[str]:
         a: list = []
         if self.server is not None:
             s = self.server.pair if hasattr(self.server, "pair") \
@@ -120,10 +120,14 @@ def parse_row(row: str) -> OpStats:
     fields[0] is the label (Sets/Gets/Totals); fields[1] is tps; fields[-1]
     is KB/s.
     """
+    from pyte.errors import MemtierError
     fields = row.split()
-    return OpStats(tps=float(fields[1]),
-                   net_rate=float(fields[-1]) / 1024 * 8,
-                   parsed=True)
+    try:
+        return OpStats(tps=float(fields[1]),
+                       net_rate=float(fields[-1]) / 1024 * 8,
+                       parsed=True)
+    except (ValueError, IndexError):
+        raise MemtierError(f"malformed stats row: {row!r}") from None
 
 
 def parse_report(rows: list, cmd: str) -> Report:
@@ -192,8 +196,8 @@ class Memtier:
         log.ring(f"memtier command: {self._report.cmd}")
         with Logger(tool) as logger:
             for name, st in (("Sets", self._report.sets),
-                              ("Gets", self._report.gets),
-                              ("Totals", self._report.totals)):
+                             ("Gets", self._report.gets),
+                             ("Totals", self._report.totals)):
                 if st.parsed:
                     logger.add(Meas.RPS, f"{name}.TPS", Aggr.SINGLE,
                                st.tps, Mult.PLAIN)
