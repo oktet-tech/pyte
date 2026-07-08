@@ -323,16 +323,20 @@ class Wrapper:
     job.  delete() is idempotent.
     """
 
-    def __init__(self, handle):
+    def __init__(self, job: "Job", handle):
+        self._job = job
         self._h = handle
         self._deleted = False
 
     def delete(self) -> None:
         if self._deleted:
             return
-        self._deleted = True
+        if self._job._h is None:
+            # The owning job was destroyed; TE freed its wrappers too.
+            return
         from pyte._shim import lib
         check(lib.pyte_job_wrapper_delete(self._h), "job.wrapper_delete")
+        self._deleted = True
 
     def __repr__(self) -> str:
         state = "deleted" if self._deleted else "active"
@@ -509,9 +513,14 @@ class Job:
         to left within a priority level.
         """
         from pyte._shim import ffi, lib
-        prio = {"low": lib.PYTE_JOB_WRAPPER_PRIORITY_LOW,
-                "default": lib.PYTE_JOB_WRAPPER_PRIORITY_DEFAULT,
-                "high": lib.PYTE_JOB_WRAPPER_PRIORITY_HIGH}[priority]
+        try:
+            prio = {"low": lib.PYTE_JOB_WRAPPER_PRIORITY_LOW,
+                    "default": lib.PYTE_JOB_WRAPPER_PRIORITY_DEFAULT,
+                    "high": lib.PYTE_JOB_WRAPPER_PRIORITY_HIGH}[priority]
+        except KeyError:
+            raise ValueError(
+                f"priority must be 'low', 'default' or 'high', "
+                f"got {priority!r}") from None
         # Keep the cdata strings alive in locals across the call.
         argv_strs = [ffi.new("char[]", _enc(a))
                      for a in [tool, *(args or [])]]
@@ -519,7 +528,7 @@ class Job:
         out = ffi.new("tapi_job_wrapper_t **")
         check(lib.pyte_job_wrapper_add(self._h, _enc(tool), argv, prio, out),
               f"job.wrap({tool})")
-        return Wrapper(out[0])
+        return Wrapper(self, out[0])
 
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""
