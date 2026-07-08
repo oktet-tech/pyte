@@ -175,6 +175,19 @@ class MemcachedError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class MemaslapError(TeError):
+    """Raised when memaslap fails or its output cannot be parsed."""
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class Mke2fsError(TeError):
     """Raised when mke2fs fails or the requested journal is missing."""
 
