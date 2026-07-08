@@ -188,6 +188,19 @@ class MemaslapError(TeError):
             super().__init__(rc_or_msg, where)
 
 
+class MemtierError(TeError):
+    """Raised when memtier_benchmark fails or its output cannot be parsed."""
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):
+            Exception.__init__(self, rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class Mke2fsError(TeError):
     """Raised when mke2fs fails or the requested journal is missing."""
 
