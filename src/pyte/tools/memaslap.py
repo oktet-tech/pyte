@@ -26,6 +26,7 @@ recorded in the suite's DIVERGENCES.md.
 from __future__ import annotations
 
 import re
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -68,6 +69,14 @@ def _addr(v) -> str:
     if hasattr(v, "pair"):
         v = v.pair
     return f"{v[0]}:{v[1]}"
+
+
+def _pick_last(values: list[str], what: str) -> str:
+    """Return the last element of *values*; raise MemaslapError if empty."""
+    if not values:
+        from pyte.errors import MemaslapError
+        raise MemaslapError(f"memaslap output lacks {what}")
+    return values[-1]
 
 
 @dataclass(frozen=True)
@@ -157,13 +166,24 @@ class Memaslap:
         status = self._job.wait(timeout=timeout)
         if not status.ok:
             raise MemaslapError(f"memaslap exited with {status}")
-        tps_s = self._tps_flt.read_all(timeout=10.0)
-        net_s = self._net_flt.read_all(timeout=10.0)
-        if not tps_s or not net_s:
-            raise MemaslapError("memaslap output lacks TPS/Net_rate")
-        self._report = Report(tps=int(tps_s.splitlines()[-1]),
-                              net_rate=float(net_s.splitlines()[-1]) * 8,
-                              cmd=self._cmd)
+        # Collect all regexp-filter messages (one per match) and take the last.
+        # read_all() would join them without separators, corrupting the value
+        # when stat_freq causes multiple matches (e.g. "17891"+"18200"
+        # → "1789118200").
+        tps_vals = [m.data for m in self._tps_flt.messages(timeout=10.0)]
+        net_vals = [m.data for m in self._net_flt.messages(timeout=10.0)]
+        tps_s = _pick_last(tps_vals, "TPS")
+        net_s = _pick_last(net_vals, "Net_rate")
+        try:
+            tps = int(tps_s)
+        except ValueError:
+            raise MemaslapError(f"malformed TPS value: {tps_s!r}") from None
+        try:
+            net_rate = float(net_s) * 8
+        except ValueError:
+            raise MemaslapError(
+                f"malformed Net_rate value: {net_s!r}") from None
+        self._report = Report(tps=tps, net_rate=net_rate, cmd=self._cmd)
         return self._report
 
     def wait_silent(self, timeout: float = 600.0) -> None:
@@ -211,7 +231,8 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
     from pyte import log
     cfg_fn = None
     if cfg_opts is not None:
-        cfg_fn = f"/tmp/pyte_memaslap_{os.getpid()}.cfg"
+        cfg_fn = (f"/tmp/pyte_memaslap_{os.getpid()}"
+                  f"_{uuid.uuid4().hex[:8]}.cfg")
         log.ring(f"memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
         pco.file_put(cfg_fn, cfg_opts.render().encode())
         opts = replace(opts, cfg_cmd=cfg_fn)
@@ -226,8 +247,12 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
                              regex=r"Net_rate:\s*([0-9]+.[0-9]+)M",
                              group=1, name="net_rate")
         # Names match tapi_memaslap.c:296-306 for log parity.
-        job.filter(stdout=True, log_level="RING", name="memaslap stdout")
-        job.filter(stderr=True, log_level="WARN", name="memaslap stderr")
+        # stdout is readable=True (default); stderr is readable=False
+        # (tapi_memaslap.c:303 .readable = false).
+        job.filter(stdout=True, readable=True, log_level="RING",
+                   name="memaslap stdout")
+        job.filter(stderr=True, readable=False, log_level="WARN",
+                   name="memaslap stderr")
         job.start()
         m = Memaslap(job, tps_flt, net_flt, cmd, pco, cfg_fn)
         yield m

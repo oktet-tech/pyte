@@ -38,6 +38,11 @@ def test_report_regexes():
     assert memaslap._RE_NET_RATE.search(line).group(1) == "10.5"
 
 
-def test_report_net_rate_mibit():
-    r = memaslap.Report(tps=17891, net_rate=10.5 * 8, cmd="memaslap ...")
-    assert r.net_rate == pytest.approx(84.0)
+def test_pick_last_returns_last():
+    assert memaslap._pick_last(["17891", "18200"], "TPS") == "18200"
+
+
+def test_pick_last_empty_raises():
+    from pyte.errors import MemaslapError
+    with pytest.raises(MemaslapError, match="TPS"):
+        memaslap._pick_last([], "TPS")
