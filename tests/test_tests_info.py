@@ -3,13 +3,31 @@
 """Unit tests for the scripts/te_py_tests_info objective generator."""
 import importlib.machinery
 import importlib.util
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-_GEN_PATH = Path(__file__).resolve().parents[3] / "scripts" / "te_py_tests_info"
+import pytest
+
+_FALLBACK = Path(__file__).resolve().parents[1] / "scripts" / "te_py_tests_info"
+
+
+def _resolve_gen_path():
+    env = os.environ.get("TE_PY_TESTS_INFO")
+    if env:
+        return Path(env)
+    if _FALLBACK.exists():
+        return _FALLBACK
+    return None
+
+
+_GEN_PATH = _resolve_gen_path()
 
 
 def _load_generator():
+    if _GEN_PATH is None:
+        pytest.skip("te_py_tests_info not available in this checkout",
+                    allow_module_level=True)
     loader = importlib.machinery.SourceFileLoader("te_py_tests_info",
                                                   str(_GEN_PATH))
     spec = importlib.util.spec_from_loader(loader.name, loader)

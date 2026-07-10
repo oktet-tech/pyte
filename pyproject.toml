@@ -12,9 +12,15 @@ requires-python = ">=3.11"
 dependencies = ["cffi>=1.16", "scapy>=2.5"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src", "."]
+
+[dependency-groups]
+dev = ["pytest>=8", "PyYAML>=6"]
 
 [tool.pyte]
 # Minimum TE this pyte is ABI-compatible with: a git ref your TE checkout
 # must contain. Use a commit hash today; a tag works once TE publishes them.
 min_te_commit = "0c1dea9365e60a399895a249f894369d408c6c2b"
+
+[tool.uv]
+package = false
