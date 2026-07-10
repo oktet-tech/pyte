@@ -655,6 +655,7 @@ extern void pyte_test_result_free(te_test_result *result);
 #define PYTE_MI_MEAS_RPS        TE_MI_MEAS_RPS
 #define PYTE_MI_MEAS_PERCENTAGE TE_MI_MEAS_PERCENTAGE
 #define PYTE_MI_MEAS_TIME       TE_MI_MEAS_TIME
+#define PYTE_MI_MEAS_LOADAVG    TE_MI_MEAS_LOADAVG
 
 /*
  * Aggr constants (SINGLE through PERCENTILE, covering all fio aggrs plus

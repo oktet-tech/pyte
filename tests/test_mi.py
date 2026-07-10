@@ -32,6 +32,7 @@ class FakeLib:
     PYTE_MI_MEAS_RTT        = 8
     PYTE_MI_MEAS_RETRANS    = 9
     PYTE_MI_MEAS_TIME       = 13
+    PYTE_MI_MEAS_LOADAVG    = 15
 
     # View type / graph axis constants (mirror PYTE_MI_VIEW_* / AXIS_*)
     PYTE_MI_VIEW_LINE_GRAPH = 0

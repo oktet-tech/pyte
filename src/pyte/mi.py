@@ -44,6 +44,7 @@ class Meas(enum.Enum):
     RPS = "PYTE_MI_MEAS_RPS"
     PERCENTAGE = "PYTE_MI_MEAS_PERCENTAGE"
     TIME = "PYTE_MI_MEAS_TIME"
+    LOADAVG = "PYTE_MI_MEAS_LOADAVG"
 
 
 class Aggr(enum.Enum):

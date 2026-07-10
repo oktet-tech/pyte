@@ -17,7 +17,7 @@ if not TE_INSTALL:
 # its directory on sys.path (especially under uv build isolation), so add
 # it explicitly before importing the sibling module.
 sys.path.insert(0, str(Path(__file__).parent))
-from te_compat import check_te_compat, read_min_te_commit
+from te_compat import check_te_compat, read_min_te_commit  # noqa: E402
 
 _PYPROJECT = Path(__file__).parent / "pyproject.toml"
 check_te_compat(os.environ.get("TE_BASE"),
