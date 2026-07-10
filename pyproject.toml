@@ -22,5 +22,3 @@ dev = ["pytest>=8", "PyYAML>=6"]
 # must contain. Use a commit hash today; a tag works once TE publishes them.
 min_te_commit = "0c1dea9365e60a399895a249f894369d408c6c2b"
 
-[tool.uv]
-package = false

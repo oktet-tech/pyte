@@ -48,7 +48,8 @@ Most of pyte's unit tests are pure-Python and need no TE engine. A subset
 needs the built cffi shim (`pyte._shim`) or is designed to run from a
 consuming suite's environment.
 
-The TE-free subset (365 tests) runs with:
+The TE-free subset runs without TE installed (use `--with` to avoid building
+the shim):
 
 ```sh
 PYTHONPATH=src uv run --no-project --with pytest --with scapy --with pyyaml \
@@ -59,8 +60,22 @@ PYTHONPATH=src uv run --no-project --with pytest --with scapy --with pyyaml \
   --ignore=tests/test_trex_stl.py
 ```
 
-The full suite (including shim-backed tests) is most easily run from a
-consuming suite that has already built pyte, for example:
+The full suite (467+ tests, including shim-backed tests) requires a TE
+installation to build the cffi shim. Install dev deps once, then run:
+
+```sh
+# One-time setup (builds the shim against TE_INSTALL):
+TE_INSTALL=/path/to/te/inst uv sync --group dev
+
+# Run the full unit-test suite:
+uv run --group dev pytest tests -q --ignore=tests/test_tests_info.py
+```
+
+The `--no-project --with pytest --with pyyaml` form still works for TE-free
+tests and needs no TE_INSTALL.
+
+The full suite is also easily run from a consuming suite that has already
+built pyte, for example:
 
 ```sh
 cd ../python-ts && uv run pytest lib/pyte/tests
