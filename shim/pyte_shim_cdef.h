@@ -165,10 +165,17 @@ te_errno pyte_job_receive(tapi_job_channel_t **filters, unsigned int n,
                           size_t *out_len, int *out_eos,
                           unsigned int *out_dropped,
                           tapi_job_channel_t **out_filter);
+te_errno pyte_job_receive_many(tapi_job_channel_t **filters, unsigned int n,
+                               int timeout_ms, unsigned int max_count,
+                               char ***out_datas, size_t **out_lens,
+                               int **out_eos, unsigned int *out_count);
+void pyte_job_receive_many_free(char **datas, size_t *lens, int *eos,
+                                unsigned int count);
 te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
                        size_t len);
 te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                        int timeout_ms);
+void pyte_job_set_tracing(tapi_job_t *job, int trace);
 
 /* tapi_job wrappers (command-line prefixes, e.g. accel launchers) */
 typedef struct tapi_job_wrapper_t tapi_job_wrapper_t;
@@ -303,6 +310,8 @@ typedef ... te_mi_logger;
 te_errno pyte_mi_meas_create(const char *tool, te_mi_logger **out);
 te_errno pyte_mi_add_meas(te_mi_logger *logger, int type, const char *name,
                           int aggr, double val, int multiplier);
+te_errno pyte_mi_add_comment(te_mi_logger *logger, const char *name,
+                             const char *value);
 te_errno pyte_mi_add_view(te_mi_logger *logger, int view_type,
                           const char *name, const char *title);
 te_errno pyte_mi_graph_axis_add(te_mi_logger *logger, int view_type,

@@ -1240,6 +1240,89 @@ pyte_job_receive(tapi_job_channel_t **filters, unsigned int n,
 }
 
 static te_errno
+pyte_job_receive_many_nojmp(tapi_job_channel_t **filters, unsigned int n,
+                            int timeout_ms, unsigned int max_count,
+                            char ***out_datas, size_t **out_lens,
+                            int **out_eos, unsigned int *out_count)
+{
+    tapi_job_channel_t *set[n + 1];
+    tapi_job_buffer_t *bufs = NULL;
+    unsigned int count = max_count;
+    unsigned int i;
+    te_errno rc;
+
+    for (i = 0; i < n; i++)
+        set[i] = filters[i];
+    set[n] = NULL;
+
+    rc = tapi_job_receive_many(set, timeout_ms, &bufs, &count);
+    if (rc != 0 && TE_RC_GET_ERROR(rc) != TE_ETIMEDOUT)
+    {
+        tapi_job_buffers_free(bufs, count);
+        return rc;
+    }
+
+    /*
+     * ETIMEDOUT with partial data: return what arrived (tapi_job
+     * semantics); Python sees the short read via the missing eos.
+     */
+    if (count == 0)
+    {
+        tapi_job_buffers_free(bufs, count);
+        *out_datas = NULL;
+        *out_lens = NULL;
+        *out_eos = NULL;
+        *out_count = 0;
+        return 0;
+    }
+
+    *out_datas = TE_ALLOC(count * sizeof(char *));
+    *out_lens = TE_ALLOC(count * sizeof(size_t));
+    *out_eos = TE_ALLOC(count * sizeof(int));
+    for (i = 0; i < count; i++)
+    {
+        (*out_lens)[i] = bufs[i].data.len;
+        (*out_datas)[i] = TE_ALLOC(bufs[i].data.len + 1);
+        if (bufs[i].data.ptr != NULL && bufs[i].data.len > 0)
+            memcpy((*out_datas)[i], bufs[i].data.ptr, bufs[i].data.len);
+        (*out_datas)[i][bufs[i].data.len] = '\0';
+        (*out_eos)[i] = bufs[i].eos ? 1 : 0;
+    }
+    *out_count = count;
+    tapi_job_buffers_free(bufs, count);
+    return 0;
+}
+
+te_errno
+pyte_job_receive_many(tapi_job_channel_t **filters, unsigned int n,
+                      int timeout_ms, unsigned int max_count,
+                      char ***out_datas, size_t **out_lens,
+                      int **out_eos, unsigned int *out_count)
+{
+    PYTE_GUARD_RC(pyte_job_receive_many_nojmp(filters, n, timeout_ms,
+                                              max_count, out_datas,
+                                              out_lens, out_eos,
+                                              out_count));
+    return 0;
+}
+
+void
+pyte_job_receive_many_free(char **datas, size_t *lens, int *eos,
+                           unsigned int count)
+{
+    unsigned int i;
+
+    if (datas != NULL)
+    {
+        for (i = 0; i < count; i++)
+            free(datas[i]);
+    }
+    free(datas);
+    free(lens);
+    free(eos);
+}
+
+static te_errno
 pyte_job_send_nojmp(tapi_job_channel_t *channel, const char *data,
                     size_t len)
 {
@@ -1273,6 +1356,17 @@ pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
     set[n] = NULL;
     PYTE_GUARD_RC(tapi_job_poll(set, timeout_ms));
     return 0;
+}
+
+void
+pyte_job_set_tracing(tapi_job_t *job, int trace)
+{
+    /* Not an RPC: only flips silent_pass flags on the job and its
+     * channels engine-side, so no jump guard is needed.  (TEST_FAIL
+     * inside is reachable only for a NULL job or a non-RPC factory —
+     * programming errors pyte cannot produce: it always passes a live
+     * handle from its only factory type, the RPC one.) */
+    tapi_job_set_tracing(job, trace ? true : false);
 }
 
 te_errno
@@ -2614,6 +2708,16 @@ pyte_mi_add_meas(te_mi_logger *logger, int type, const char *name,
                           (te_mi_meas_type)type, name,
                           (te_mi_meas_aggr)aggr, val,
                           (te_mi_meas_multiplier)multiplier);
+    return retval;
+}
+
+te_errno
+pyte_mi_add_comment(te_mi_logger *logger, const char *name,
+                    const char *value)
+{
+    te_errno retval = 0;
+
+    te_mi_logger_add_comment(logger, &retval, name, "%s", value);
     return retval;
 }
 

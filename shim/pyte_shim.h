@@ -322,10 +322,46 @@ extern te_errno pyte_job_receive(tapi_job_channel_t **filters,
                                  char **out_data, size_t *out_len,
                                  int *out_eos, unsigned int *out_dropped,
                                  tapi_job_channel_t **out_filter);
+/*
+ * Bulk receive: drain up to max_count queued messages from the filter
+ * set in ONE tapi_job_receive_many() RPC.  max_count == 0 means "all
+ * queued messages" (ta_job_receive_many() documents input count 0 as
+ * unlimited; the value is passed through unchanged).
+ *
+ * Results come back as three parallel malloc'ed arrays (data copies
+ * are NUL-terminated but lengths are exact, so interior data is
+ * preserved as tapi_job delivers it) plus the actual count; free them
+ * with pyte_job_receive_many_free().  When nothing is queued the
+ * arrays are NULL and *out_count is 0.
+ *
+ * TE_ETIMEDOUT from tapi_job_receive_many() is not an error here:
+ * whatever messages arrived before the timeout are returned (possibly
+ * none) and the caller detects the short read by the missing eos
+ * entries.
+ */
+extern te_errno pyte_job_receive_many(tapi_job_channel_t **filters,
+                                      unsigned int n, int timeout_ms,
+                                      unsigned int max_count,
+                                      char ***out_datas, size_t **out_lens,
+                                      int **out_eos,
+                                      unsigned int *out_count);
+
+/** Free the arrays returned by pyte_job_receive_many() (NULL-safe). */
+extern void pyte_job_receive_many_free(char **datas, size_t *lens,
+                                       int *eos, unsigned int count);
+
 extern te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
                               size_t len);
 extern te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                               int timeout_ms);
+
+/*
+ * Toggle per-call RPC logging for all of the job's channels and
+ * filters (tapi_job_set_tracing()); errors are still logged.  Not an
+ * RPC itself — it only flips engine-side silent_pass flags — hence no
+ * jump guard and a void return.
+ */
+extern void pyte_job_set_tracing(tapi_job_t *job, int trace);
 
 /*
  * Job wrappers: prefix the job's command line with a launcher tool
@@ -704,6 +740,18 @@ extern te_errno pyte_mi_meas_create(const char *tool, te_mi_logger **out);
 extern te_errno pyte_mi_add_meas(te_mi_logger *logger, int type,
                                  const char *name, int aggr, double val,
                                  int multiplier);
+
+/**
+ * Add a comment key/value to an existing logger (shows up under
+ * "comments" in the MI artifact, e.g. the tool's command line).
+ *
+ * te_mi_logger_add_comment() reports errors via the retval
+ * out-pointer; this wrapper captures that value and returns it so
+ * Python can raise TeError.  MI logging is engine-local (not an RPC),
+ * so no jump guard is needed.
+ */
+extern te_errno pyte_mi_add_comment(te_mi_logger *logger, const char *name,
+                                    const char *value);
 
 /**
  * Add a measurement view (e.g. a line graph) to an existing logger.
