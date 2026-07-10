@@ -77,6 +77,10 @@ class FakeLib:
         self.calls.append(("add", typ, dname, aggr, float(val), mult))
         return self.add_rc
 
+    def pyte_mi_add_comment(self, logger, name, value):
+        self.calls.append(("comment", bytes(name), bytes(value)))
+        return self.add_rc
+
     def pyte_mi_add_view(self, logger, view_type, name, title):
         self.calls.append(("view", view_type, bytes(name), bytes(title)))
         return 0
@@ -266,6 +270,30 @@ def test_add_none_name_passes_null(monkeypatch):
     assert add[1] == lib.PYTE_MI_MEAS_TIME
     assert add[2] is None          # fake decodes ffi.NULL to None
     assert add[4] == 1.5
+
+
+def test_comment_passes_encoded_name_and_value(monkeypatch):
+    """comment() forwards encoded name/value to pyte_mi_add_comment."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    with mi.Logger("memaslap") as logger:
+        logger.comment("command", "memaslap --foo")
+
+    comments = [c for c in lib.calls if c[0] == "comment"]
+    assert comments == [("comment", b"command", b"memaslap --foo")]
+
+
+def test_comment_after_close_raises_runtime_error(monkeypatch):
+    """comment() on a closed Logger raises RuntimeError, like add()."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+
+    logger = mi.Logger("memaslap")
+    logger.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        logger.comment("command", "memaslap --foo")
+    assert [c for c in lib.calls if c[0] == "comment"] == []
 
 
 def test_line_graph_adds_view_and_x_axis(monkeypatch):

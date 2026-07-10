@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import signal
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Iterator
@@ -206,30 +207,49 @@ class Filter:
             else:
                 yield msg
 
+    def drain(self, timeout: float = DEFAULT_TIMEOUT) -> list[JobMessage]:
+        """Read ALL queued messages in one tapi_job_receive_many() call.
+
+        Eos messages are consumed but not returned.  One RPC instead
+        of one per message; a short read (e.g. the job still running)
+        shows up as missing eos entries, not as an error.
+        """
+        return self.read_many(0, timeout=timeout)
+
     def read_many(self, count: int,
                   timeout: float = DEFAULT_TIMEOUT) -> list[JobMessage]:
-        """Read up to ``count`` messages from this filter.
+        """Read up to ``count`` messages (0 = all queued) from this
+        filter via ONE C ``tapi_job_receive_many()`` call.
 
-        Stops early once every attached channel has reported
-        end-of-stream (one eos per channel, counted against
-        ``self._n_channels`` exactly like :meth:`messages`); eos
-        messages are consumed but not returned.
-
-        This is a Python-side loop over :meth:`next` rather than a
-        wrapper of C ``tapi_job_receive_many()``: the semantics are
-        the same at test-scale message counts and it needs no extra
-        shim surface.  ``timeout`` applies to each receive;
-        :exc:`pyte.errors.TimeoutError` propagates immediately.
+        Eos messages count against ``count`` on the agent side but are
+        consumed here, not returned.  Unlike :meth:`messages` this does
+        not wait for end-of-stream: after ``timeout`` expires waiting
+        for the *first* message, whatever already arrived is returned
+        (possibly an empty list) — a timeout is not an error.  The
+        ``dropped`` field of the returned messages is always 0 (the
+        bulk shim call does not carry per-message drop counts).
         """
-        msgs: list[JobMessage] = []
-        eos_seen = 0
-        while len(msgs) < count and eos_seen < self._n_channels:
-            msg = self.next(timeout=timeout)
-            if msg.eos:
-                eos_seen += 1
-            else:
-                msgs.append(msg)
-        return msgs
+        from pyte._shim import ffi, lib
+        flts = ffi.new("tapi_job_channel_t *[]", [self._h])
+        datas = ffi.new("char ***")
+        lens = ffi.new("size_t **")
+        eos = ffi.new("int **")
+        n = ffi.new("unsigned int *")
+        check(lib.pyte_job_receive_many(flts, 1, _ms(timeout), count,
+                                        datas, lens, eos, n),
+              f"filter.read_many({self.name})")
+        try:
+            out = []
+            for i in range(n[0]):
+                if eos[0][i]:
+                    continue
+                data = ffi.buffer(datas[0][i], lens[0][i])[:].decode(
+                    "utf-8", "replace")
+                out.append(JobMessage(data=data, eos=False, dropped=0,
+                                      filter=self))
+            return out
+        finally:
+            lib.pyte_job_receive_many_free(datas[0], lens[0], eos[0], n[0])
 
     def read_all(self, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Concatenate all message data until end-of-stream.
@@ -529,6 +549,29 @@ class Job:
         check(lib.pyte_job_wrapper_add(self._h, _enc(tool), argv, prio, out),
               f"job.wrap({tool})")
         return Wrapper(self, out[0])
+
+    def tracing(self, enable: bool) -> None:
+        """Toggle per-call RPC logging for this job's operations.
+
+        Wraps tapi_job_set_tracing(): affects the job and all of its
+        channels and filters; errors are still logged either way.
+        """
+        from pyte._shim import lib
+        lib.pyte_job_set_tracing(self._h, 1 if enable else 0)
+
+    @contextmanager
+    def quiet(self):
+        """Suppress RPC tracing for the block.
+
+        The C suites' set_tracing(FALSE)/.../set_tracing(TRUE) idiom
+        around chatty polling loops; tracing is restored even if the
+        block raises.
+        """
+        self.tracing(False)
+        try:
+            yield self
+        finally:
+            self.tracing(True)
 
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""

@@ -155,6 +155,26 @@ class Logger:
             float(value), _const(multiplier))
         check(rc, f"mi.Logger.add({name!r})")
 
+    def comment(self, name: str, value: str) -> None:
+        """Add a comment key/value pair to the MI artifact.
+
+        Wraps te_mi_logger_add_comment(); comments end up under the
+        ``"comments"`` key of the MI JSON (e.g. the tool's command
+        line: ``logger.comment("command", cmdline)``).
+
+        :param name:  comment key (unique per logger).
+        :param value: comment value.
+        :raises RuntimeError: if the logger is already closed.
+        :raises TeError:      if the underlying C call fails
+                              (TE_EEXIST on a duplicate key).
+        """
+        if self._closed:
+            raise RuntimeError(
+                f"mi.Logger({self._tool!r}) is already closed")
+        rc = self._lib.pyte_mi_add_comment(
+            self._logger, name.encode(), value.encode())
+        check(rc, f"mi.Logger.comment({name!r})")
+
     def line_graph(self, name: str, title: str, x_axis: Meas) -> None:
         """Add a line-graph view over the logged measurements.
 
