@@ -282,7 +282,8 @@ class TestSkip(Exception):
     """Raise (or call test.skip()) to mark the test skipped."""
 
 
-_ERRNO_NAMES = {"ECONNREFUSED", "ENOENT", "ENODATA", "EPERM"}
+_ERRNO_NAMES = {"ECONNREFUSED", "ENOENT", "ENODATA", "ENOPROTOOPT",
+                "EPERM"}
 
 
 def __getattr__(name: str):

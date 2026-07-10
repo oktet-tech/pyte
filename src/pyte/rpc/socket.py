@@ -62,6 +62,9 @@ class SockOpt(enum.Enum):
     SO_RCVBUF = "PYTE_SO_RCVBUF"
     SO_SNDBUF = "PYTE_SO_SNDBUF"
     SO_ERROR = "PYTE_SO_ERROR"
+    # SO_INCOMING_NAPI_ID: NAPI ID of the last received packet; a
+    # getsockopt() probe for kernel busy-poll support (read-only).
+    SO_INCOMING_NAPI_ID = "PYTE_SO_INCOMING_NAPI_ID"
     TCP_NODELAY = "PYTE_TCP_NODELAY"
     # IP_PKTINFO: receive dest address + incoming iface index as ancillary
     # data (IPPROTO_IP / IP_PKTINFO cmsg). rpc_sockopt2level() derives the
