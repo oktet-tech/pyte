@@ -69,6 +69,21 @@ class FakeLib:
     def pyte_job_set_tracing(self, job_h, trace):
         self.calls.append(("set_tracing", job_h, trace))
 
+    # TeError construction helpers (required by pyte.errors.check())
+    PYTE_ETIMEDOUT = 110
+
+    def pyte_rc_error(self, rc):
+        return rc
+
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def te_rc_mod2str(self, rc):
+        return b"TAPI"
+
+    def te_rc_err2str(self, rc):
+        return b"EFAIL"
+
 
 class FakeFfi:
     """Minimal cffi-like façade used by Job.wrap()/Filter bulk reads."""
@@ -94,6 +109,11 @@ class FakeFfi:
     def buffer(data, length):
         """Emulate ffi.buffer(ptr, len): the fake 'pointer' is bytes."""
         return data[:length]
+
+    @staticmethod
+    def string(b):
+        """Emulate ffi.string(cdata): the fake cdata is already bytes."""
+        return b
 
 
 def _fake_shim(monkeypatch):
@@ -209,6 +229,22 @@ def test_read_many_limits_count_single_call(monkeypatch):
     assert [m.data for m in msgs] == ["a", "b"]
 
 
+def test_read_many_error_no_free(monkeypatch):
+    """When pyte_job_receive_many returns non-zero, check() raises and
+    pyte_job_receive_many_free is NOT called (the shim freed server-side)."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_bufs = [(b"x", False)]
+    lib.recv_rc = 12  # TE_ENOENT — any non-zero te_errno
+
+    with pytest.raises(TeError):
+        flt.read_many(0)
+
+    frees = [c for c in lib.calls if c[0] == "receive_many_free"]
+    assert frees == [], "receive_many_free must not be called when rc != 0"
+
+
 # ---------------------------------------------------------------------------
 # Job.tracing() / Job.quiet()
 # ---------------------------------------------------------------------------
@@ -244,3 +280,42 @@ def test_quiet_restores_tracing_on_exception(monkeypatch):
             raise RuntimeError("boom")
     assert lib.calls == [("set_tracing", "job-h", 0),
                          ("set_tracing", "job-h", 1)]
+
+
+def test_tracing_noop_after_destroy(monkeypatch):
+    """tracing() after destroy() is a no-op — no crash, no shim call."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+
+    job._h = None  # simulate destroy()
+    job.tracing(False)
+    job.tracing(True)
+
+    assert lib.calls == []
+
+
+def test_quiet_noop_after_destroy(monkeypatch):
+    """quiet() whose finally fires after destroy() must not call the shim.
+
+    The context manager's finally block calls tracing(True); with the
+    NULL guard that restore is silently skipped.  Two scenarios:
+      1. destroy() called inside the with-block.
+      2. destroy() called before entering quiet() at all.
+    """
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+
+    # Scenario 1: destroy() inside the quiet() block
+    with job.quiet():
+        assert lib.calls == [("set_tracing", "job-h", 0)]
+        job._h = None  # simulate destroy() mid-block
+    # finally: tracing(True) fires but _h is None → no additional shim call
+    assert lib.calls == [("set_tracing", "job-h", 0)]
+
+    # Scenario 2: quiet() entered when already destroyed
+    lib.calls.clear()
+    job2 = _fake_job(handle="job2-h")
+    job2._h = None  # destroyed before entering quiet()
+    with job2.quiet():
+        pass
+    assert lib.calls == []

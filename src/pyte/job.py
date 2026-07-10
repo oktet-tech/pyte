@@ -556,6 +556,8 @@ class Job:
         Wraps tapi_job_set_tracing(): affects the job and all of its
         channels and filters; errors are still logged either way.
         """
+        if self._h is None:      # after destroy(): no-op, mirrors destroy()
+            return               # idempotence; a NULL handle would crash in C
         from pyte._shim import lib
         lib.pyte_job_set_tracing(self._h, 1 if enable else 0)
 

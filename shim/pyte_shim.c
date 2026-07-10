@@ -1363,9 +1363,8 @@ pyte_job_set_tracing(tapi_job_t *job, int trace)
 {
     /* Not an RPC: only flips silent_pass flags on the job and its
      * channels engine-side, so no jump guard is needed.  (TEST_FAIL
-     * inside is reachable only for a NULL job or a non-RPC factory —
-     * programming errors pyte cannot produce: it always passes a live
-     * handle from its only factory type, the RPC one.) */
+     * inside is reachable for a NULL job — but the Python facade now
+     * guards tracing() against NULL after destroy(), so this is safe.) */
     tapi_job_set_tracing(job, trace ? true : false);
 }
 
