@@ -17,8 +17,7 @@ Totals (:376-381); with --run-count>1 the LAST table wins (:353-357) --
 we keep updating per matching row, so later tables overwrite earlier.
 MI (:406-457): tool "memtier_benchmark"; per parsed op: RPS "<Op>.TPS"
 single plain + THROUGHPUT "<Op>.Net_rate" single mebi; comment "command"
--- pyte.mi has NO comment support; RING-log the command instead with a
-# DIVERGENCE comment, exactly as memaslap.py does.
+= argv joined, emitted natively via logger.comment().
 """
 from __future__ import annotations
 
@@ -189,11 +188,7 @@ class Memtier:
     def mi_report(self, tool: str = "memtier_benchmark") -> None:
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte import log
         from pyte.mi import Aggr, Logger, Meas, Mult
-        # DIVERGENCE: te_mi comment "command" (tapi_memtier.c:456-457)
-        # is RING-logged -- pyte.mi has no comment support.
-        log.ring(f"memtier command: {self._report.cmd}")
         with Logger(tool) as logger:
             for name, st in (("Sets", self._report.sets),
                              ("Gets", self._report.gets),
@@ -203,6 +198,7 @@ class Memtier:
                                st.tps, Mult.PLAIN)
                     logger.add(Meas.THROUGHPUT, f"{name}.Net_rate",
                                Aggr.SINGLE, st.net_rate, Mult.MEBI)
+            logger.comment("command", self._report.cmd)
 
     def close(self) -> None:
         if self._closed:

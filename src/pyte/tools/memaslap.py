@@ -17,11 +17,6 @@ Report filters: "TPS:\\s*([0-9]+)\\s" and "Net_rate:\\s*([0-9]+.[0-9]+)M"
 (:284,291); net_rate is MiB/s in output, x8 to Mibit/s (:531).
 MI (:557-571): tool "memaslap", RPS "TPS" single plain, THROUGHPUT
 "Net_rate" single mebi, comment "command" = argv joined.
-
-DIVERGENCE: pyte.mi.Logger has no comment() method and the shim has no
-comment support. The MI "command" field (tapi_memaslap.c:557-571) is
-instead logged as RING via pyte.log.ring() in mi_report(). This will be
-recorded in the suite's DIVERGENCES.md.
 """
 from __future__ import annotations
 
@@ -210,17 +205,13 @@ class Memaslap:
     def mi_report(self, tool: str = "memaslap") -> None:
         if self._report is None:
             raise RuntimeError("call wait() before mi_report()")
-        from pyte import log
         from pyte.mi import Aggr, Logger, Meas, Mult
-        # DIVERGENCE: pyte.mi.Logger has no comment() method and shim has no
-        # comment support. MI "command" field (tapi_memaslap.c:557-571) is
-        # logged as RING instead.
-        log.ring(f"memaslap command: {self._report.cmd}")
         with Logger(tool) as logger:
             logger.add(Meas.RPS, "TPS", Aggr.SINGLE,
                        self._report.tps, Mult.PLAIN)
             logger.add(Meas.THROUGHPUT, "Net_rate", Aggr.SINGLE,
                        self._report.net_rate, Mult.MEBI)
+            logger.comment("command", self._report.cmd)
 
     def close(self) -> None:
         if self._closed:
