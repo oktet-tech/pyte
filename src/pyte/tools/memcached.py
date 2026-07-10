@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import enum
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -254,26 +254,34 @@ class Memcached:
         self.opts = opts
 
     def stats(self, timeout: float = 15.0,
-              program: str = "mc-stats") -> Stats:
+              program: str = "mc-stats", quiet: bool = True) -> Stats:
         """Run mc-stats <port> and parse counters.
 
         Mirrors memcached_stats_get() (mem-db/memcached.c:432-517): a
         one-shot job whose full stdout is read and scraped for the
         seven counters.
+
+        quiet mirrors the C's tapi_job_set_tracing toggles around the
+        probe (mem-db/memcached.c:458-459,480,484) with one Job.quiet()
+        bracket over filter attach/start/wait/read (the C re-enables
+        tracing just for start+wait; not worth two brackets here).
         """
         from pyte.errors import MemcachedError
         port = _addr_port(self.opts.tcp_port)
         j = self._pco.job(program, [port])
-        # Filter names match app-perf-ts mem-db/memcached.c:462,478 for log parity.
-        flt = j.filter(stdout=True, readable=True, name="stat stdout")
-        j.filter(stderr=True, readable=False, log_level="WARN",
-                 name="stat stderr")
         try:
-            j.start()
-            status = j.wait(timeout=timeout)
-            if not status.ok:
-                raise MemcachedError(f"mc-stats exited with {status}")
-            return parse_stats(flt.read_all(timeout=timeout))
+            with j.quiet() if quiet else nullcontext():
+                # Filter names match app-perf-ts mem-db/memcached.c:462,478
+                # for log parity.
+                flt = j.filter(stdout=True, readable=True,
+                               name="stat stdout")
+                j.filter(stderr=True, readable=False, log_level="WARN",
+                         name="stat stderr")
+                j.start()
+                status = j.wait(timeout=timeout)
+                if not status.ok:
+                    raise MemcachedError(f"mc-stats exited with {status}")
+                return parse_stats(flt.read_all(timeout=timeout))
         finally:
             j.destroy()
 

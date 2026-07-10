@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.memcached argv-builder and stats-parser tests (no testbed)."""
+from contextlib import contextmanager
+
 import pytest
 from pyte.errors import MemcachedError
 from pyte.tools import memcached
@@ -74,3 +76,80 @@ def test_delimiter_flag():
     # delimiter emits -D<char> (tapi_memcached.c option "-D").
     opts = memcached.Opts(delimiter=":")
     assert "-D:" in opts.argv()
+
+
+# -- Memcached.stats() quiet bracket (mem-db/memcached.c:458-484) ------------
+
+_STATS_OUT = "".join(
+    f"STAT {f} {i}\n"
+    for i, f in enumerate(("cmd_set", "cmd_get", "get_hits", "get_misses",
+                           "curr_items", "bytes_read", "bytes_written")))
+
+
+class _FakeStatus:
+    ok = True
+
+
+class _FakeFilter:
+    def read_all(self, timeout):
+        return _STATS_OUT
+
+
+class _FakeJob:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def filter(self, **kw):
+        self.calls.append(("filter", kw.get("name")))
+        return _FakeFilter()
+
+    def start(self):
+        self.calls.append("start")
+
+    def wait(self, timeout):
+        self.calls.append("wait")
+        return _FakeStatus()
+
+    def destroy(self):
+        self.calls.append("destroy")
+
+    @contextmanager
+    def quiet(self):
+        self.calls.append("quiet-on")
+        try:
+            yield self
+        finally:
+            self.calls.append("quiet-off")
+
+
+class _FakePco:
+    def __init__(self):
+        self.calls = []
+
+    def job(self, program, argv):
+        self.calls.append(("job", program, argv))
+        return _FakeJob(self.calls)
+
+
+def test_stats_quiet_wraps_probe():
+    # quiet=True (default): filter attach, start, wait and the read all
+    # happen inside one Job.quiet() bracket; destroy stays outside.
+    pco = _FakePco()
+    m = memcached.Memcached(pco, job=None,
+                            opts=memcached.Opts(tcp_port=11211))
+    s = m.stats()
+    assert s.cmd_set == 0 and s.bytes_written == 6
+    assert pco.calls == [("job", "mc-stats", ["11211"]),
+                         "quiet-on",
+                         ("filter", "stat stdout"),
+                         ("filter", "stat stderr"),
+                         "start", "wait",
+                         "quiet-off", "destroy"]
+
+
+def test_stats_quiet_false_keeps_tracing():
+    pco = _FakePco()
+    m = memcached.Memcached(pco, job=None,
+                            opts=memcached.Opts(tcp_port=11211))
+    m.stats(quiet=False)
+    assert "quiet-on" not in pco.calls
