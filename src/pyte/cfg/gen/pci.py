@@ -68,7 +68,7 @@ class DeviceParam(CfgObject):
         cvt_name="INT32",
         access="read_only")
     type = StrKnob("type", access="read_only")
-    value = Collection("value", DeviceParamValue)
+    value_ = Collection("value", DeviceParamValue)
 
 
 class DevicePower(CfgObject):

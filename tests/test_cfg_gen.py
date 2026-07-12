@@ -632,6 +632,99 @@ def test_generate_from_text_map_emits_modules():
         in out["sys"]
 
 
+# -- reserved names: CM segments must not shadow the engine API --------
+
+def test_attr_name_reserved_engine_names_get_trailing_underscore():
+    # CfgObject exposes oid (instance attr), name (instance-key property),
+    # saved() and the emitted SelfKnob "value"; a CM leaf with any of
+    # these segments would shadow the engine API (a leaf "oid" even
+    # recurses infinitely: knob.__set__ -> _oid -> obj.oid -> knob).
+    assert _gen.attr_name("name") == "name_"
+    assert _gen.attr_name("oid") == "oid_"
+    assert _gen.attr_name("saved") == "saved_"
+    assert _gen.attr_name("value") == "value_"
+    assert _gen.attr_name("mtu") == "mtu"      # normal segments untouched
+
+
+def test_reserved_leaf_emits_renamed_knob():
+    """/agent/interface/irq/name (real CM) must not shadow CfgObject.name."""
+    yaml_text = """
+- register:
+    - oid: "/agent/interface"
+      access: read_create
+      name: ifname
+    - oid: "/agent/interface/irq"
+      access: read_only
+      name: irq_name
+    - oid: "/agent/interface/irq/name"
+      type: string
+      access: read_only
+"""
+    out = _gen.generate_from(
+        {"cm.yml": yaml_text},
+        [_gen.Target("cm.yml", "/agent/interface", "interface")])
+    src = out["interface"]
+    assert 'name_ = StrKnob("name", access="read_only")' in src
+    assert '\n    name = StrKnob' not in src
+
+
+def test_lint_warns_on_reserved_segment():
+    entries = _gen.parse_cm_raw("""
+- register:
+    - oid: "/agent/interface/irq/name"
+      type: string
+      access: read_only
+""")
+    warns = _gen.lint(entries)
+    assert any("name" in w and "reserved" in w for w in warns)
+
+
+# -- duplicate emitted names must fail loudly, not last-wins -----------
+
+def test_duplicate_attr_names_raise():
+    """file-max and file_max both sanitize to file_max; silently keeping
+    the last one loses a knob."""
+    yaml_text = """
+- register:
+    - oid: "/agent/sys"
+      access: read_only
+    - oid: "/agent/sys/file-max"
+      type: int32
+      access: read_write
+    - oid: "/agent/sys/file_max"
+      type: int32
+      access: read_write
+"""
+    with pytest.raises(ValueError, match="file_max"):
+        _gen.generate_from(
+            {"cm.yml": yaml_text},
+            [_gen.Target("cm.yml", "/agent/sys", "sys")])
+
+
+def test_duplicate_class_names_raise():
+    """/agent/foo/bar and /agent/foo-bar both produce class FooBar; the
+    second definition would silently rebind the first."""
+    yaml_text = """
+- register:
+    - oid: "/agent/foo"
+      access: read_only
+    - oid: "/agent/foo/bar"
+      access: read_only
+    - oid: "/agent/foo/bar/x"
+      type: int32
+      access: read_write
+    - oid: "/agent/foo-bar"
+      access: read_only
+    - oid: "/agent/foo-bar/y"
+      type: int32
+      access: read_write
+"""
+    with pytest.raises(ValueError, match="FooBar"):
+        _gen.generate_from(
+            {"cm.yml": yaml_text},
+            [_gen.Target("cm.yml", "/agent", "agent")])
+
+
 # -- force_collection: CM entries whose name: is missing although the
 # runtime node is a collection (documentation-grade CM metadata) -------
 

@@ -305,7 +305,7 @@ class IrqCpu(CfgObject):
 
 class Irq(CfgObject):
     """Network interface interrupt information"""
-    name = StrKnob("name", access="read_only")
+    name_ = StrKnob("name", access="read_only")
     cpu = Collection("cpu", IrqCpu)
     smp_affinity = IntKnob("smp_affinity", cvt_name="UINT64")
 

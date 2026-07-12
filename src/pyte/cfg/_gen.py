@@ -129,6 +129,11 @@ def lint(entries: list[Entry]) -> list[str]:
             warns.append(
                 f"{e.oid}: name defaulted to none but d: Name "
                 f"{e.raw_name!r} looks like a collection key")
+        seg = e.oid.rstrip("/").split("/")[-1]
+        if seg in _RESERVED_ATTRS:
+            warns.append(
+                f"{e.oid}: segment {seg!r} is a reserved engine name; "
+                f"emitted as attribute {seg}_")
     return warns
 
 
@@ -237,18 +242,29 @@ def class_name(oid: str, root_oid: str) -> str:
     return "".join(_pascal(s) for s in tail.split("/"))
 
 
+#: Names every generated class inherits or gets from the engine:
+#: CfgObject.oid (instance attribute -- a knob descriptor named "oid"
+#: even recurses infinitely: knob.__set__ -> _oid -> obj.oid -> knob),
+#: CfgObject.name (the instance-key property), CfgObject.saved(), and
+#: the SelfKnob emitted as "value".  A CM segment with one of these
+#: names must not shadow the engine API (live case: the real CM leaf
+#: /agent/interface/irq/name).
+_RESERVED_ATTRS = frozenset({"oid", "name", "saved", "value"})
+
+
 def attr_name(seg: str) -> str:
     """A valid Python attribute name for an OID segment.
 
     The raw segment stays the OID subid; only the Python attribute name
     is sanitized: non-identifier chars (e.g. '-') become '_', a leading
-    digit is prefixed with '_', and a Python keyword gets a trailing '_'
-    (so e.g. "file-max" -> "file_max", "global" -> "global_").
+    digit is prefixed with '_', and a Python keyword or a reserved
+    engine name gets a trailing '_' (so e.g. "file-max" -> "file_max",
+    "global" -> "global_", "name" -> "name_").
     """
     a = re.sub(r"\W", "_", seg)
     if a[:1].isdigit():
         a = "_" + a
-    if keyword.iskeyword(a):
+    if keyword.iskeyword(a) or a in _RESERVED_ATTRS:
         a += "_"
     return a
 
@@ -370,7 +386,9 @@ def emit_module(root: Node, module_name: str,
 
     blocks: list[str] = []
     used: set[str] = {"CfgObject"}   # every emitted class subclasses it
-    _emit_class(root, root_oid, params, oid_fmt, blocks, used, include)
+    cnames: dict[str, str] = {}      # class name -> defining OID
+    _emit_class(root, root_oid, params, oid_fmt, blocks, used, cnames,
+                include)
     header = _HEADER.format(title=title, imports=_imports_for(used))
     # Two blank lines before the first class and between classes (PEP 8 /
     # ruff E302) so the generated module is lint-clean.
@@ -379,22 +397,31 @@ def emit_module(root: Node, module_name: str,
 
 def _emit_class(node: Node, root_oid: str, root_params: list[str],
                 root_oid_fmt: str, blocks: list[str],
-                used: set[str],
+                used: set[str], cnames: dict[str, str],
                 include: tuple[str, ...] | None = None) -> None:
     """Append the class block for `node`; recurse into object children.
 
     Child object classes are appended BEFORE the parent's block so that
     SubObject/Collection references are already defined.  `used`
-    accumulates the engine names actually emitted (for the import block).
+    accumulates the engine names actually emitted (for the import block);
+    `cnames` maps emitted class names to their defining OID so a
+    collision (e.g. /a/foo/bar vs /a/foo-bar, both FooBar) raises
+    instead of the second class silently rebinding the first.
     `include`, honored only at this (root) call, restricts the emitted
     children to the named ones; recursive calls pass None so named
     subtrees emit in full.
     """
     cname = class_name(node.oid, root_oid)
+    if cname in cnames:
+        raise ValueError(
+            f"class name collision: {node.oid} and {cnames[cname]} "
+            f"both emit class {cname}")
+    cnames[cname] = node.oid
     body: list[str] = [f"class {cname}(CfgObject):"]
     body.extend(_docstring(node, "    "))
 
     members: list[str] = []
+    attrs: dict[str, str] = {}       # attribute name -> child segment
     # Any node emitted as its own class (collection element or value-
     # bearing subobject) that carries a scalar value gets a self-value,
     # whether or not it also has children -- otherwise a childless
@@ -417,6 +444,12 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
                     f"include lists {seg!r}, not a child of {node.oid}")
             items.append((seg, child))
     for seg, child in items:
+        attr = attr_name(seg)
+        if attr in attrs:
+            raise ValueError(
+                f"attribute name collision under {node.oid}: segments "
+                f"{attrs[attr]!r} and {seg!r} both map to {attr!r}")
+        attrs[attr] = seg
         kind = classify(child)
         if kind == "knob":
             used.add(knob_class(child.entry.type))
@@ -424,17 +457,17 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
         elif kind == "subobject":
             used.add("SubObject")
             members.append(
-                f'    {attr_name(seg)} = SubObject('
+                f'    {attr} = SubObject('
                 f'"{seg}", {class_name(child.oid, root_oid)})')
             _emit_class(child, root_oid, root_params, root_oid_fmt,
-                        blocks, used)
+                        blocks, used, cnames)
         else:  # collection
             used.add("Collection")
             members.append(
-                f'    {attr_name(seg)} = Collection('
+                f'    {attr} = Collection('
                 f'"{seg}", {class_name(child.oid, root_oid)})')
             _emit_class(child, root_oid, root_params, root_oid_fmt,
-                        blocks, used)
+                        blocks, used, cnames)
 
     has_init = node.oid == root_oid
     if members:
