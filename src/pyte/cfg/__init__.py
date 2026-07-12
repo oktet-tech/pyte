@@ -133,7 +133,9 @@ def set(oid: str, value, cvt: int | None = None) -> None:  # noqa: A001
         cvt = _get_type(oid)
     if isinstance(value, bool):
         value = int(value)
-    _raw_set(oid, cvt, str(value))
+    # None clears the value ("" on the wire); str(None) would write
+    # the literal text "None".
+    _raw_set(oid, cvt, "" if value is None else str(value))
 
 
 def add(oid: str, value=None) -> CfgNode:
@@ -164,9 +166,11 @@ def add(oid: str, value=None) -> CfgNode:
         if value is None:
             t, wire = lib.PYTE_CVT_NONE, b""
         elif isinstance(value, bool):
-            t, wire = lib.PYTE_CVT_INT32, _enc(str(int(value)))
+            t, wire = lib.PYTE_CVT_BOOL, _enc("1" if value else "0")
         elif isinstance(value, int):
             t, wire = lib.PYTE_CVT_INT32, _enc(str(value))
+        elif isinstance(value, float):
+            t, wire = lib.PYTE_CVT_DOUBLE, _enc(str(value))
         else:
             t, wire = lib.PYTE_CVT_STRING, _enc(str(value))
 
@@ -289,8 +293,21 @@ def grab_rsrc(agent: str, name: str, target_oid: str) -> CfgNode:
     only objects it holds EXCLUSIVELY (shared-grabbed interfaces stay
     invisible), and lock names strip the ``/agent:`` prefix, so locks
     are host-global across agents on the same host.
+
+    Re-entrant with :func:`release_rsrc`: releasing leaves the
+    ``rsrc`` instance in place with an empty value, so a later grab
+    of the same name re-points the existing instance instead of
+    failing EEXIST on add.
     """
-    return add(f"/agent:{agent}/rsrc:{name}", target_oid)
+    oid = f"/agent:{agent}/rsrc:{name}"
+    try:
+        return add(oid, target_oid)
+    except CfgError:
+        # The instance already exists (a prior release_rsrc left it
+        # empty): re-point it.  If add failed for another reason the
+        # set fails too, chaining the add error as __context__.
+        set(oid, target_oid)
+        return CfgNode(oid)
 
 
 def release_rsrc(agent: str, name: str) -> None:

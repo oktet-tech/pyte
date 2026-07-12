@@ -161,7 +161,8 @@ class AddrKnob(_Knob):
     cvt_name = "ADDRESS"
 
     def to_cfg(self, value):
-        return str(value)
+        # None clears the address (""); str(None) would write "None".
+        return "" if value is None else str(value)
 
 
 class IpAddrKnob(_Knob):
@@ -175,7 +176,10 @@ class IpAddrKnob(_Knob):
         return ipaddress.ip_address(value) if value else None
 
     def to_cfg(self, value):
-        return str(value)
+        # Round-trip of from_cfg: an unset address reads as None, so
+        # writing None back (e.g. saved() restore) must clear it, not
+        # write the literal text "None".
+        return "" if value is None else str(value)
 
 
 class SelfKnob(_Knob):

@@ -109,6 +109,126 @@ def test_set_bool_becomes_01(monkeypatch):
     assert calls == ["1"]
 
 
+def test_set_none_becomes_empty_string(monkeypatch):
+    """set(oid, None) must clear the value, not write the text \"None\"."""
+    calls = []
+    monkeypatch.setattr(cfg, "_raw_set",
+                        lambda oid, cvt, wire: calls.append(wire))
+    cfg.set("/agent:A/x:", None, cvt=9)
+    assert calls == [""]
+
+
+# -- add(): heuristic type fallback (descriptor unavailable) -----------
+
+def _install_fake_add(monkeypatch):
+    """Fake shim for add(): _get_type fails so the heuristic runs."""
+    import sys
+    import types
+
+    from pyte.errors import CfgError
+
+    class FakeLib:
+        PYTE_CVT_UNSPECIFIED = 0
+        PYTE_CVT_NONE = 1
+        PYTE_CVT_BOOL = 2
+        PYTE_CVT_INT32 = 6
+        PYTE_CVT_DOUBLE = 12
+        PYTE_CVT_STRING = 13
+
+        # TeError construction helpers (CfgError takes an rc int)
+        PYTE_ETIMEDOUT = 110
+
+        def __init__(self):
+            self.adds = []
+
+        def pyte_cfg_add_str(self, oid, t, wire, handle):
+            self.adds.append((bytes(oid), t, bytes(wire)))
+            return 0
+
+        def pyte_rc_error(self, rc):
+            return rc
+
+        def pyte_rc_module(self, rc):
+            return 0
+
+        def te_rc_mod2str(self, rc):
+            return b"CS"
+
+        def te_rc_err2str(self, rc):
+            return b"EFAIL"
+
+    class FakeFfi:
+        def new(self, spec, *a):
+            return [None]
+
+        @staticmethod
+        def string(b):
+            return b
+
+    lib = FakeLib()
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=FakeFfi(), lib=lib))
+
+    def no_type(oid):
+        raise CfgError(12)
+    monkeypatch.setattr(cfg, "_get_type", no_type)
+    return lib
+
+
+def test_add_heuristic_bool_uses_cvt_bool(monkeypatch):
+    """bool must map to CVT_BOOL, not INT32 (silently wrong type)."""
+    lib = _install_fake_add(monkeypatch)
+    cfg.add("/agent:A/x:i", True)
+    assert lib.adds == [(b"/agent:A/x:i", lib.PYTE_CVT_BOOL, b"1")]
+    lib.adds.clear()
+    cfg.add("/agent:A/x:i", False)
+    assert lib.adds == [(b"/agent:A/x:i", lib.PYTE_CVT_BOOL, b"0")]
+
+
+def test_add_heuristic_float_uses_cvt_double(monkeypatch):
+    """float must not fall through to CVT_STRING."""
+    lib = _install_fake_add(monkeypatch)
+    cfg.add("/agent:A/x:i", 2.5)
+    assert lib.adds == [(b"/agent:A/x:i", lib.PYTE_CVT_DOUBLE, b"2.5")]
+
+
+def test_add_heuristic_int_and_str_unchanged(monkeypatch):
+    lib = _install_fake_add(monkeypatch)
+    cfg.add("/agent:A/x:i", 7)
+    cfg.add("/agent:A/x:j", "text")
+    assert lib.adds == [
+        (b"/agent:A/x:i", lib.PYTE_CVT_INT32, b"7"),
+        (b"/agent:A/x:j", lib.PYTE_CVT_STRING, b"text"),
+    ]
+
+
+# -- grab_rsrc(): re-entrant after release_rsrc ------------------------
+
+def test_grab_rsrc_repoints_existing_instance(monkeypatch):
+    """release_rsrc leaves the rsrc instance in place with value \"\";
+    a second grab must set() it instead of failing EEXIST on add()."""
+    from pyte.errors import CfgError
+
+    calls = []
+
+    def fake_add(oid, value=None):
+        calls.append(("add", oid, value))
+        raise CfgError(12)   # what an existing instance produces
+
+    monkeypatch.setattr(cfg, "add", fake_add)
+    monkeypatch.setattr(cfg, "set",
+                        lambda oid, value, cvt=None:
+                        calls.append(("set", oid, value)))
+
+    node = cfg.grab_rsrc("B", "net:lo", "/agent:B/interface:lo")
+
+    assert calls == [
+        ("add", "/agent:B/rsrc:net:lo", "/agent:B/interface:lo"),
+        ("set", "/agent:B/rsrc:net:lo", "/agent:B/interface:lo"),
+    ]
+    assert node.oid == "/agent:B/rsrc:net:lo"
+
+
 # -- backup(): order + always-release ---------------------------------
 
 @pytest.fixture

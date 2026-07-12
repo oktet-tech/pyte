@@ -206,6 +206,18 @@ def test_ipaddr_knob_empty_is_none(fake):
     assert Knobs().ip is None
 
 
+def test_ipaddr_knob_set_none_writes_empty(fake):
+    """from_cfg maps \"\" -> None, so to_cfg must round-trip None -> \"\"
+    (saved() restore of an unset address), not write the text \"None\"."""
+    Knobs().ip = None
+    assert fake.sets[-1] == ("/agent:A/x:y/net_addr:", "", 11)
+
+
+def test_addr_knob_set_none_writes_empty(fake):
+    Knobs().mac = None
+    assert fake.sets[-1] == ("/agent:A/x:y/link_addr:", "", 11)
+
+
 def test_runtime_fallback_knob_passes_cvt_none(fake):
     # A bare _Knob (no cvt_name) lets cfg.set look the type up (cvt=None).
     from pyte.cfg._engine import _Knob
