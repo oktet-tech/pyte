@@ -200,3 +200,21 @@ def test_iomux_use_after_close_raises(monkeypatch):
         mux.add(5, Evt.IN)
     with pytest.raises(RuntimeError, match="IoMux is closed"):
         mux.wait(1.0)
+
+
+def test_wait_none_blocks_forever(monkeypatch):
+    """P1.5: timeout=None (the Python idiom) blocks; -1.0 C-ism gone."""
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
+    mux.wait(None)                        # default: block forever
+    call = [c for c in lib.calls if c[0] == "call"][-1]
+    assert call[1] == -1                  # -1 ms to the TAPI
+
+
+def test_wait_rejects_negative(monkeypatch):
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
+    with pytest.raises(ValueError, match="negative"):
+        mux.wait(-1.0)

@@ -15,9 +15,14 @@ lifecycle.
 """
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 
 from pyte.errors import ToolError
+
+#: Sentinel: "use the class's default_timeout" (None now means forever).
+_USE_DEFAULT = object()
+_NoTimeout = type(None)
 
 # ---------------------------------------------------------------------------
 # argv builders: explicit order stays in the tool module (that order is
@@ -234,18 +239,29 @@ class ToolHandle:
         raise NotImplementedError
 
     # -- shared lifecycle ------------------------------------------------
-    def wait(self, timeout: float | None = None):
+    def wait(self, timeout: float | _NoTimeout | None = _USE_DEFAULT):
         """Wait for completion, parse the output, return the report.
 
         Caches the report; subsequent calls return the cached value.
         Raises ``error_cls`` per the class's ``wait_policy``.
+
+        *timeout* is ONE deadline covering both the job wait and the
+        output read (the read gets what the wait left over, floored
+        at 1 s); the old per-tool code reused the full timeout for
+        each step, doubling the worst case.  Omit it for the tool's
+        ``default_timeout``; pass ``None`` to block forever.
         """
         if self._report is not None:
             return self._report
-        if timeout is None:
+        if timeout is _USE_DEFAULT:
             timeout = self.default_timeout
+        start = time.monotonic()
         status = self._job.wait(timeout=timeout)
-        raw = self._read_output(timeout)
+        if timeout is None:
+            remaining = None
+        else:
+            remaining = max(timeout - (time.monotonic() - start), 1.0)
+        raw = self._read_output(remaining)
         if self.wait_policy == "status-first":
             if not status.ok:
                 self._fail_status(status, raw)
@@ -261,9 +277,14 @@ class ToolHandle:
         self._report = report
         return report
 
-    def wait_silent(self, timeout: float | None = None) -> None:
-        """Wait for completion without touching the output (pre-runs)."""
-        if timeout is None:
+    def wait_silent(self,
+                    timeout: float | _NoTimeout | None = _USE_DEFAULT,
+                    ) -> None:
+        """Wait for completion without touching the output (pre-runs).
+
+        Omit *timeout* for the tool's default; None blocks forever.
+        """
+        if timeout is _USE_DEFAULT:
             timeout = self.default_timeout
         status = self._job.wait(timeout=timeout)
         if not status.ok:

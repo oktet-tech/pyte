@@ -504,3 +504,49 @@ def test_quiet_noop_after_destroy(monkeypatch):
     with job2.quiet():
         pass
     assert lib.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Timeout convention (P1.5): float | None, None = block forever (-1 ms);
+# negatives rejected instead of silently meaning "forever" in C.
+# ---------------------------------------------------------------------------
+
+def test_ms_none_means_block_forever():
+    from pyte.job import _ms
+    assert _ms(None) == -1
+    assert _ms(2.5) == 2500
+
+
+def test_ms_rejects_negative():
+    from pyte.job import _ms
+    with pytest.raises(ValueError, match="negative"):
+        _ms(-3)
+
+
+def test_drain_defaults_to_no_wait(monkeypatch):
+    """drain() means "what's queued NOW": it must not inherit the 10 s
+    first-message wait (a drain of an empty queue blocked 10 seconds)."""
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_bufs = []
+    flt.drain()
+    recv = [c for c in lib.calls if c[0] == "receive_many"]
+    assert recv == [("receive_many", ["flt-h"], 1, 0, 0)]
+
+
+def test_wait_accepts_none(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+
+    def wait_ok(h, ms, otype, oval):
+        lib.calls.append(("job_wait", ms))
+        otype[0] = lib.PYTE_JOB_EXITED
+        oval[0] = 0
+        return 0
+    lib.pyte_job_wait = wait_ok
+    lib.PYTE_JOB_EXITED = 1
+    lib.PYTE_JOB_SIGNALED = 2
+    lib.PYTE_EINPROGRESS = 114
+
+    job.wait(timeout=None)
+    assert ("job_wait", -1) in lib.calls

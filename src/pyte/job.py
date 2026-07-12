@@ -20,8 +20,18 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT = 10.0
 
 
-def _ms(timeout: float) -> int:
-    """Convert float seconds to int milliseconds."""
+def _ms(timeout: float | None) -> int:
+    """Convert float seconds to int milliseconds.
+
+    None means "block forever" (-1 ms, the tapi_job convention).
+    Negative values are rejected: they used to silently mean forever
+    in C, which is never what a computed remaining-time wants.
+    """
+    if timeout is None:
+        return -1
+    if timeout < 0:
+        raise ValueError(f"timeout must not be negative, got {timeout!r}"
+                         " (use None to block forever)")
     return int(timeout * 1000)
 
 
@@ -224,16 +234,16 @@ class Filter:
         if self._n_channels == 0:
             self._h = None      # freed by the TAPI: refuse further use
 
-    def next(self, timeout: float = DEFAULT_TIMEOUT) -> JobMessage:
+    def next(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobMessage:
         """Read the next message (raises TimeoutError if none)."""
         return receive_any([self], timeout=timeout)
 
-    def last(self, timeout: float = DEFAULT_TIMEOUT) -> JobMessage:
+    def last(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobMessage:
         """Peek the last message without consuming the queue."""
         return receive_any([self], timeout=timeout, last=True)
 
-    def messages(self,
-                 timeout: float = DEFAULT_TIMEOUT) -> Iterator[JobMessage]:
+    def messages(self, timeout: float | None = DEFAULT_TIMEOUT,
+                 ) -> Iterator[JobMessage]:
         """Yield messages until all attached channels have sent eos.
 
         ta_job emits one eos message per attached primary channel, so a
@@ -254,17 +264,21 @@ class Filter:
             else:
                 yield msg
 
-    def drain(self, timeout: float = DEFAULT_TIMEOUT) -> list[JobMessage]:
+    def drain(self, timeout: float | None = 0) -> list[JobMessage]:
         """Read ALL queued messages in one tapi_job_receive_many() call.
 
         Eos messages are consumed but not returned.  One RPC instead
         of one per message; a short read (e.g. the job still running)
-        shows up as missing eos entries, not as an error.
+        shows up as missing eos entries, not as an error.  The default
+        timeout is 0: "drain" means what is queued NOW (it used to
+        inherit the 10 s first-message wait, so draining an empty
+        queue blocked ten seconds).
         """
         return self.read_many(0, timeout=timeout)
 
     def read_many(self, count: int,
-                  timeout: float = DEFAULT_TIMEOUT) -> list[JobMessage]:
+                  timeout: float | None = DEFAULT_TIMEOUT,
+                  ) -> list[JobMessage]:
         """Read up to ``count`` messages (0 = all queued) from this
         filter via ONE C ``tapi_job_receive_many()`` call.
 
@@ -298,7 +312,7 @@ class Filter:
         finally:
             lib.pyte_job_receive_many_free(datas[0], lens[0], eos[0], n[0])
 
-    def read_all(self, timeout: float = DEFAULT_TIMEOUT) -> str:
+    def read_all(self, timeout: float | None = DEFAULT_TIMEOUT) -> str:
         """Concatenate all message data until end-of-stream.
 
         Joins the raw bytes of every message and decodes ONCE, so a
@@ -338,7 +352,8 @@ def _attach_filter(channels: list[Channel], *, name: str | None,
     return flt
 
 
-def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
+def receive_any(filters: list[Filter],
+                timeout: float | None = DEFAULT_TIMEOUT,
                 last: bool = False) -> JobMessage:
     """Read the next message from any of the given filters.
 
@@ -378,7 +393,7 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
 
 
 def poll(items: list[Channel | InputChannel | Filter],
-         timeout: float = DEFAULT_TIMEOUT) -> None:
+         timeout: float | None = DEFAULT_TIMEOUT) -> None:
     """Wait until one of the channels/filters is ready.
 
     Raises pyte.errors.TimeoutError if none becomes ready in time.
@@ -546,11 +561,12 @@ class Job:
         from pyte._shim import lib
         check(lib.pyte_job_start(h), f"job.start({self.program})")
 
-    def wait(self, timeout: float = DEFAULT_TIMEOUT) -> JobStatus:
+    def wait(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobStatus:
         """Wait for completion; raises TimeoutError if still running.
 
-        tapi_job_wait() reports a still-running job as TE_EINPROGRESS;
-        convert that to the same TimeoutError as other timeouts.
+        timeout=None blocks until the job completes.  tapi_job_wait()
+        reports a still-running job as TE_EINPROGRESS; convert that to
+        the same TimeoutError as other timeouts.
         """
         h = self._handle()
         from pyte._shim import ffi, lib

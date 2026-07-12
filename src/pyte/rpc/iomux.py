@@ -185,18 +185,25 @@ class IoMux:
 
     # -- waiting ----------------------------------------------------------
 
-    def wait(self, timeout: float = -1.0) -> list[tuple[int, Evt]]:
+    def wait(self, timeout: float | None = None) -> list[tuple[int, Evt]]:
         """Wait up to *timeout* seconds for events.
 
         Returns a list of ``(fd, Evt)`` pairs — one per ready file
         descriptor.  Returns an empty list on timeout (n == 0).
 
-        *timeout* < 0 means block indefinitely (passed as -1 ms to the TAPI).
+        ``timeout=None`` (the default) blocks indefinitely — the
+        Python convention (select/poll/epoll), not the old -1.0
+        C-ism.  Negative values are rejected: a computed remaining
+        time hitting a negative must not silently mean "forever".
         """
         if self._h is None:
             raise RuntimeError("IoMux is closed")
+        if timeout is not None and timeout < 0:
+            raise ValueError(
+                f"timeout must not be negative, got {timeout!r} "
+                "(use None to block forever)")
         from pyte._shim import ffi, lib
-        timeout_ms = -1 if timeout < 0 else int(timeout * 1000)
+        timeout_ms = -1 if timeout is None else int(timeout * 1000)
         n_out = ffi.new("int *")
         revts_p = ffi.new("int **")
         check(lib.pyte_iomux_call(self._h, timeout_ms, n_out, revts_p),

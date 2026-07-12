@@ -384,3 +384,36 @@ def test_running_closes_on_exit_and_exception():
         with _tool.running(h2):
             raise RuntimeError("body failed")
     assert h2.closed == 1
+
+
+def test_wait_shares_one_deadline_across_wait_and_read(monkeypatch):
+    """P1.5: a 30 s wait() must not spend 30 s in job.wait and then
+    ANOTHER 30 s reading output — the read gets the remaining budget."""
+    import itertools
+
+    ticks = itertools.chain([0.0, 20.0], itertools.repeat(20.0))
+    monkeypatch.setattr(_tool.time, "monotonic", lambda: next(ticks))
+
+    reads = []
+
+    class F:
+        def read_all(self, timeout=None):
+            reads.append(timeout)
+            return "data"
+
+    Demo(FakeJob(), F()).wait(timeout=30.0)
+    assert reads == [10.0]     # 30 - 20 consumed by job.wait
+
+
+def test_wait_none_timeout_blocks_everywhere():
+    reads = []
+
+    class F:
+        def read_all(self, timeout="unset"):
+            reads.append(timeout)
+            return "data"
+
+    job = FakeJob()
+    Demo(job, F()).wait(timeout=None)
+    assert job.events[0] == ("wait", None)
+    assert reads == [None]
