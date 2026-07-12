@@ -233,13 +233,13 @@ class Nptcp(_tool.ToolHandle):
 
 @contextmanager
 def server(pco: "RpcServer", opts: "Opts | None" = None, *,
-           host: str = "127.0.0.1", port: int = 0,
-           ready_delay: float = 2.0):
+           host: str = "127.0.0.1", ready_delay: float = 2.0):
     """Context manager: run an NPtcp receiver for the block's duration.
 
     Yields a :class:`pyte.tools._clientserver.Endpoint`. ``host`` is the
-    address the transmitter should target; ``port`` is informational (NPtcp
-    picks its own port). Uses a 2-second settle delay instead of the C TAPI's
+    address the transmitter should target; The Endpoint's port is None: NPtcp picks its own
+    port and does not report it (BREAKING: the fake ``port`` kwarg is
+    gone). Uses a 2-second settle delay instead of the C TAPI's
     stderr-line readiness wait (documented deviation).
 
     Example::
@@ -251,7 +251,7 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
     """
     opts = opts or Opts()
     with serve(pco, "NPtcp", opts.server_argv(),
-               host=host, port=port, ready_delay=ready_delay) as ep:
+               host=host, port=None, ready_delay=ready_delay) as ep:
         yield ep
 
 

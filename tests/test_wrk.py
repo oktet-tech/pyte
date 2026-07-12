@@ -46,7 +46,7 @@ def test_parse_report():
     assert rep.req_count == 246000
     assert rep.req_per_sec == pytest.approx(24600.0)
     # Transfer/sec 3.50MB -> binary MiB -> bytes/s
-    assert rep.bps == pytest.approx(3.50 * 1024 * 1024)
+    assert rep.bytes_per_sec == pytest.approx(3.50 * 1024 * 1024)
     # thread latency: 456.78us / 123.45us / 2.50ms / 89.00%
     assert rep.thread_latency.mean == pytest.approx(456.78)        # µs
     assert rep.thread_latency.stdev == pytest.approx(123.45)       # µs
@@ -74,7 +74,7 @@ def test_parse_report_minimal_defaults():
     rep = _parse_report((DATA / "wrk_minimal.txt").read_text())
     assert rep.req_count == 25000
     assert rep.req_per_sec == pytest.approx(5000.0)
-    assert rep.bps == pytest.approx(600.0 * 1024)          # 600.00KB -> bytes/s
+    assert rep.bytes_per_sec == pytest.approx(600.0 * 1024)          # 600.00KB -> bytes/s
     assert rep.lat_distr == ()                              # no distribution block
     assert rep.unexpected_resp == 0
     assert rep.socket_errors.connect == 0

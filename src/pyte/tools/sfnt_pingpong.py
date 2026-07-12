@@ -272,13 +272,13 @@ class SfntPingpong(_tool.ToolHandle):
 
 @contextmanager
 def server(pco: "RpcServer", opts: "Opts | None" = None, *,
-           host: str = "127.0.0.1", port: int = 0,
-           ready_delay: float = 1.0):
+           host: str = "127.0.0.1", ready_delay: float = 1.0):
     """Context manager: run an sfnt-pingpong server for the block's duration.
 
     Yields an :class:`pyte.tools._clientserver.Endpoint`. ``host`` is the
     address the client should target (the server binds all interfaces).
-    ``port`` is informational (sfnt-pingpong picks its own port).
+    The Endpoint's port is None: sfnt-pingpong picks its own port
+    and does not report it (BREAKING: the fake ``port`` kwarg is gone).
 
     Example::
 
@@ -289,7 +289,7 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
     """
     opts = opts or Opts()
     with serve(pco, "sfnt-pingpong", opts.server_argv(),
-               host=host, port=port, ready_delay=ready_delay) as ep:
+               host=host, port=None, ready_delay=ready_delay) as ep:
         yield ep
 
 

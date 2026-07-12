@@ -10,7 +10,7 @@ def test_suite_argv():
     opts = memaslap.Opts(servers=(("192.0.2.1", 11211),), threads=4,
                          concurrency=256, time=60, bin_protocol=True,
                          verbose=True, cfg_cmd="/tmp/x.cfg")
-    assert opts.argv() == [
+    assert opts.to_argv() == [
         "--servers=192.0.2.1:11211", "--threads=4", "--concurrency=256",
         "--time=60s", "--binary", "--cfg_cmd=/tmp/x.cfg", "--verbose",
     ]
@@ -49,8 +49,8 @@ def test_pick_last_empty_raises():
 
 
 def test_argv_suffixes():
-    opts = memaslap.Opts(win_size=10, stat_freq=5, expected_tps=20)
-    argv = opts.argv()
+    opts = memaslap.Opts(win_size_kb=10, stat_freq=5, expected_ktps=20)
+    argv = opts.to_argv()
     assert "--win_size=10k" in argv
     assert "--stat_freq=5s" in argv
     assert "--tps=20k" in argv
@@ -61,7 +61,7 @@ def test_multi_server_and_addr():
         pair = ("b", 2)
 
     opts = memaslap.Opts(servers=(("a", 1), _Addr()))
-    argv = opts.argv()
+    argv = opts.to_argv()
     assert argv[0] == "--servers=a:1,b:2"
 
 

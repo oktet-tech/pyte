@@ -65,7 +65,7 @@ class Opts:
     debug: bool = False
     memtier_path: str = "memtier_benchmark"
 
-    def argv(self) -> list[str]:
+    def to_argv(self) -> list[str]:
         a: list = []
         if self.server is not None:
             s = self.server.pair if hasattr(self.server, "pair") \
@@ -210,7 +210,7 @@ def run(pco: "RpcServer", opts: Opts):
                    name="memtier_benchmark stderr")
         return stats_flt
 
-    argv = opts.argv()
+    argv = opts.to_argv()
     cmd = " ".join([opts.memtier_path, *argv])
     job, stats_flt = _tool.launch(pco, opts.memtier_path, argv,
                                   setup=_setup)

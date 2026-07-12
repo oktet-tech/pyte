@@ -12,7 +12,7 @@ def test_default_argv_is_ports_only():
     # tapi_memcached_default_opt sets tcp/udp port to zero_sockaddr =>
     # --port=0 --udp-port=0 always present (tapi_memcached.c:179-180).
     opts = memcached.Opts()
-    assert opts.argv() == ["--port=0", "--udp-port=0"]
+    assert opts.to_argv() == ["--port=0", "--udp-port=0"]
 
 
 def test_suite_argv():
@@ -21,7 +21,7 @@ def test_suite_argv():
                           tcp_port=("192.0.2.1", 11211),
                           enable_coredumps=True, conn_limit=1024,
                           napi_ids=4)
-    assert opts.argv() == [
+    assert opts.to_argv() == [
         "--user=root", "--memory-limit=1024", "--conn-limit=1024",
         "--port=11211", "--udp-port=0", "--enable-coredumps",
         "--threads=4", "--napi-ids=4",
@@ -31,14 +31,14 @@ def test_suite_argv():
 def test_verbose_and_protocol_enums():
     opts = memcached.Opts(verbose=memcached.Verbose.MORE,
                           protocol=memcached.Proto.BINARY)
-    argv = opts.argv()
+    argv = opts.to_argv()
     assert "-vv" in argv and "--protocol=binary" in argv
 
 
 def test_ext_path_struct():
     # TAPI_JOB_OPT_STRUCT("-oext_path=", ":", ...) tapi_memcached.c:140-144
     opts = memcached.Opts(ext_path="/mnt/d1/extstore", ext_path_size_gb=1)
-    assert "-oext_path=/mnt/d1/extstore:1G" in opts.argv()
+    assert "-oext_path=/mnt/d1/extstore:1G" in opts.to_argv()
 
 
 def test_stats_parse():
@@ -63,19 +63,19 @@ def test_addr_duck_type():
         pair = ("192.0.2.1", 11211)
 
     opts = memcached.Opts(tcp_port=FakeAddr())
-    assert "--port=11211" in opts.argv()
+    assert "--port=11211" in opts.to_argv()
 
 
 def test_unix_mask_octal():
     # unix_mask emitted as octal digits (0o755 -> "755").
     opts = memcached.Opts(unix_mask=0o755)
-    assert "--unix-mask=755" in opts.argv()
+    assert "--unix-mask=755" in opts.to_argv()
 
 
 def test_delimiter_flag():
     # delimiter emits -D<char> (tapi_memcached.c option "-D").
     opts = memcached.Opts(delimiter=":")
-    assert "-D:" in opts.argv()
+    assert "-D:" in opts.to_argv()
 
 
 # -- Memcached.stats() quiet bracket (mem-db/memcached.c:458-484) ------------

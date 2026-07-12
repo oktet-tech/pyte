@@ -86,7 +86,7 @@ class Opts:
     conn_sock: int | None = None
     execute_number: int | None = None
     time: int | None = None           # seconds ("s" suffix)
-    win_size: int | None = None       # KB ("k" suffix)
+    win_size_kb: int | None = None    # emitted with "k" suffix
     fixed_size: int | None = None
     verify: float | None = None
     division: int | None = None
@@ -97,13 +97,15 @@ class Opts:
     udp: bool = False
     facebook: bool = False
     bin_protocol: bool = False
-    expected_tps: int | None = None   # "k" suffix
+    #: THOUSANDS of transactions/sec (emitted as --tps=<N>k);
+    #: the unit is in the name (was expected_tps, silently x1000)
+    expected_ktps: int | None = None
     rep_write: int | None = None
     cfg_cmd: str | None = None        # set by run() when cfg_opts given
     verbose: bool = False
     memaslap_path: str = "memaslap"
 
-    def argv(self) -> list[str]:
+    def to_argv(self) -> list[str]:
         a: list[str] = []
         if self.servers:
             a.append("--servers=" +
@@ -113,7 +115,7 @@ class Opts:
                              ("--conn_sock=", self.conn_sock, ""),
                              ("--execute_number=", self.execute_number, ""),
                              ("--time=", self.time, "s"),
-                             ("--win_size=", self.win_size, "k"),
+                             ("--win_size=", self.win_size_kb, "k"),
                              ("--fixed_size=", self.fixed_size, ""),
                              ("--verify=", self.verify, ""),
                              ("--division=", self.division, ""),
@@ -128,8 +130,8 @@ class Opts:
                         ("--binary", self.bin_protocol)):
             if v:
                 a.append(flag)
-        if self.expected_tps is not None:
-            a.append(f"--tps={self.expected_tps}k")
+        if self.expected_ktps is not None:
+            a.append(f"--tps={self.expected_ktps}k")
         if self.rep_write is not None:
             a.append(f"--rep_write={self.rep_write}")
         if self.cfg_cmd is not None:
@@ -240,7 +242,7 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
             log.ring(f"memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
             pco.file_put(cfg_fn, cfg_opts.render().encode())
             opts = replace(opts, cfg_cmd=cfg_fn)
-        argv = opts.argv()
+        argv = opts.to_argv()
         cmd = " ".join([opts.memaslap_path, *argv])
         job, (tps_flt, net_flt) = _tool.launch(
             pco, opts.memaslap_path, argv, setup=_setup)

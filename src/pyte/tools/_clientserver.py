@@ -20,14 +20,18 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Endpoint:
-    """Where a started server listens."""
+    """Where a started server listens.
+
+    ``port`` is None for tools that pick their own port and do not
+    report it (sfnt-pingpong, NPtcp) -- a fake 0 used to stand there.
+    """
     host: str
-    port: int
+    port: int | None
 
 
 @contextmanager
 def serve(pco: "RpcServer", program: str, argv: list[str], *,
-          host: str, port: int, ready_delay: float = 1.0,
+          host: str, port: int | None, ready_delay: float = 1.0,
           term: int | _signal.Signals = _signal.SIGINT):
     """Run a server job for the duration of the ``with`` block.
 

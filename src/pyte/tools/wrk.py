@@ -29,7 +29,7 @@ the C parse_unit tables:
 Regexes + targets (tapi_wrk.c:227-292):
 
     r"(\\d+) requests in"                       → req_count (int)
-    r"Transfer/sec:\\s*(\\S+)B"                  → bps (binary-unit float, bytes/s)
+    r"Transfer/sec:\\s*(\\S+)B"        → bytes_per_sec (binary-unit float)
     r"Requests/sec:\\s*(\\S+)"                   → req_per_sec (plain float)
     r"Latency\\s+(.*%)"                         → thread_latency: 4 tokens
                                                   mean,stdev,max (time µs) + within_stdev (%)
@@ -43,7 +43,7 @@ Regexes + targets (tapi_wrk.c:227-292):
 
 MI (tapi_wrk_report_mi_log, tapi_wrk.c:571-580):
 
-    THROUGHPUT NULL        MEAN  bps*8.0                  MEGA
+    THROUGHPUT NULL        MEAN  bytes_per_sec*8.0 (bits) MEGA
     RPS        NULL        MEAN  req_per_sec              PLAIN
     LATENCY    "per-thread" MEAN thread_latency.mean      MICRO
     LATENCY    "per-thread" MAX  thread_latency.max       MICRO
@@ -113,7 +113,8 @@ class Report:
     lat_distr: tuple[LatencyPercentile, ...]
     req_count: int
     req_per_sec: float
-    bps: float
+    #: TRANSFER rate in BYTES per second (wrk's Transfer/sec)
+    bytes_per_sec: float
     unexpected_resp: int
     socket_errors: SocketErrors
 
@@ -122,7 +123,7 @@ class Report:
 # Options dataclass
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class Opts:
     """wrk command-line options.
 
@@ -251,7 +252,8 @@ def _parse_report(text: str) -> Report:
     req_count = int(m_req_count.group(1))
 
     m_transfer = _RE_TRANSFER.search(text)
-    bps = _parse_unit(m_transfer.group(1), _BINARY) if m_transfer else 0.0
+    bytes_per_sec = (_parse_unit(m_transfer.group(1), _BINARY)
+                     if m_transfer else 0.0)
 
     m_req_sec = _RE_REQ_SEC.search(text)
     req_per_sec = _parse_unit(m_req_sec.group(1), _METRIC) if m_req_sec else 0.0
@@ -300,7 +302,7 @@ def _parse_report(text: str) -> Report:
         lat_distr=tuple(lat_distr),
         req_count=req_count,
         req_per_sec=req_per_sec,
-        bps=bps,
+        bytes_per_sec=bytes_per_sec,
         unexpected_resp=unexpected_resp,
         socket_errors=socket_errors,
     )
@@ -333,7 +335,7 @@ class Wrk(_tool.ToolHandle):
         """Emit MI artifacts mirroring tapi_wrk_report_mi_log()."""
         from pyte.mi import Aggr, Meas, Mult
         logger.add(Meas.THROUGHPUT, "", Aggr.MEAN,
-                   rep.bps * 8.0 / 1e6, Mult.MEGA)
+                   rep.bytes_per_sec * 8.0 / 1e6, Mult.MEGA)
         logger.add(Meas.RPS, "", Aggr.MEAN, rep.req_per_sec, Mult.PLAIN)
         logger.add(Meas.LATENCY, "per-thread", Aggr.MEAN,
                    rep.thread_latency.mean, Mult.MICRO)

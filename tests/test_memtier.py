@@ -13,7 +13,7 @@ def test_suite_argv():
                         data_size=1024, ratio="1:9", key_prefix="memtier---",
                         key_pattern="S:R", key_minimum=100000,
                         key_maximum=200000, hide_histogram=True)
-    assert opts.argv() == [
+    assert opts.to_argv() == [
         "--server=192.0.2.1", "--port=11211",
         "--protocol=memcache_binary", "--clients=64", "--threads=4",
         "--test-time=60", "--data-size=1024", "--ratio=1:9",
@@ -75,7 +75,7 @@ def test_argv_stub_server_extra_flags():
 
     opts = memtier.Opts(server=_Addr(), run_count=2, requests=100,
                         pipeline=8, random_data=True, debug=True)
-    argv = opts.argv()
+    argv = opts.to_argv()
     assert "--server=192.0.2.7" in argv
     assert "--port=6379" in argv
     assert "--run-count=2" in argv

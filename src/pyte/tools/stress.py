@@ -43,13 +43,15 @@ class Opts:
         ``--io`` workers spinning on sync().
     vm:
         ``--vm`` workers spinning on malloc()/free().
-    timeout:
-        ``--timeout`` seconds to run; None runs until stopped.
+    duration:
+        ``--timeout`` seconds to run; None runs until stopped.  Named
+        duration to avoid colliding with every wait(timeout=) in the
+        package (BREAKING rename from ``timeout``, P1.1 sweep).
     """
     cpu: int | None = None
     io: int | None = None
     vm: int | None = None
-    timeout: int | None = None
+    duration: int | None = None
 
     def __post_init__(self) -> None:
         if self.cpu is None and self.io is None and self.vm is None:
@@ -65,8 +67,8 @@ class Opts:
             argv += ["--io", str(self.io)]
         if self.vm is not None:
             argv += ["--vm", str(self.vm)]
-        if self.timeout is not None:
-            argv += ["--timeout", str(self.timeout)]
+        if self.duration is not None:
+            argv += ["--timeout", str(self.duration)]
         return argv
 
 

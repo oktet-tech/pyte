@@ -92,7 +92,7 @@ class Opts:
     enable_largepages: bool = False
     listen_backlog: int | None = None
     protocol: Proto | None = None
-    max_item_size: int | None = None        # kilobytes ("k" suffix)
+    max_item_size_kb: int | None = None     # emitted with "k" suffix
     enable_sasl: bool = False
     disable_flush_all: bool = False
     disable_dumping: bool = False
@@ -131,7 +131,7 @@ class Opts:
     slab_automove_freeratio: float | None = None
     memcached_path: str = "memcached"
 
-    def argv(self) -> list[str]:
+    def to_argv(self) -> list[str]:
         """Build argv (without argv[0]) in memcached_binds order."""
         a: list[str] = []
 
@@ -170,7 +170,7 @@ class Opts:
         u("--listen-backlog=", self.listen_backlog)
         if self.protocol is not None:
             a.append(f"--protocol={self.protocol.value}")
-        u("--max-item-size=", self.max_item_size, "k")
+        u("--max-item-size=", self.max_item_size_kb, "k")
         b("--enable-sasl", self.enable_sasl)
         b("--disable-flush-all", self.disable_flush_all)
         b("--disable-dumping", self.disable_dumping)
@@ -295,7 +295,7 @@ def server(pco: "RpcServer", opts: Opts | None = None):
     which the C suite tolerates too, mem-db/memcached.c:419-424).
     """
     opts = opts or Opts()
-    job = pco.job(opts.memcached_path, opts.argv())
+    job = pco.job(opts.memcached_path, opts.to_argv())
     m = Memcached(pco, job, opts)
     try:
         job.stdout.log(level="RING")
