@@ -44,3 +44,13 @@ def test_generated_subtrees_have_no_hard_lint_errors():
         hard += [w for w in _gen.lint(entries)
                  if "invalid name" in w or "typo" in w]
     assert hard == [], hard
+
+
+@pytest.mark.parametrize("mod", ["agent", "interface", "module", "pci",
+                                 "sys"])
+def test_generated_modules_import(mod):
+    """Import smoke for every checked-in generated module (module/pci
+    had 0% coverage: nothing ever imported them)."""
+    import importlib
+    m = importlib.import_module(f"pyte.cfg.gen.{mod}")
+    assert m.__name__.endswith(mod)
