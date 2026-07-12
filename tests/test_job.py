@@ -69,6 +69,46 @@ class FakeLib:
     def pyte_job_set_tracing(self, job_h, trace):
         self.calls.append(("set_tracing", job_h, trace))
 
+    def pyte_job_destroy(self, job_h, timeout_ms):
+        self.calls.append(("destroy", job_h, timeout_ms))
+        return 0
+
+    def pyte_job_out_channels(self, job_h, o, e):
+        self.calls.append(("out_channels", job_h))
+        o[0] = "out-h"
+        e[0] = "err-h"
+        return 0
+
+    def pyte_job_in_channel(self, job_h, i):
+        self.calls.append(("in_channel", job_h))
+        i[0] = "in-h"
+        return 0
+
+    def pyte_job_attach_filter(self, arr, n, name, readable, level, out):
+        self.calls.append(("attach_filter", list(arr), n))
+        out[0] = "flt-h"
+        return 0
+
+    def pyte_job_filter_remove(self, flt_h, arr, n):
+        self.calls.append(("filter_remove", flt_h, list(arr), n))
+        return 0
+
+    def pyte_job_send(self, chan_h, raw, length):
+        self.calls.append(("send", chan_h, bytes(raw), length))
+        return 0
+
+    def pyte_job_start(self, job_h):
+        self.calls.append(("start", job_h))
+        return 0
+
+    def pyte_job_stop(self, job_h, signo, timeout_ms):
+        self.calls.append(("stop", job_h, signo, timeout_ms))
+        return 0
+
+    def pyte_job_kill(self, job_h, signo):
+        self.calls.append(("kill", job_h, signo))
+        return 0
+
     # TeError construction helpers (required by pyte.errors.check())
     PYTE_ETIMEDOUT = 110
 
@@ -99,6 +139,8 @@ class FakeFfi:
             return [None]
         if spec == "tapi_job_channel_t *[]":
             return list(init)
+        if spec == "tapi_job_channel_t **":
+            return [None]
         if spec in ("char ***", "size_t **", "int **"):
             return [None]
         if spec == "unsigned int *":
@@ -243,6 +285,92 @@ def test_read_many_error_no_free(monkeypatch):
 
     frees = [c for c in lib.calls if c[0] == "receive_many_free"]
     assert frees == [], "receive_many_free must not be called when rc != 0"
+
+
+# ---------------------------------------------------------------------------
+# Use-after-destroy guards: a destroyed job (and its channels/filters)
+# must raise a clear RuntimeError, never pass a NULL handle into C
+# (pyte_shim passes handles straight to tapi_job_* which dereferences).
+# ---------------------------------------------------------------------------
+
+def test_lifecycle_methods_raise_after_destroy(monkeypatch):
+    """start/wait/stop/kill/wrap on a destroyed job raise, no shim call."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    job.destroy()
+    lib.calls.clear()
+
+    for op in (job.start,
+               job.wait,
+               job.stop,
+               job.kill,
+               lambda: job.wrap("strace")):
+        with pytest.raises(RuntimeError, match="destroyed"):
+            op()
+    assert lib.calls == []
+
+
+def test_channel_allocation_raises_after_destroy(monkeypatch):
+    """stdout/stderr/stdin properties on a destroyed job raise."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    job.destroy()
+    lib.calls.clear()
+
+    for prop in ("stdout", "stderr", "stdin"):
+        with pytest.raises(RuntimeError, match="destroyed"):
+            getattr(job, prop)
+    assert lib.calls == []
+
+
+def test_destroy_invalidates_held_channels_and_filters(monkeypatch):
+    """Channel/Filter/InputChannel objects held across destroy() raise
+    instead of passing dangling pointers into C."""
+    from pyte.job import receive_any
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    out = job.stdout
+    stdin = job.stdin
+    flt = out.attach_filter(name="f")
+    job.destroy()
+    lib.calls.clear()
+
+    with pytest.raises(RuntimeError, match="destroyed"):
+        stdin.send("data")
+    with pytest.raises(RuntimeError, match="destroyed"):
+        out.attach_filter(name="g")
+    with pytest.raises(RuntimeError, match="destroyed"):
+        flt.next()
+    with pytest.raises(RuntimeError, match="destroyed"):
+        flt.read_many(0)
+    with pytest.raises(RuntimeError, match="destroyed"):
+        receive_any([flt])
+    assert lib.calls == []
+
+
+def test_destroy_remains_idempotent(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    job.destroy()
+    lib.calls.clear()
+    job.destroy()   # second destroy: no shim call, no error
+    assert lib.calls == []
+
+
+def test_filter_detached_from_all_channels_is_dead(monkeypatch):
+    """Once detach() drops the last channel, TAPI frees the filter;
+    the Python object must refuse further use instead of crashing."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    out = job.stdout
+    flt = out.attach_filter(name="f")
+
+    flt.detach(out)
+    lib.calls.clear()
+
+    with pytest.raises(RuntimeError, match="detached|destroyed"):
+        flt.next()
+    assert lib.calls == []
 
 
 # ---------------------------------------------------------------------------

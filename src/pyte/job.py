@@ -97,6 +97,18 @@ class Channel:
         self._h = handle
         self.name = name
 
+    def _handle(self):
+        """The live C handle; raises after the owning job is destroyed.
+
+        pyte_shim passes handles straight into tapi_job_*, so a NULL
+        or dangling pointer would crash the test process in C.
+        """
+        if self._h is None:
+            raise RuntimeError(
+                f"channel {self.name} of job "
+                f"{self._job.program!r} is already destroyed")
+        return self._h
+
     def attach_filter(self, name: str | None = None, readable: bool = True,
                       log_level: int | str | None = None,
                       regex: str | None = None, group: int = 0) -> "Filter":
@@ -132,11 +144,19 @@ class InputChannel:
         self._job = job
         self._h = handle
 
+    def _handle(self):
+        """The live C handle; raises after the owning job is destroyed."""
+        if self._h is None:
+            raise RuntimeError(
+                f"stdin of job {self._job.program!r} is already destroyed")
+        return self._h
+
     def send(self, data: str | bytes) -> None:
         """Write data to the job's stdin (binary-safe)."""
+        h = self._handle()
         from pyte._shim import lib
         raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
-        check(lib.pyte_job_send(self._h, raw, len(raw)),
+        check(lib.pyte_job_send(h, raw, len(raw)),
               f"job.send({self._job.program})")
 
     def __repr__(self) -> str:
@@ -152,15 +172,29 @@ class Filter:
         self.name = name
         self._n_channels: int = n_channels
 
+    def _handle(self):
+        """The live C handle; raises once the filter is unusable.
+
+        The handle is invalidated when the owning job is destroyed or
+        when the filter has been detached from all its channels (the
+        TAPI frees it then).
+        """
+        if self._h is None:
+            raise RuntimeError(
+                f"filter {self.name!r} of job {self._job.program!r} is "
+                "already destroyed or fully detached")
+        return self._h
+
     def attach(self, channel: Channel) -> None:
         """Attach this filter to one more output channel.
 
         Increments the internal channel count so that
         :meth:`messages` waits for the correct number of eos messages.
         """
+        h = self._handle()
         from pyte._shim import ffi, lib
-        arr = ffi.new("tapi_job_channel_t *[]", [channel._h])
-        check(lib.pyte_job_filter_add(self._h, arr, 1),
+        arr = ffi.new("tapi_job_channel_t *[]", [channel._handle()])
+        check(lib.pyte_job_filter_add(h, arr, 1),
               f"filter_add_channels({self.name})")
         self._n_channels += 1
 
@@ -168,14 +202,17 @@ class Filter:
         """Detach this filter from a channel.
 
         Decrements the internal channel count.  Once detached from all
-        its channels the filter is freed by the TAPI and this object
-        must not be used again.
+        its channels the filter is freed by the TAPI; this object is
+        marked dead and any further use raises RuntimeError.
         """
+        h = self._handle()
         from pyte._shim import ffi, lib
-        arr = ffi.new("tapi_job_channel_t *[]", [channel._h])
-        check(lib.pyte_job_filter_remove(self._h, arr, 1),
+        arr = ffi.new("tapi_job_channel_t *[]", [channel._handle()])
+        check(lib.pyte_job_filter_remove(h, arr, 1),
               f"filter_remove_channels({self.name})")
         self._n_channels -= 1
+        if self._n_channels == 0:
+            self._h = None      # freed by the TAPI: refuse further use
 
     def next(self, timeout: float = DEFAULT_TIMEOUT) -> JobMessage:
         """Read the next message (raises TimeoutError if none)."""
@@ -229,8 +266,9 @@ class Filter:
         ``dropped`` field of the returned messages is always 0 (the
         bulk shim call does not carry per-message drop counts).
         """
+        h = self._handle()
         from pyte._shim import ffi, lib
-        flts = ffi.new("tapi_job_channel_t *[]", [self._h])
+        flts = ffi.new("tapi_job_channel_t *[]", [h])
         datas = ffi.new("char ***")
         lens = ffi.new("size_t **")
         eos = ffi.new("int **")
@@ -270,7 +308,7 @@ def _attach_filter(channels: list[Channel], *, name: str | None,
     if not channels:
         raise ValueError("no channels to attach the filter to")
     job = channels[0]._job
-    arr = ffi.new("tapi_job_channel_t *[]", [c._h for c in channels])
+    arr = ffi.new("tapi_job_channel_t *[]", [c._handle() for c in channels])
     out = ffi.new("tapi_job_channel_t **")
     cname = ffi.NULL if name is None else _enc(name)
     check(lib.pyte_job_attach_filter(arr, len(channels), cname,
@@ -282,6 +320,7 @@ def _attach_filter(channels: list[Channel], *, name: str | None,
     if regex is not None:
         check(lib.pyte_job_filter_regexp(flt._h, _enc(regex), group),
               f"job.filter_add_regexp({regex!r})")
+    job._filters.append(flt)
     return flt
 
 
@@ -300,7 +339,7 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
     from pyte._shim import ffi, lib
     if not filters:
         raise ValueError("no filters to receive from")
-    arr = ffi.new("tapi_job_channel_t *[]", [f._h for f in filters])
+    arr = ffi.new("tapi_job_channel_t *[]", [f._handle() for f in filters])
     data = ffi.new("char **")
     dlen = ffi.new("size_t *")
     eos = ffi.new("int *")
@@ -332,7 +371,7 @@ def poll(items: list[Channel | InputChannel | Filter],
     from pyte._shim import ffi, lib
     if not items:
         raise ValueError("no channels to poll")
-    arr = ffi.new("tapi_job_channel_t *[]", [i._h for i in items])
+    arr = ffi.new("tapi_job_channel_t *[]", [i._handle() for i in items])
     check(lib.pyte_job_poll(arr, len(items), _ms(timeout)), "job.poll")
 
 
@@ -377,6 +416,18 @@ class Job:
         self._stdout: Channel | None = None
         self._stderr: Channel | None = None
         self._stdin: InputChannel | None = None
+        self._filters: list[Filter] = []
+
+    def _handle(self):
+        """The live C handle; raises after destroy().
+
+        pyte_shim passes handles straight into tapi_job_*, so a NULL
+        handle would crash the test process in C instead of raising.
+        """
+        if self._h is None:
+            raise RuntimeError(
+                f"job {self.program!r} is already destroyed")
+        return self._h
 
     @classmethod
     def create(cls, server: "RpcServer", program: str, args: list[str],
@@ -413,10 +464,11 @@ class Job:
     # -- channels ------------------------------------------------------
     def _alloc_out(self) -> None:
         if self._stdout is None:
+            h = self._handle()
             from pyte._shim import ffi, lib
             o = ffi.new("tapi_job_channel_t **")
             e = ffi.new("tapi_job_channel_t **")
-            check(lib.pyte_job_out_channels(self._h, o, e),
+            check(lib.pyte_job_out_channels(h, o, e),
                   f"job.alloc_output_channels({self.program})")
             self._stdout = Channel(self, o[0], "stdout")
             self._stderr = Channel(self, e[0], "stderr")
@@ -443,9 +495,10 @@ class Job:
         the process is spawned is not bound to it (TE_EBADFD on send).
         """
         if self._stdin is None:
+            h = self._handle()
             from pyte._shim import ffi, lib
             i = ffi.new("tapi_job_channel_t **")
-            check(lib.pyte_job_in_channel(self._h, i),
+            check(lib.pyte_job_in_channel(h, i),
                   f"job.alloc_input_channels({self.program})")
             self._stdin = InputChannel(self, i[0])
         return self._stdin
@@ -474,8 +527,9 @@ class Job:
     # -- lifecycle -----------------------------------------------------
     def start(self) -> None:
         """Actually run the job."""
+        h = self._handle()
         from pyte._shim import lib
-        check(lib.pyte_job_start(self._h), f"job.start({self.program})")
+        check(lib.pyte_job_start(h), f"job.start({self.program})")
 
     def wait(self, timeout: float = DEFAULT_TIMEOUT) -> JobStatus:
         """Wait for completion; raises TimeoutError if still running.
@@ -483,10 +537,11 @@ class Job:
         tapi_job_wait() reports a still-running job as TE_EINPROGRESS;
         convert that to the same TimeoutError as other timeouts.
         """
+        h = self._handle()
         from pyte._shim import ffi, lib
         otype = ffi.new("int *")
         oval = ffi.new("int *")
-        rc = lib.pyte_job_wait(self._h, _ms(timeout), otype, oval)
+        rc = lib.pyte_job_wait(h, _ms(timeout), otype, oval)
         if rc != 0 and (lib.pyte_rc_error(rc) ==
                         lib.pyte_rc_error(lib.PYTE_EINPROGRESS)):
             raise TeTimeoutError(rc, f"job.wait({self.program}): "
@@ -500,8 +555,9 @@ class Job:
     def stop(self, timeout: float = DEFAULT_TIMEOUT,
              signal: int | signal.Signals = signal.SIGTERM) -> None:
         """Terminate gracefully; SIGKILL after timeout expires."""
+        h = self._handle()
         from pyte._shim import lib
-        check(lib.pyte_job_stop(self._h, _signo(signal), _ms(timeout)),
+        check(lib.pyte_job_stop(h, _signo(signal), _ms(timeout)),
               f"job.stop({self.program})")
 
     def restart(self, timeout: float = DEFAULT_TIMEOUT,
@@ -546,7 +602,8 @@ class Job:
                      for a in [tool, *(args or [])]]
         argv = ffi.new("const char *[]", [*argv_strs, ffi.NULL])
         out = ffi.new("tapi_job_wrapper_t **")
-        check(lib.pyte_job_wrapper_add(self._h, _enc(tool), argv, prio, out),
+        check(lib.pyte_job_wrapper_add(self._handle(), _enc(tool), argv,
+                                       prio, out),
               f"job.wrap({tool})")
         return Wrapper(self, out[0])
 
@@ -577,21 +634,34 @@ class Job:
 
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""
+        h = self._handle()
         from pyte._shim import lib
-        check(lib.pyte_job_kill(self._h, _signo(signal)),
+        check(lib.pyte_job_kill(h, _signo(signal)),
               f"job.kill({self.program}, {signal})")
 
     def destroy(self, timeout: float = DEFAULT_TIMEOUT) -> None:
         """Destroy the job (terminating it if needed) and its factory.
 
-        Idempotent: safe to call more than once.
+        Idempotent: safe to call more than once.  Channel, Filter and
+        InputChannel objects created from this job are invalidated:
+        TE frees them together with the job, so any further use would
+        dereference freed memory in C — they raise RuntimeError
+        instead.
         """
         from pyte._shim import lib
         if self._h is not None:
             check(lib.pyte_job_destroy(self._h, _ms(timeout)),
                   f"job.destroy({self.program})")
             self._h = None
+            # TE freed all channels/filters with the job: mark every
+            # Python wrapper dead so held references raise instead of
+            # passing dangling pointers into C.
+            for child in (self._stdout, self._stderr, self._stdin,
+                          *self._filters):
+                if child is not None:
+                    child._h = None
             self._stdout = self._stderr = self._stdin = None
+            self._filters.clear()
         if self._factory is not None:
             check(lib.pyte_job_factory_destroy(self._factory),
                   "job_factory_destroy")
