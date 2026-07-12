@@ -11,6 +11,88 @@ from pyte.log import _enc
 from pyte.rpc.server import SUPPRESSED
 
 
+class Msg(enum.Flag):
+    """MSG_* send/receive flags for the data-transfer methods.
+
+    TE's RPC layer transports flags in its own ``rpc_send_recv_flags``
+    encoding (te_rpc_sys_socket.h), which does NOT match the host's
+    ``MSG_*`` values: e.g. host ``MSG_DONTWAIT`` is 0x40 while TE's is
+    8, so passing ``socket.MSG_*`` integers would silently mean a
+    different flag on the agent.  Members are translated to PYTE_MSG_*
+    shim constants at the call boundary; plain ints are rejected.
+    """
+
+    OOB = enum.auto()
+    PEEK = enum.auto()
+    DONTROUTE = enum.auto()
+    DONTWAIT = enum.auto()
+    WAITALL = enum.auto()
+    NOSIGNAL = enum.auto()
+    TRUNC = enum.auto()
+    CTRUNC = enum.auto()
+    ERRQUEUE = enum.auto()
+    MCAST = enum.auto()
+    BCAST = enum.auto()
+    MORE = enum.auto()
+    CONFIRM = enum.auto()
+    EOR = enum.auto()
+
+
+#: Map from Msg member to the corresponding PYTE_MSG_* shim constant.
+_MSG_CONSTS = {
+    Msg.OOB:       "PYTE_MSG_OOB",
+    Msg.PEEK:      "PYTE_MSG_PEEK",
+    Msg.DONTROUTE: "PYTE_MSG_DONTROUTE",
+    Msg.DONTWAIT:  "PYTE_MSG_DONTWAIT",
+    Msg.WAITALL:   "PYTE_MSG_WAITALL",
+    Msg.NOSIGNAL:  "PYTE_MSG_NOSIGNAL",
+    Msg.TRUNC:     "PYTE_MSG_TRUNC",
+    Msg.CTRUNC:    "PYTE_MSG_CTRUNC",
+    Msg.ERRQUEUE:  "PYTE_MSG_ERRQUEUE",
+    Msg.MCAST:     "PYTE_MSG_MCAST",
+    Msg.BCAST:     "PYTE_MSG_BCAST",
+    Msg.MORE:      "PYTE_MSG_MORE",
+    Msg.CONFIRM:   "PYTE_MSG_CONFIRM",
+    Msg.EOR:       "PYTE_MSG_EOR",
+}
+
+#: Lazy dict: Msg member -> TE RPC bit value (populated from the shim on
+#: first use so unit tests with a fake shim can supply the values).
+MSG_BITS: dict[Msg, int] = {}
+
+
+def _ensure_msg_bits() -> None:
+    """Populate MSG_BITS lazily from the shim constants."""
+    if MSG_BITS:
+        return
+    from pyte._shim import lib
+    for member, const in _MSG_CONSTS.items():
+        MSG_BITS[member] = int(getattr(lib, const))
+
+
+def _msg_bits(flags: "Msg") -> int:
+    """Convert a :class:`Msg` flag into the TE RPC integer bit mask."""
+    if not isinstance(flags, Msg):
+        raise TypeError(
+            "flags must be a Msg flag (host socket.MSG_* ints do not "
+            f"match TE's RPC encoding), not {type(flags).__name__}")
+    _ensure_msg_bits()
+    bits = 0
+    for member in flags:
+        bits |= MSG_BITS[member]
+    return bits
+
+
+def _msg_flag(bits: int) -> "Msg":
+    """Decode a TE RPC integer bit mask back into a :class:`Msg` flag."""
+    _ensure_msg_bits()
+    flag = Msg(0)
+    for member, bit in MSG_BITS.items():
+        if bits & bit:
+            flag |= member
+    return flag
+
+
 @dataclass(frozen=True)
 class RecvMsg:
     """Result of :meth:`RpcSocket.recvmsg`.
@@ -24,12 +106,14 @@ class RecvMsg:
     SOL_MAX plus a WARN in the TE log).
     ``addr`` is ``(ip, port)`` when the kernel returned a source name,
     or ``None`` on a connected socket that reported no name.
+    ``flags`` are the returned ``msg_flags`` decoded into :class:`Msg`
+    (e.g. ``Msg.TRUNC in rm.flags``).
     """
 
     data: bytes
     ancillary: list[tuple[int, int, bytes]]
     addr: tuple[str, int] | None
-    flags: int
+    flags: "Msg"
 
 # inet6/local need sockaddr helpers not yet implemented (_mk_addr and
 # _parse_addr only handle AF_INET), so only inet is exposed for now.
@@ -282,22 +366,24 @@ class RpcSocket:
             return None
         return bool(blk[0])
 
-    def send(self, data: bytes, flags: int = 0) -> int | None:
+    def send(self, data: bytes, flags: Msg = Msg(0)) -> int | None:
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_send(self.server._h, self.fd, data, len(data),
-                               flags, out)
+                               bits, out)
         ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"send({len(data)} bytes)")
         if ret is SUPPRESSED:
             return None
         return ret
 
-    def recv(self, size: int, flags: int = 0) -> bytes | None:
+    def recv(self, size: int, flags: Msg = Msg(0)) -> bytes | None:
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("ssize_t *")
-        rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, flags,
+        rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, bits,
                                out)
         ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recv({size})")
@@ -306,20 +392,22 @@ class RpcSocket:
         return bytes(ffi.buffer(buf, out[0]))
 
     def sendto(self, data: bytes, addr: tuple[str, int],
-               flags: int = 0) -> int | None:
+               flags: Msg = Msg(0)) -> int | None:
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         sa, _keep = _mk_addr(ffi, lib, addr)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_sendto(self.server._h, self.fd, data, len(data),
-                                 flags, sa, out)
+                                 bits, sa, out)
         ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"sendto({len(data)} bytes, {addr})")
         if ret is SUPPRESSED:
             return None
         return ret
 
-    def recvfrom(self, size: int,
-                 flags: int = 0) -> tuple[bytes, tuple[str, int]] | None:
+    def recvfrom(self, size: int, flags: Msg = Msg(0),
+                 ) -> tuple[bytes, tuple[str, int]] | None:
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         ss = ffi.new("struct sockaddr_storage *")
@@ -328,14 +416,15 @@ class RpcSocket:
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recvfrom(self.server._h, self.fd, buf, size,
-                                   flags, sa, fromlen, out)
+                                   bits, sa, fromlen, out)
         ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recvfrom({size})")
         if ret is SUPPRESSED:
             return None
         return bytes(ffi.buffer(buf, out[0])), _parse_addr(ffi, lib, sa)
 
-    def sendmsg(self, buffers, addr=None, ancillary=(), flags=0):
+    def sendmsg(self, buffers, addr=None, ancillary=(),
+                flags: Msg = Msg(0)):
         """Send a scatter-gather message with optional ancillary data.
 
         :param buffers:   non-empty list of :class:`bytes` payloads.
@@ -348,9 +437,10 @@ class RpcSocket:
                           IPPROTO_TCP, IPPROTO_UDP) and their known cmsg
                           types are forwarded; unknown values are silently
                           dropped by the RPC layer.
-        :param flags:     send flags (native int).
+        :param flags:     send flags (:class:`Msg`).
         :returns:         bytes sent, or ``None`` when error was suppressed.
         """
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
 
         buffers = list(buffers)
@@ -409,7 +499,7 @@ class RpcSocket:
             iov_ptrs, iov_lens_arr, n_iov,
             addr_bytes, port,
             c_levels, c_types, c_data_ptrs, c_lens, n_cmsg,
-            flags, sent)
+            bits, sent)
         ret = self.server._check_call(rc, sent[0], lambda v: v >= 0,
                                       f"sendmsg({n_iov} iov, {n_cmsg} cmsg)")
         if ret is SUPPRESSED:
@@ -417,12 +507,12 @@ class RpcSocket:
         return int(sent[0])
 
     def recvmsg(self, bufsize: int, ctrl_space: int = 0,
-                flags: int = 0) -> "RecvMsg | None":
+                flags: Msg = Msg(0)) -> "RecvMsg | None":
         """Receive a message with optional ancillary data.
 
         :param bufsize:    data buffer size in bytes.
         :param ctrl_space: bytes reserved for ancillary data (0 = none).
-        :param flags:      receive flags (native int).
+        :param flags:      receive flags (:class:`Msg`).
         :returns:          :class:`RecvMsg` or ``None`` when suppressed.
 
         Ancillary data level/type values are host-native integers, but only
@@ -430,6 +520,7 @@ class RpcSocket:
         IPPROTO_TCP, IPPROTO_UDP) and their known cmsg types survive the
         RPC conversion; unknown values arrive mangled (SOL_MAX + WARN).
         """
+        bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
 
         p_data = ffi.new("uint8_t **")
@@ -445,7 +536,7 @@ class RpcSocket:
         p_received = ffi.new("ssize_t *")
 
         rc = lib.pyte_rpc_recvmsg(
-            self.server._h, self.fd, bufsize, ctrl_space, flags,
+            self.server._h, self.fd, bufsize, ctrl_space, bits,
             p_data, p_data_len,
             p_from_addr, p_from_port,
             p_levels, p_types, p_datas, p_lens,
@@ -481,4 +572,4 @@ class RpcSocket:
                                 p_datas[0], p_lens[0], n)
 
         return RecvMsg(data=data, ancillary=ancillary, addr=addr,
-                       flags=int(p_msg_flags[0]))
+                       flags=_msg_flag(int(p_msg_flags[0])))

@@ -113,6 +113,22 @@
 #define PYTE_SHUT_RD      RPC_SHUT_RD
 #define PYTE_SHUT_WR      RPC_SHUT_WR
 #define PYTE_SHUT_RDWR    RPC_SHUT_RDWR
+/* MSG_* send/recv flags in TE's RPC encoding (rpc_send_recv_flags,
+ * te_rpc_sys_socket.h) -- these do NOT match host MSG_* values */
+#define PYTE_MSG_OOB       RPC_MSG_OOB
+#define PYTE_MSG_PEEK      RPC_MSG_PEEK
+#define PYTE_MSG_DONTROUTE RPC_MSG_DONTROUTE
+#define PYTE_MSG_DONTWAIT  RPC_MSG_DONTWAIT
+#define PYTE_MSG_WAITALL   RPC_MSG_WAITALL
+#define PYTE_MSG_NOSIGNAL  RPC_MSG_NOSIGNAL
+#define PYTE_MSG_TRUNC     RPC_MSG_TRUNC
+#define PYTE_MSG_CTRUNC    RPC_MSG_CTRUNC
+#define PYTE_MSG_ERRQUEUE  RPC_MSG_ERRQUEUE
+#define PYTE_MSG_MCAST     RPC_MSG_MCAST
+#define PYTE_MSG_BCAST     RPC_MSG_BCAST
+#define PYTE_MSG_MORE      RPC_MSG_MORE
+#define PYTE_MSG_CONFIRM   RPC_MSG_CONFIRM
+#define PYTE_MSG_EOR       RPC_MSG_EOR
 
 /* Configurator value-type passthrough */
 #define PYTE_CVT_NONE CVT_NONE

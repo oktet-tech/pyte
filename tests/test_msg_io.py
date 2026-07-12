@@ -12,7 +12,17 @@ import types
 
 import pytest
 
-from pyte.rpc.socket import RecvMsg, RpcSocket
+from pyte.rpc import socket as sockmod
+from pyte.rpc.socket import Msg, RecvMsg, RpcSocket
+
+
+@pytest.fixture(autouse=True)
+def _clear_msg_bits():
+    """Msg bit values are populated lazily from whichever shim is first
+    imported; clear around each test so fake/real shims don't bleed."""
+    sockmod.MSG_BITS.clear()
+    yield
+    sockmod.MSG_BITS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +168,22 @@ class FakeLib:
     PYTE_SOCK_DGRAM = 2
     PYTE_PROTO_DEF = 0
 
+    # TE's rpc_send_recv_flags encoding (te_rpc_sys_socket.h)
+    PYTE_MSG_OOB       = 1
+    PYTE_MSG_PEEK      = 2
+    PYTE_MSG_DONTROUTE = 4
+    PYTE_MSG_DONTWAIT  = 8
+    PYTE_MSG_WAITALL   = 0x10
+    PYTE_MSG_NOSIGNAL  = 0x20
+    PYTE_MSG_TRUNC     = 0x40
+    PYTE_MSG_CTRUNC    = 0x80
+    PYTE_MSG_ERRQUEUE  = 0x100
+    PYTE_MSG_MCAST     = 0x200
+    PYTE_MSG_BCAST     = 0x400
+    PYTE_MSG_MORE      = 0x800
+    PYTE_MSG_CONFIRM   = 0x1000
+    PYTE_MSG_EOR       = 0x2000
+
     def __init__(self):
         self.calls = []
         # recvmsg pre-configured result
@@ -297,7 +323,7 @@ def test_sendmsg_scatter(monkeypatch):
     _install_fake(monkeypatch, lib)
     sock = RpcSocket(FakeServer(), 7)
 
-    n = sock.sendmsg([b"hello-", b"world"], flags=0)
+    n = sock.sendmsg([b"hello-", b"world"], flags=Msg.DONTWAIT)
 
     assert n == 11
     assert len(lib.calls) == 1
@@ -306,6 +332,7 @@ def test_sendmsg_scatter(monkeypatch):
     assert args["iov"] == [(b"hello-", 6), (b"world", 5)]
     assert args["addr"] is None or isinstance(args["addr"], _FfiNull)
     assert args["cmsgs"] == []
+    assert args["flags"] == FakeLib.PYTE_MSG_DONTWAIT   # TE encoding
 
 
 def test_sendmsg_with_addr_and_ancillary(monkeypatch):
@@ -340,7 +367,7 @@ def test_recvmsg_basic(monkeypatch):
     assert isinstance(msg, RecvMsg)
     assert msg.data == b"hello"
     assert msg.addr == ("127.0.0.1", 5000)
-    assert msg.flags == 0
+    assert msg.flags == Msg(0)
     assert len(msg.ancillary) == 1
     lvl, typ, dat = msg.ancillary[0]
     assert (lvl, typ) == (0, 8)
