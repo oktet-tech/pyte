@@ -141,3 +141,176 @@ def test_parse_size_rejects_bad_input():
         _units.parse_size(0)
     with pytest.raises(ValueError):
         _units.parse_size("-4k")
+
+
+# -- ToolHandle: shared lifecycle with per-tool hooks --------------------
+
+from pyte.errors import TeError, ToolError  # noqa: E402
+from pyte.job import JobStatus, StatusKind  # noqa: E402
+
+OK = JobStatus(StatusKind.EXITED, 0)
+BAD = JobStatus(StatusKind.EXITED, 3)
+
+
+class FakeJob:
+    def __init__(self, status=OK, stop_error=False):
+        self.status = status
+        self.stop_error = stop_error
+        self.events = []
+
+    def wait(self, timeout=None):
+        self.events.append(("wait", timeout))
+        return self.status
+
+    def stop(self, *a, **k):
+        self.events.append(("stop",))
+        if self.stop_error:
+            raise TeError(12)
+
+    def destroy(self, *a, **k):
+        self.events.append(("destroy",))
+
+
+class FakeFilter:
+    def __init__(self, text="raw output"):
+        self.text = text
+        self.reads = 0
+
+    def read_all(self, timeout=None):
+        self.reads += 1
+        return self.text
+
+
+class DemoError(ToolError):
+    """demo tool failed."""
+
+
+class Demo(_tool.ToolHandle):
+    tool = "demo"
+    error_cls = DemoError
+    default_timeout = 33.0
+
+    def _parse(self, raw):
+        if "garbage" in raw:
+            raise DemoError(f"cannot parse: {raw!r}")
+        return {"parsed": raw}
+
+
+def test_wait_parses_and_caches():
+    job, flt = FakeJob(), FakeFilter("data")
+    h = Demo(job, flt)
+    assert h.wait() == {"parsed": "data"}
+    assert h.wait() == {"parsed": "data"}
+    assert flt.reads == 1                      # cached, no second read
+    assert job.events[0] == ("wait", 33.0)     # class default timeout
+
+
+def test_parse_first_reports_status_when_parse_fails():
+    h = Demo(FakeJob(status=BAD), FakeFilter("garbage"))
+    with pytest.raises(DemoError, match="exited with"):
+        h.wait()
+
+
+def test_parse_first_propagates_parse_error_on_ok_exit():
+    h = Demo(FakeJob(status=OK), FakeFilter("garbage"))
+    with pytest.raises(DemoError, match="cannot parse"):
+        h.wait()
+
+
+def test_parse_first_default_check_raises_on_bad_exit():
+    """Parse succeeded but the run failed: default policy raises."""
+    h = Demo(FakeJob(status=BAD), FakeFilter("data"))
+    with pytest.raises(DemoError, match="exited with"):
+        h.wait()
+
+
+def test_check_status_hook_can_tolerate_bad_exit():
+    """ping's 100%-loss case: parseable output on a non-zero exit."""
+    class Tolerant(Demo):
+        def _check_status(self, status, raw):
+            pass
+
+    h = Tolerant(FakeJob(status=BAD), FakeFilter("data"))
+    assert h.wait() == {"parsed": "data"}
+
+
+def test_status_first_raises_before_parse():
+    class Json(Demo):
+        wait_policy = "status-first"
+
+        def _parse(self, raw):
+            raise AssertionError("must not parse a failed run")
+
+    h = Json(FakeJob(status=BAD), FakeFilter("whatever"))
+    with pytest.raises(DemoError, match="exited with"):
+        h.wait()
+
+
+def test_read_output_hook_feeds_parse():
+    """Tools that read via messages()/regex filters override the read."""
+    class Rows(Demo):
+        def _read_output(self, timeout):
+            return ["row1", "row2"]
+
+        def _parse(self, rows):
+            return rows
+
+    h = Rows(FakeJob(), None)          # no stdout filter needed
+    assert h.wait() == ["row1", "row2"]
+
+
+def test_wait_silent_checks_status_only():
+    h = Demo(FakeJob(status=BAD), FakeFilter())
+    with pytest.raises(DemoError, match="exited with"):
+        h.wait_silent()
+    Demo(FakeJob(), FakeFilter()).wait_silent()    # ok run: no raise
+
+
+def test_close_stops_destroys_idempotent():
+    job = FakeJob(stop_error=True)     # stop failure tolerated
+    h = Demo(job, FakeFilter())
+    h.close()
+    h.close()
+    assert job.events == [("stop",), ("destroy",)]
+
+
+def test_close_hooks_overridable():
+    events = []
+
+    class Custom(Demo):
+        def _stop_for_close(self):
+            events.append("custom-stop")
+
+        def _after_close(self):
+            events.append("after")
+
+    job = FakeJob()
+    Custom(job, FakeFilter()).close()
+    assert events == ["custom-stop", "after"]
+    assert job.events == [("destroy",)]
+
+
+def test_mi_report_auto_waits(monkeypatch):
+    """mi_report() no longer demands a prior wait() call."""
+    import pyte.mi
+
+    class FakeLogger:
+        def __init__(self, tool):
+            self.tool = tool
+            self.adds = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(pyte.mi, "Logger", FakeLogger)
+    seen = []
+
+    class WithMi(Demo):
+        def _mi(self, logger, rep):
+            seen.append((logger.tool, rep))
+
+    WithMi(FakeJob(), FakeFilter("data")).mi_report()
+    assert seen == [("demo", {"parsed": "data"})]
