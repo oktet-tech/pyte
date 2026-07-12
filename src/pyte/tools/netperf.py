@@ -257,7 +257,10 @@ class Netperf:
         """Wait for the client to finish, parse output, return a Report.
 
         Caches the report. Raises :exc:`pyte.errors.NetperfError` on a
-        non-zero exit or unparseable output.
+        non-zero exit or unparseable output.  A failed run usually
+        produces no parseable output at all, so a parse failure on a
+        non-zero exit reports the exit status (the root cause), not
+        the parse error — same dual-path as ping/wrk.
         """
         if self._report is not None:
             return self._report
@@ -266,7 +269,14 @@ class Netperf:
 
         status = self._job.wait(timeout=timeout)
         raw = self._stdout_filter.read_all(timeout=timeout)
-        report = _parse_report(raw, self._test_name)
+        try:
+            report = _parse_report(raw, self._test_name)
+        except NetperfError:
+            if not status.ok:
+                raise NetperfError(
+                    f"netperf client exited with {status}; "
+                    f"stdout={raw[:200]!r}") from None
+            raise
         if not status.ok:
             raise NetperfError(
                 f"netperf client exited with {status}")

@@ -108,3 +108,49 @@ def test_parse_tcp_maerts_routes_to_stream():
 def test_parse_unparseable_raises():
     with pytest.raises(NetperfError, match="parse"):
         _parse_report("no metrics here", "TCP_STREAM")
+
+
+# -- wait(): dual-path error policy -----------------------------------------
+
+from pyte.job import JobStatus, StatusKind  # noqa: E402
+from pyte.tools.netperf import Netperf  # noqa: E402
+
+
+class FakeJob:
+    def __init__(self, status):
+        self._status = status
+
+    def wait(self, timeout=None):
+        return self._status
+
+
+class FakeFilter:
+    def __init__(self, text):
+        self._text = text
+
+    def read_all(self, timeout=None):
+        return self._text
+
+
+def test_wait_failed_run_reports_exit_status():
+    """A failed run (empty output, non-zero exit) must raise the exit
+    status, not a confusing "cannot parse ... text=''" error."""
+    np = Netperf(FakeJob(JobStatus(StatusKind.EXITED, 111)),
+                 FakeFilter(""), "TCP_STREAM")
+    with pytest.raises(NetperfError, match="exited"):
+        np.wait()
+
+
+def test_wait_ok_run_unparseable_output_raises_parse_error():
+    np = Netperf(FakeJob(JobStatus(StatusKind.EXITED, 0)),
+                 FakeFilter("garbage\n"), "TCP_STREAM")
+    with pytest.raises(NetperfError, match="parse"):
+        np.wait()
+
+
+def test_wait_failed_run_with_parseable_output_still_raises():
+    text = (DATA / "netperf_tcp_stream.txt").read_text()
+    np = Netperf(FakeJob(JobStatus(StatusKind.SIGNALED, 9)),
+                 FakeFilter(text), "TCP_STREAM")
+    with pytest.raises(NetperfError, match="signaled"):
+        np.wait()
