@@ -29,6 +29,7 @@ class Entry:
     doc: str        # human prose from d:, structural trailer stripped
     raw_name: str = ""  # text after "Name:" in d: block; "" if not kept
     volatile: bool = False  # True when the CM entry carries volatile: true
+    raw_volatile: object = None  # the raw YAML volatile value (for lint)
 
 
 def _strip_doc(d: str) -> str:
@@ -64,15 +65,19 @@ def _make_entry(raw: dict, keep_raw: bool) -> Entry:
     ``d:`` block's first ``Name:`` label (used by ``parse_cm_raw``).
     """
     d = raw.get("d", "")
-    return Entry(
+    entry = Entry(
         oid=raw["oid"],
         type=raw.get("type", "none"),
         access=raw.get("access", "read_only"),
         name=str(raw.get("name", "none")),
         doc=_strip_doc(d),
         raw_name=_name_prose(d) if keep_raw else "",
-        volatile=bool(raw.get("volatile", False)),
+        # strictly YAML true: cm_base.yml has templated string
+        # values like ${TE_VOLATILE_ROUTES:-false} (truthy!).
+        volatile=raw.get("volatile") is True,
     )
+    entry.raw_volatile = raw.get("volatile")
+    return entry
 
 
 def _parse(text: str, keep_raw: bool) -> list[Entry]:
@@ -129,6 +134,11 @@ def lint(entries: list[Entry]) -> list[str]:
             warns.append(
                 f"{e.oid}: name defaulted to none but d: Name "
                 f"{e.raw_name!r} looks like a collection key")
+        if e.raw_volatile is not None and not isinstance(e.raw_volatile,
+                                                         bool):
+            warns.append(
+                f"{e.oid}: volatile is {e.raw_volatile!r} (not a YAML "
+                f"bool); treated as False")
         seg = e.oid.rstrip("/").split("/")[-1]
         if seg in _RESERVED_ATTRS:
             warns.append(
@@ -165,6 +175,12 @@ def build_tree(entries: list[Entry]) -> Node:
             if i == 0:
                 if root is None:
                     root = Node(seg=seg, oid=path)
+                elif root.seg != seg:
+                    # Silently grafting a foreign-rooted entry under the
+                    # first root corrupts the tree; refuse loudly.
+                    raise ValueError(
+                        f"entry {e.oid} is rooted at /{seg}, not "
+                        f"/{root.seg}; one tree per root")
                 node = root
                 continue
             if seg not in node.children:
@@ -295,8 +311,16 @@ def _imports_for(used: set[str]) -> str:
 
 
 def _esc_doc(text: str) -> str:
-    """Escape triple quotes so doc text cannot break a generated docstring."""
-    return text.replace('"""', r'\"\"\"')
+    """Escape doc text so it cannot break out of a generated docstring.
+
+    Backslashes are doubled (a trailing one would swallow the closing
+    quotes), triple quotes are escaped, and a trailing single quote is
+    escaped so it cannot fuse with the closing triple quote.
+    """
+    text = text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    if text.endswith('"'):
+        text = text[:-1] + '\\"'
+    return text
 
 
 def _docstring(node: Node, indent: str) -> list[str]:
@@ -312,6 +336,20 @@ def _docstring(node: Node, indent: str) -> list[str]:
             f'{indent}"""']
 
 
+def _wrap_member(attr: str, cls: str, args: list[str]) -> str:
+    """Render `attr = Cls(args...)`, wrapped to <=79 columns if needed.
+
+    Used for ALL member kinds (knobs, SubObject, Collection): the
+    per-kind emitters used to wrap only knob lines, so long
+    SubObject/Collection lines exceeded 79 (live in the old pci.py).
+    """
+    one = f'    {attr} = {cls}({", ".join(args)})'
+    if len(one) <= 79:
+        return one
+    inner = ",\n".join(f"        {a}" for a in args)
+    return f"    {attr} = {cls}(\n{inner})"
+
+
 def _knob_line(seg: str, node: Node) -> str:
     """Render one leaf-knob descriptor assignment line (wrapped if long)."""
     cm_type = node.entry.type
@@ -323,13 +361,7 @@ def _knob_line(seg: str, node: Node) -> str:
         args.append('access="read_only"')
     if node.entry.volatile:
         args.append("sync=True")
-    attr = attr_name(seg)
-    one = f'    {attr} = {cls}({", ".join(args)})'
-    if len(one) <= 79:
-        return one
-    # Wrap: one arg per continuation line (guarantees <=79 for any real arg).
-    inner = ",\n".join(f"        {a}" for a in args)
-    return f"    {attr} = {cls}(\n{inner})"
+    return _wrap_member(attr_name(seg), cls, args)
 
 
 def _init_spec(root: Node) -> tuple[list[str], str]:
@@ -456,16 +488,18 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
             members.append(_knob_line(seg, child))
         elif kind == "subobject":
             used.add("SubObject")
-            members.append(
-                f'    {attr} = SubObject('
-                f'"{seg}", {class_name(child.oid, root_oid)})')
+            members.append(_wrap_member(
+                attr, "SubObject",
+                [f'"{seg}"', class_name(child.oid, root_oid)]))
             _emit_class(child, root_oid, root_params, root_oid_fmt,
                         blocks, used, cnames)
         else:  # collection
             used.add("Collection")
-            members.append(
-                f'    {attr} = Collection('
-                f'"{seg}", {class_name(child.oid, root_oid)})')
+            args = [f'"{seg}"', class_name(child.oid, root_oid)]
+            if child.entry is not None and \
+                    child.entry.access == "read_only":
+                args.append('access="read_only"')
+            members.append(_wrap_member(attr, "Collection", args))
             _emit_class(child, root_oid, root_params, root_oid_fmt,
                         blocks, used, cnames)
 

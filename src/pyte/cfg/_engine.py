@@ -131,6 +131,10 @@ class BoolKnob(_Knob):
     cvt_name = "BOOL"
 
     def to_cfg(self, value):
+        if isinstance(value, str):
+            # bool("0") is True: a stringly bool silently inverts.
+            raise TypeError(
+                f"BoolKnob takes a bool, not the string {value!r}")
         return bool(value)
 
 
@@ -212,6 +216,11 @@ class SubObject:
         self.subid = subid
         self.cls = cls
 
+    def __set__(self, obj, value):
+        raise AttributeError(
+            f"cannot assign to the container {self.subid!r}; assign to "
+            f"one of its knobs instead (e.g. obj.{self.subid}.<knob>)")
+
     def __get__(self, obj, owner=None):
         if obj is None:
             return self
@@ -219,52 +228,89 @@ class SubObject:
 
 
 class Collection:
-    """An instance-named child collection (e.g. net_addr, vlans, rule)."""
+    """An instance-named child collection (e.g. net_addr, vlans, rule).
 
-    def __init__(self, subid: str, cls: type[CfgObject]):
+    ``access="read_only"`` models CM collections the agent populates
+    itself (e.g. interface IRQs): add/del raise up front instead of
+    failing deep in the agent.
+    """
+
+    def __init__(self, subid: str, cls: type[CfgObject],
+                 access: str = "read_write"):
         self.subid = subid
         self.cls = cls
+        self.access = access
+
+    def __set__(self, obj, value):
+        raise AttributeError(
+            f"cannot assign to the container {self.subid!r}; use "
+            f"obj.{self.subid}[name] / .add() instead")
 
     def __get__(self, obj, owner=None):
         if obj is None:
             return self
-        return BoundCollection(obj.oid, self.subid, self.cls)
+        return BoundCollection(obj.oid, self.subid, self.cls,
+                               access=self.access)
 
 
 class BoundCollection:
     """Children of one object under a fixed collection subid.
 
-    Indexable (``coll[name]``), iterable (``for child in coll``), and
-    mutable (``coll.add(name, value)`` / ``del coll[name]``).
+    Indexable (``coll[name]``), iterable (``for child in coll``),
+    probeable (``name in coll``, ``coll.get(name)``) and — unless the
+    CM declares the collection read-only — mutable
+    (``coll.add(name, value)`` / ``del coll[name]``).
     """
 
-    def __init__(self, parent_oid: str, subid: str, cls: type[CfgObject]):
+    def __init__(self, parent_oid: str, subid: str, cls: type[CfgObject],
+                 access: str = "read_write"):
         self._parent_oid = parent_oid
         self._subid = subid
         self._cls = cls
+        self._access = access
 
     def _child_oid(self, name: str) -> str:
         return f"{self._parent_oid}/{self._subid}:{name}"
+
+    def _writable(self, what: str) -> None:
+        if self._access == "read_only":
+            raise TypeError(
+                f"collection {self._subid!r} is read-only; cannot {what}")
 
     def __getitem__(self, name: str) -> CfgObject:
         """Return the entry's typed view by name.
 
         Composes the OID but does NOT verify the entry exists (a later
-        knob read does that).  Iterate the collection to enumerate the
-        entries that actually exist.
+        knob read does that).  Use ``name in coll`` / :meth:`get` to
+        probe, or iterate to enumerate what actually exists.
         """
         return self._cls(self._child_oid(name))
+
+    def __contains__(self, name: str) -> bool:
+        return bool(cfg.find(self._child_oid(name)))
+
+    def get(self, name: str, default=None):
+        """The entry's typed view when it exists, else *default*."""
+        if name in self:
+            return self[name]
+        return default
 
     def __iter__(self):
         for node in cfg.find(f"{self._parent_oid}/{self._subid}:*"):
             yield self._cls(node.oid)
 
     def add(self, name: str, value=None) -> CfgObject:
+        self._writable(f"add {name!r}")
         cfg.add(self._child_oid(name), value)
         return self[name]
 
     def __delitem__(self, name: str) -> None:
-        cfg.delete(self._child_oid(name), children=True)
+        from pyte.errors import CfgNotFoundError
+        self._writable(f"delete {name!r}")
+        try:
+            cfg.delete(self._child_oid(name), children=True)
+        except CfgNotFoundError:
+            raise KeyError(name) from None
 
     def __repr__(self) -> str:
         return (f"BoundCollection({self._parent_oid!r}, {self._subid!r}, "

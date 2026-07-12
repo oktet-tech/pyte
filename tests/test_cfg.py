@@ -312,3 +312,54 @@ def test_transaction_releases_even_if_restore_raises(backup_seam,
             raise RuntimeError("boom")
     assert backup_seam == ["create", "body",
                            ("restore", "BK"), ("release", "BK")]
+
+
+# -- CfgNotFoundError + exists() (P1.7) ---------------------------------
+
+def test_check_maps_enoent_to_not_found(monkeypatch):
+    import sys
+    import types
+
+    from pyte.errors import CfgError, CfgNotFoundError, check
+
+    class Lib:
+        PYTE_ETIMEDOUT = 110
+        PYTE_ENOENT = 2
+
+        def pyte_rc_error(self, rc):
+            return rc
+
+        def pyte_rc_module(self, rc):
+            return 0
+
+        def te_rc_mod2str(self, rc):
+            return b"CS"
+
+        def te_rc_err2str(self, rc):
+            return b"ENOENT"
+
+    class Ffi:
+        @staticmethod
+        def string(b):
+            return b
+
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=Ffi(), lib=Lib()))
+    with pytest.raises(CfgNotFoundError):
+        check(2, "cfg get /x", CfgError)
+    # non-ENOENT stays plain CfgError; non-cfg classes unaffected
+    with pytest.raises(CfgError) as ei:
+        check(5, "cfg get /x", CfgError)
+    assert not isinstance(ei.value, CfgNotFoundError)
+    from pyte.errors import RpcError
+    with pytest.raises(RpcError) as ei:
+        check(2, "call", RpcError)
+    assert not isinstance(ei.value, CfgNotFoundError)
+
+
+def test_exists_via_find(monkeypatch):
+    monkeypatch.setattr(cfg, "find",
+                        lambda pattern: [object()]
+                        if pattern == "/agent:A/rsrc:x" else [])
+    assert cfg.exists("/agent:A/rsrc:x") is True
+    assert cfg.exists("/agent:A/rsrc:y") is False

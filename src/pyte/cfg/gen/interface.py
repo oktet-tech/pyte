@@ -143,7 +143,7 @@ class CoalesceQueuesQueue(CfgObject):
 
 class CoalesceQueues(CfgObject):
     """Interrupt coalescing parameters for network interface queues"""
-    queue = Collection("queue", CoalesceQueuesQueue)
+    queue = Collection("queue", CoalesceQueuesQueue, access="read_only")
 
 
 class Coalesce(CfgObject):
@@ -182,7 +182,10 @@ class Phy(CfgObject):
         access="read_only",
         sync=True)
     mode = Collection("mode", PhyMode)
-    lp_advertised = Collection("lp_advertised", PhyLpAdvertised)
+    lp_advertised = Collection(
+        "lp_advertised",
+        PhyLpAdvertised,
+        access="read_only")
     state = IntKnob("state", cvt_name="INT32", access="read_only", sync=True)
     set_supported = IntKnob(
         "set_supported",
@@ -295,7 +298,7 @@ class XstatsXstat(CfgObject):
 
 class Xstats(CfgObject):
     """Network interface extended statistics"""
-    xstat = Collection("xstat", XstatsXstat)
+    xstat = Collection("xstat", XstatsXstat, access="read_only")
 
 
 class IrqCpu(CfgObject):
@@ -306,7 +309,7 @@ class IrqCpu(CfgObject):
 class Irq(CfgObject):
     """Network interface interrupt information"""
     name_ = StrKnob("name", access="read_only")
-    cpu = Collection("cpu", IrqCpu)
+    cpu = Collection("cpu", IrqCpu, access="read_only")
     smp_affinity = IntKnob("smp_affinity", cvt_name="UINT64")
 
 
@@ -353,7 +356,7 @@ class Interface(CfgObject):
     deviceinfo = SubObject("deviceinfo", Deviceinfo)
     reset = IntKnob("reset", cvt_name="INT32", sync=True)
     xstats = SubObject("xstats", Xstats)
-    irq = Collection("irq", Irq)
+    irq = Collection("irq", Irq, access="read_only")
 
     def __init__(self, ta, ifname):
         super().__init__(f"/agent:{ta}/interface:{ifname}")

@@ -47,6 +47,14 @@ class CfgError(TeError):
     """Configurator request failed."""
 
 
+class CfgNotFoundError(CfgError):
+    """The OID does not exist (TE_ENOENT from the Configurator).
+
+    Raised instead of the flat CfgError so callers can probe for
+    absence without comparing hex rc codes.
+    """
+
+
 class TrcError(_RcOrMsg, TeError):
     """TRC database access failure."""
 
@@ -205,4 +213,8 @@ def check(rc: int, where: str = "", cls: type[TeError] = TeError) -> None:
         lib = _shim_lib()
         if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ETIMEDOUT):
             raise TimeoutError(rc, where)
+        if (issubclass(cls, CfgError)
+                and lib.pyte_rc_error(rc) ==
+                lib.pyte_rc_error(lib.PYTE_ENOENT)):
+            raise CfgNotFoundError(rc, where)
         raise cls(rc, where)

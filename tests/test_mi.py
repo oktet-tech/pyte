@@ -335,3 +335,26 @@ def test_line_graph_wrong_x_axis_type_raises(monkeypatch):
     with mi.Logger("ifstat") as logger:
         with pytest.raises(TypeError, match="Meas"):
             logger.line_graph("g", "t", x_axis="time")
+
+
+def test_logger_dropped_without_close_warns(monkeypatch):
+    """A forgotten close() means the MI data silently never flushes;
+    the finalizer warns (never calls the shim at GC time)."""
+    import gc
+    import warnings
+
+    _fake_shim(monkeypatch, FakeLib())
+    logger = mi.Logger("fio")
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        del logger
+        gc.collect()
+    assert any("never closed" in str(w.message) for w in got)
+    # a properly closed logger must NOT warn
+    logger = mi.Logger("fio")
+    logger.close()
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        del logger
+        gc.collect()
+    assert not got

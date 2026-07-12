@@ -446,3 +446,83 @@ def test_selfknob_read_only_rejects(fake):
 
     with pytest.raises(AttributeError, match="read-only"):
         RO("/agent:A/x:y").value = 1
+
+
+# -- container/descriptor guards (P1.7) ---------------------------------
+
+def test_subobject_assignment_raises():
+    """iface.phy = 1 (typo for iface.phy.autoneg = 1) must fail loudly,
+    not silently shadow the descriptor with an instance attribute."""
+    from pyte.cfg._engine import SubObject
+
+    class Phy(CfgObject):
+        pass
+
+    class Iface(CfgObject):
+        phy = SubObject("phy", Phy)
+
+    iface = Iface("/agent:A/interface:eth0")
+    with pytest.raises(AttributeError, match="container"):
+        iface.phy = 1
+
+
+def test_collection_assignment_raises():
+    from pyte.cfg._engine import Collection
+
+    class Irq(CfgObject):
+        pass
+
+    class Iface(CfgObject):
+        irq = Collection("irq", Irq)
+
+    iface = Iface("/agent:A/interface:eth0")
+    with pytest.raises(AttributeError, match="container"):
+        iface.irq = "boom"
+
+
+def test_bool_knob_rejects_strings(fake):
+    """BoolKnob.to_cfg was bare bool(): '0' (truthy!) wrote True while
+    the sibling IntKnob coerced '9000' correctly."""
+    k = Knobs()
+    with pytest.raises(TypeError, match="bool"):
+        k.flag = "0"
+
+
+def test_bound_collection_contains_and_get(monkeypatch):
+    from pyte import cfg as cfg_mod
+    from pyte.cfg._engine import BoundCollection
+
+    class Elem(CfgObject):
+        pass
+
+    coll = BoundCollection("/agent:A/interface:eth0", "irq", Elem)
+    found = {"/agent:A/interface:eth0/irq:9": True}
+    monkeypatch.setattr(
+        cfg_mod, "find",
+        lambda pattern: ([object()] if found.get(pattern) else []))
+
+    assert "9" in coll
+    assert "77" not in coll
+    got = coll.get("9")
+    assert isinstance(got, Elem)
+    assert coll.get("77") is None
+    assert coll.get("77", "dflt") == "dflt"
+
+
+def test_bound_collection_del_missing_is_keyerror(monkeypatch):
+    """Deleting a missing entry is a normal Python KeyError, not an
+    opaque CfgError with a hex rc."""
+    from pyte import cfg as cfg_mod
+    from pyte.cfg._engine import BoundCollection
+    from pyte.errors import CfgNotFoundError
+
+    class Elem(CfgObject):
+        pass
+
+    def missing(oid, children=False):
+        raise CfgNotFoundError(12, f"cfg delete {oid}")
+
+    monkeypatch.setattr(cfg_mod, "delete", missing)
+    coll = BoundCollection("/agent:A/interface:eth0", "irq", Elem)
+    with pytest.raises(KeyError, match="9"):
+        del coll["9"]

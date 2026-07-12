@@ -169,8 +169,14 @@ class DeviceAerCorrectableError(CfgObject):
 class DeviceAer(CfgObject):
     """Advanced Error Reporting container"""
     value = SelfKnob(cvt_name="INT32")
-    uncorrectable_error = Collection("uncorrectable_error", DeviceAerUncorrectableError)
-    correctable_error = Collection("correctable_error", DeviceAerCorrectableError)
+    uncorrectable_error = Collection(
+        "uncorrectable_error",
+        DeviceAerUncorrectableError,
+        access="read_only")
+    correctable_error = Collection(
+        "correctable_error",
+        DeviceAerCorrectableError,
+        access="read_only")
 
 
 class Device(CfgObject):
@@ -188,15 +194,15 @@ class Device(CfgObject):
     subsystem_vendor = StrKnob("subsystem_vendor", access="read_only")
     subsystem_device = StrKnob("subsystem_device", access="read_only")
     class_ = StrKnob("class", access="read_only")
-    vpd = Collection("vpd", DeviceVpd)
-    interrupt = Collection("interrupt", DeviceInterrupt)
+    vpd = Collection("vpd", DeviceVpd, access="read_only")
+    interrupt = Collection("interrupt", DeviceInterrupt, access="read_only")
     node = StrKnob("node", access="read_only")
     driver = StrKnob("driver")
-    net = Collection("net", DeviceNet)
-    dev = Collection("dev", DeviceDev)
+    net = Collection("net", DeviceNet, access="read_only")
+    dev = Collection("dev", DeviceDev, access="read_only")
     sriov = SubObject("sriov", DeviceSriov)
     eswitch = SubObject("eswitch", DeviceEswitch)
-    param = Collection("param", DeviceParam)
+    param = Collection("param", DeviceParam, access="read_only")
     serialno = StrKnob("serialno", access="read_only")
     power = SubObject("power", DevicePower)
     spdk_config = Collection("spdk_config", DeviceSpdkConfig)
@@ -212,7 +218,7 @@ class VendorDeviceInstance(CfgObject):
 
 class VendorDevice(CfgObject):
     """List of PCI devices IDs for a given vendor for installed devices"""
-    instance = Collection("instance", VendorDeviceInstance)
+    instance = Collection("instance", VendorDeviceInstance, access="read_only")
 
 
 class Vendor(CfgObject):
@@ -255,7 +261,7 @@ class Vendor(CfgObject):
     Locking /agent/hardware/pci/vendor is necessary for SRIOV support,
     because normally one would like to access VFs just created.
     """
-    device = Collection("device", VendorDevice)
+    device = Collection("device", VendorDevice, access="read_only")
 
 
 class Pci(CfgObject):
@@ -268,8 +274,8 @@ class Pci(CfgObject):
     are driver binding (/agent/hardware/pci/device/driver) and
     VF management (/agent/hardware/pci/device/sriov/vf).
     """
-    device = Collection("device", Device)
-    vendor = Collection("vendor", Vendor)
+    device = Collection("device", Device, access="read_only")
+    vendor = Collection("vendor", Vendor, access="read_only")
 
     def __init__(self, ta):
         super().__init__(f"/agent:{ta}/hardware:/pci:")

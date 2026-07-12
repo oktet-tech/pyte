@@ -767,7 +767,10 @@ def test_force_collection_emits_collection_not_subobject():
                      force_collection={
                          "/agent/sys/net/ipv4/conf": "ifname"})])
     src = out["sys"]
-    assert 'conf = Collection("conf", NetIpv4Conf)' in src
+    # access="read_only": the CM declares the collection itself
+    # agent-populated (you cannot add /proc/sys/.../conf/<if> dirs)
+    assert 'conf = Collection("conf", NetIpv4Conf, access="read_only")' \
+        in src
     assert 'conf = SubObject' not in src
     # interior singletons (net, ipv4) legitimately stay SubObjects
     assert 'net = SubObject("net", Net)' in src
@@ -1020,3 +1023,111 @@ def test_cm_dir_raises_when_nothing_found(tmp_path, monkeypatch):
                  "ws", "pyte", "src", "pyte", "cfg", "_gen.py")
     with pytest.raises(FileNotFoundError, match="CM source"):
         _gen.cm_dir()
+
+
+# -- generator hardening (P1.8) -----------------------------------------
+
+def test_volatile_must_be_boolean_true():
+    """cm_base.yml contains volatile: ${TE_VOLATILE_ROUTES:-false} — a
+    STRING, truthy under bool().  Only a YAML true counts."""
+    entries = _gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: int32
+      access: read_write
+      volatile: "${TE_VOLATILE_ROUTES:-false}"
+""")
+    assert entries[0].volatile is False
+
+
+def test_lint_warns_on_non_boolean_volatile():
+    entries = _gen.parse_cm_raw("""
+- register:
+    - oid: "/agent/x"
+      type: int32
+      access: read_write
+      volatile: "false"
+""")
+    assert any("volatile" in w for w in _gen.lint(entries))
+
+
+def test_build_tree_rejects_foreign_roots():
+    """An entry rooted outside the first segment used to be silently
+    dropped or grafted under the wrong OID."""
+    with pytest.raises(ValueError, match="/net"):
+        _gen.build_tree(_gen.parse_cm("""
+- register:
+    - oid: "/agent/x"
+      type: int32
+      access: read_write
+    - oid: "/net/node"
+      type: string
+      access: read_write
+"""))
+
+
+def test_esc_doc_escapes_backslash_and_trailing_quote():
+    assert _gen._esc_doc('ends with "quote"') .endswith('\\"')
+    assert "\\\\" in _gen._esc_doc("back\\slash")
+    # a trailing quote must not fuse with the closing docstring quotes
+    src = _gen._esc_doc('text ending "quote"')
+    assert not src.endswith('"""')
+
+
+def test_member_lines_wrap_at_79():
+    """T.4: the emitter wraps knob lines but SubObject/Collection member
+    lines could exceed 79 columns (live in pci.py)."""
+    yaml_text = """
+- register:
+    - oid: "/agent/averylongsegmentnameindeed"
+      access: read_only
+    - oid: "/agent/averylongsegmentnameindeed/anotherextremelylongchild"
+      access: read_only
+      name: key
+    - oid: "/agent/averylongsegmentnameindeed/anotherextremelylongchild/v"
+      type: int32
+      access: read_write
+"""
+    out = _gen.generate_from(
+        {"cm.yml": yaml_text},
+        [_gen.Target("cm.yml", "/agent/averylongsegmentnameindeed", "m")])
+    for line in out["m"].splitlines():
+        assert len(line) <= 79, line
+
+
+def test_read_only_collection_has_no_add():
+    """CM access rights reach the engine: a read_only collection raises
+    on add/del up front instead of deep in the agent."""
+    from pyte.cfg._engine import BoundCollection, Collection
+
+    class Elem:
+        def __init__(self, oid):
+            self.oid = oid
+
+    class Owner:
+        oid = "/agent:A/interface:eth0"
+        irq = Collection("irq", Elem, access="read_only")
+
+    coll = Owner().irq
+    assert isinstance(coll, BoundCollection)
+    with pytest.raises(TypeError, match="read-only"):
+        coll.add("9")
+    with pytest.raises(TypeError, match="read-only"):
+        del coll["9"]
+
+
+def test_generator_emits_collection_access():
+    yaml_text = """
+- register:
+    - oid: "/agent/sys"
+      access: read_only
+    - oid: "/agent/sys/irq"
+      access: read_only
+      name: irq_name
+    - oid: "/agent/sys/irq/v"
+      type: int32
+      access: read_write
+"""
+    out = _gen.generate_from(
+        {"cm.yml": yaml_text}, [_gen.Target("cm.yml", "/agent/sys", "sys")])
+    assert 'irq = Collection("irq", Irq, access="read_only")' in out["sys"]

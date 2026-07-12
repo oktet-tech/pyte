@@ -207,6 +207,11 @@ def find(pattern: str) -> list[CfgNode]:
     return nodes
 
 
+def exists(oid: str) -> bool:
+    """True iff the instance OID exists (an exact-OID find probe)."""
+    return bool(find(oid))
+
+
 def synchronize(oid: str, subtree: bool = True) -> None:
     """Re-read the (sub)tree state from the test agents."""
     lib = _shim_lib()

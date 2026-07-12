@@ -33,7 +33,7 @@ class DriverDevice(CfgObject):
 
 class Driver(CfgObject):
     """Driver implemented by a system module."""
-    device = Collection("device", DriverDevice)
+    device = Collection("device", DriverDevice, access="read_only")
 
 
 class Module(CfgObject):
@@ -48,7 +48,7 @@ class Module(CfgObject):
     filename = SubObject("filename", Filename)
     version = StrKnob("version", access="read_only")
     parameter = Collection("parameter", Parameter)
-    driver = Collection("driver", Driver)
+    driver = Collection("driver", Driver, access="read_only")
 
     def __init__(self, ta, name):
         super().__init__(f"/agent:{ta}/module:{name}")

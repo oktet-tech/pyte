@@ -29,6 +29,8 @@ Example::
 from __future__ import annotations
 
 import enum
+import warnings
+import weakref
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
@@ -112,6 +114,13 @@ class Logger:
         self._logger = None   # set by _open()
         self._closed = False
         self._open()
+        # A dropped-without-close() Logger means its MI data silently
+        # never flushes (perf numbers vanish from the run).  Warn --
+        # do NOT call into the shim from a GC-time callback.
+        self._finalizer = weakref.finalize(
+            self, warnings.warn,
+            f"mi.Logger({tool!r}) was never closed; its MI data was "
+            "never flushed", ResourceWarning)
 
     def _open(self) -> None:
         ffi, lib = _shim()
@@ -215,6 +224,7 @@ class Logger:
         if self._closed:
             return
         self._closed = True
+        self._finalizer.detach()
         rc = self._lib.pyte_mi_destroy(self._logger)
         check(rc, "mi.Logger.close()")
 
