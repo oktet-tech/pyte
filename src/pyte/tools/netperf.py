@@ -49,6 +49,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import NetperfError
+from pyte.tools import _tool
 from pyte.tools._clientserver import serve
 from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
@@ -237,82 +239,43 @@ def _parse_report(text: str, test_name: str) -> Report:
                   mbps_send=v, mbps_recv=v, trps=None)
 
 
-class Netperf:
+class Netperf(_tool.ToolHandle):
     """Lifecycle manager for a running netperf *client* job.
 
-    Created via :func:`run`. The text report arrives on stdout.
+    Created via :func:`run`. wait() is parse-first with the standard
+    dual-path, and (unlike ping) a successful parse on a non-zero exit
+    still raises: netperf has no legitimate report-with-bad-exit case.
     """
 
+    tool = "netperf client"
+    error_cls = NetperfError
+    default_timeout = 60.0
+
     def __init__(self, job, stdout_filter, test_name: str):
-        self._job = job
-        self._stdout_filter = stdout_filter
+        super().__init__(job, stdout_filter)
         self._test_name = test_name
-        self._report: Report | None = None
-        self._closed = False
 
-    def wait(self, timeout: float = 60.0) -> Report:
-        """Wait for the client to finish, parse output, return a Report.
+    def _parse(self, raw: str) -> Report:
+        return _parse_report(raw, self._test_name)
 
-        Caches the report. Raises :exc:`pyte.errors.NetperfError` on a
-        non-zero exit or unparseable output.  A failed run usually
-        produces no parseable output at all, so a parse failure on a
-        non-zero exit reports the exit status (the root cause), not
-        the parse error — same dual-path as ping/wrk.
-        """
-        if self._report is not None:
-            return self._report
-
-        from pyte.errors import NetperfError
-
-        status = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
-        try:
-            report = _parse_report(raw, self._test_name)
-        except NetperfError:
-            if not status.ok:
-                raise NetperfError(
-                    f"netperf client exited with {status}; "
-                    f"stdout={raw[:200]!r}") from None
-            raise
-        if not status.ok:
-            raise NetperfError(
-                f"netperf client exited with {status}")
-        self._report = report
-        return self._report
-
-    def mi_report(self, tool: str = "netperf") -> None:
+    def _mi(self, logger, rep: Report) -> None:
         """Emit MI artifacts mirroring tapi_netperf_mi_report().
 
         STREAM: throughput "Sending"/"Receiving" single mbps_* mega.
         RR:     rps "Transactions per second" single trps plain.
-
-        Requires :meth:`wait` first.
         """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        rep = self._report
-        from pyte.mi import Aggr, Logger, Meas, Mult
-        with Logger(tool) as logger:
-            if rep.test_type == "stream":
-                logger.add(Meas.THROUGHPUT, "Sending", Aggr.SINGLE,
-                           rep.mbps_send, Mult.MEGA)
-                logger.add(Meas.THROUGHPUT, "Receiving", Aggr.SINGLE,
-                           rep.mbps_recv, Mult.MEGA)
-            else:
-                logger.add(Meas.RPS, "Transactions per second", Aggr.SINGLE,
-                           rep.trps, Mult.PLAIN)
+        from pyte.mi import Aggr, Meas, Mult
+        if rep.test_type == "stream":
+            logger.add(Meas.THROUGHPUT, "Sending", Aggr.SINGLE,
+                       rep.mbps_send, Mult.MEGA)
+            logger.add(Meas.THROUGHPUT, "Receiving", Aggr.SINGLE,
+                       rep.mbps_recv, Mult.MEGA)
+        else:
+            logger.add(Meas.RPS, "Transactions per second", Aggr.SINGLE,
+                       rep.trps, Mult.PLAIN)
 
-    def close(self) -> None:
-        """Stop netperf (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+    def mi_report(self, tool: str = "netperf") -> None:
+        super().mi_report(tool)
 
 
 @contextmanager
@@ -341,17 +304,13 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 @contextmanager
 def run(pco: "RpcServer", opts: Opts):
     """Context manager: run a netperf *client*; yield a :class:`Netperf`."""
-    job = pco.job("netperf", opts.client_argv())
-    try:
-        stdout_filter = job.stdout.attach_filter(
-            name="netperf_stdout", readable=True)
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="netperf_stdout",
+                                       readable=True)
         job.stderr.log(level="WARN")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    client = Netperf(job, stdout_filter, opts.test_name)
-    try:
-        yield client
-    finally:
-        client.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "netperf", opts.client_argv(),
+                            setup=_setup)
+    with _tool.running(Netperf(job, flt, opts.test_name)) as c:
+        yield c

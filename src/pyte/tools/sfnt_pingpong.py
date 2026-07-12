@@ -51,6 +51,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import SfntError
+from pyte.tools import _tool
 from pyte.tools._clientserver import serve
 from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
@@ -221,41 +223,23 @@ def _parse_report(text: str) -> Report:
     return Report(rows=tuple(rows))
 
 
-class SfntPingpong:
+class SfntPingpong(_tool.ToolHandle):
     """Lifecycle manager for a running sfnt-pingpong *client* job.
 
     Created via :func:`run`. The latency table arrives on stdout.
+    wait() is parse-first (ping-style dual-path) and does not judge
+    the exit status of a run whose table parsed.
     """
 
-    def __init__(self, job, stdout_filter):
-        self._job = job
-        self._stdout_filter = stdout_filter
-        self._report: Report | None = None
-        self._closed = False
+    tool = "sfnt-pingpong client"
+    error_cls = SfntError
+    default_timeout = 120.0
 
-    def wait(self, timeout: float = 120.0) -> Report:
-        """Wait for the client to finish, parse the table, return a Report.
+    def _parse(self, raw: str) -> Report:
+        return _parse_report(raw)
 
-        Caches the report. Parse-first: raises :exc:`pyte.errors.SfntError`
-        only when both the exit status is non-zero AND parsing fails
-        (mirrors ping.py's dual-path).
-        """
-        if self._report is not None:
-            return self._report
-
-        from pyte.errors import SfntError
-
-        status = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
-        try:
-            self._report = _parse_report(raw)
-        except SfntError:
-            if not status.ok:
-                raise SfntError(
-                    f"sfnt-pingpong client exited with {status}; "
-                    f"stdout={raw[:200]!r}")
-            raise
-        return self._report
+    def _check_status(self, status, raw) -> None:
+        pass    # a parseable table is a result, whatever the exit status
 
     def mi_report(self, tool: str = "sfnt-pingpong") -> None:
         """Emit MI artifacts mirroring tapi_sfnt_pp_mi_report().
@@ -263,14 +247,12 @@ class SfntPingpong:
         Per row emits six LATENCY measurements with multiplier ``nano``:
         mean, min, median, max, stdev, and percentile (99th).  The size
         is embedded in the measurement name since pyte.mi has no key API
-        (documented deviation).
-
-        Requires :meth:`wait` first.
+        (documented deviation).  One Logger per row, so the base's
+        single-logger mi_report() is overridden wholesale.
         """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
+        rep = self.wait()
         from pyte.mi import Aggr, Logger, Meas, Mult
-        for row in self._report.rows:
+        for row in rep.rows:
             name = f"1/2 RTT latency [size={row.size}]"
             name99 = f"1/2 RTT latency (99) [size={row.size}]"
             with Logger(tool) as logger:
@@ -286,18 +268,6 @@ class SfntPingpong:
                            row.stddev, Mult.NANO)
                 logger.add(Meas.LATENCY, name99, Aggr.PERCENTILE,
                            row.percentile, Mult.NANO)
-
-    def close(self) -> None:
-        """Stop the client (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
 
 
 @contextmanager
@@ -325,18 +295,15 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 
 @contextmanager
 def run(pco: "RpcServer", opts: Opts):
-    """Context manager: run an sfnt-pingpong *client*; yield a :class:`SfntPingpong`."""
-    job = pco.job("sfnt-pingpong", opts.client_argv())
-    try:
-        stdout_filter = job.stdout.attach_filter(
-            name="sfnt_pingpong_stdout", readable=True)
+    """Context manager: run an sfnt-pingpong *client*; yield a
+    :class:`SfntPingpong`."""
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="sfnt_pingpong_stdout",
+                                       readable=True)
         job.stderr.log(level="WARN")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    client = SfntPingpong(job, stdout_filter)
-    try:
-        yield client
-    finally:
-        client.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "sfnt-pingpong", opts.client_argv(),
+                            setup=_setup)
+    with _tool.running(SfntPingpong(job, flt)) as c:
+        yield c

@@ -34,6 +34,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import PingError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -147,73 +150,46 @@ def _parse_report(text: str) -> Report:
         rtt=rtt)
 
 
-class Ping:
+class Ping(_tool.ToolHandle):
     """Lifecycle manager for a running ping job.
 
     Normally created via :func:`run` (a context manager). All I/O happens
     over ``pco.job("ping", argv)``; the summary arrives on stdout.
+
+    wait() is parse-first and never raises on a parseable run's exit
+    status: a normal ping with 100% loss exits non-zero but still
+    prints a valid summary (the ``_check_status`` no-op below).
     """
 
-    def __init__(self, job, stdout_filter):
-        self._job = job
-        self._stdout_filter = stdout_filter
-        self._report: Report | None = None
-        self._closed = False
+    tool = "ping"
+    error_cls = PingError
+    default_timeout = 60.0
 
-    def wait(self, timeout: float = 60.0) -> Report:
-        """Wait for ping to finish, parse the summary, return a Report.
+    def _parse(self, raw: str) -> Report:
+        return _parse_report(raw)
 
-        Caches the report. Raises :exc:`pyte.errors.PingError` on a
-        non-zero exit whose output is also unparseable. (A normal ping
-        with 100% loss exits non-zero but still prints a parseable
-        summary, so we parse first and only raise if parsing fails.)
-        """
-        if self._report is not None:
-            return self._report
-
-        from pyte.errors import PingError
-
-        status = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
-        try:
-            self._report = _parse_report(raw)
-        except PingError:
-            if not status.ok:
-                raise PingError(
-                    f"ping exited with {status}; stdout={raw[:200]!r}")
-            raise
-        return self._report
+    def _check_status(self, status, raw) -> None:
+        pass    # 100%-loss runs exit non-zero with a valid summary
 
     def mi_report(self, tool: str = "ping") -> None:
         """Emit MI artifacts mirroring tapi_ping_report_mi_log().
 
-        No-op when the report has no rtt stats (matches the C TAPI, which
-        returns early when !with_rtt). Requires :meth:`wait` first.
+        No-op when the report has no rtt stats (matches the C TAPI,
+        which returns early when !with_rtt) — no MI logger is even
+        created then.
         """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        rep = self._report
+        rep = self.wait()
         if not rep.with_rtt or rep.rtt is None:
             return
-        from pyte.mi import Aggr, Logger, Meas, Mult
-        with Logger(tool) as logger:
-            logger.add(Meas.RTT, "Min RTT", Aggr.MIN, rep.rtt.min, Mult.MILLI)
-            logger.add(Meas.RTT, "Mean RTT", Aggr.MEAN, rep.rtt.avg, Mult.MILLI)
-            logger.add(Meas.RTT, "Max RTT", Aggr.MAX, rep.rtt.max, Mult.MILLI)
-            logger.add(Meas.RTT, "RTT stdev", Aggr.STDEV, rep.rtt.mdev,
-                       Mult.MILLI)
+        super().mi_report(tool)
 
-    def close(self) -> None:
-        """Stop ping (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+    def _mi(self, logger, rep: Report) -> None:
+        from pyte.mi import Aggr, Meas, Mult
+        logger.add(Meas.RTT, "Min RTT", Aggr.MIN, rep.rtt.min, Mult.MILLI)
+        logger.add(Meas.RTT, "Mean RTT", Aggr.MEAN, rep.rtt.avg, Mult.MILLI)
+        logger.add(Meas.RTT, "Max RTT", Aggr.MAX, rep.rtt.max, Mult.MILLI)
+        logger.add(Meas.RTT, "RTT stdev", Aggr.STDEV, rep.rtt.mdev,
+                   Mult.MILLI)
 
 
 @contextmanager
@@ -229,17 +205,11 @@ def run(pco: "RpcServer", opts: Opts):
             rep = p.wait()
             print(rep.rtt.avg)
     """
-    job = pco.job("ping", opts.to_argv())
-    try:
-        stdout_filter = job.stdout.attach_filter(
-            name="ping_stdout", readable=True)
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="ping_stdout", readable=True)
         job.stderr.log(level="ERROR")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    ping_obj = Ping(job, stdout_filter)
-    try:
-        yield ping_obj
-    finally:
-        ping_obj.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "ping", opts.to_argv(), setup=_setup)
+    with _tool.running(Ping(job, flt)) as p:
+        yield p

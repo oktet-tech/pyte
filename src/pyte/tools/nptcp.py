@@ -52,6 +52,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import NptcpError
+from pyte.tools import _tool
 from pyte.tools._clientserver import serve
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
@@ -190,75 +192,43 @@ def _parse_report(text: str) -> Report:
     return Report(entries=tuple(entries))
 
 
-class Nptcp:
-    """Lifecycle manager for a running NPtcp *transmitter* (client) job.
+class Nptcp(_tool.ToolHandle):
+    """Lifecycle manager for a running NPtcp *transmitter* job.
 
-    Created via :func:`run`. The results table arrives on **stderr** (not
-    stdout) — NetPIPE writes its output table to stderr.
+    Created via :func:`run`. The results table arrives on **stderr**
+    (NetPIPE writes its output table there), so the readable stderr
+    filter is what feeds ``_parse``.  wait() is parse-first
+    (ping-style dual-path).
     """
 
-    def __init__(self, job, stderr_filter):
-        self._job = job
-        self._stderr_filter = stderr_filter
-        self._report: Report | None = None
-        self._closed = False
+    tool = "NPtcp transmitter"
+    error_cls = NptcpError
+    default_timeout = 300.0
 
-    def wait(self, timeout: float = 300.0) -> Report:
-        """Wait for the transmitter to finish, parse the table, return a Report.
+    def _parse(self, raw: str) -> Report:
+        return _parse_report(raw)
 
-        Caches the report. Raises :exc:`pyte.errors.NptcpError` on parse
-        failure. If parsing fails and the job exited non-zero, raises with
-        the exit status; if parsing fails but exit was OK, re-raises the
-        parse error (unexpected but forwarded faithfully).
-        """
-        if self._report is not None:
-            return self._report
-
-        from pyte.errors import NptcpError
-
-        status = self._job.wait(timeout=timeout)
-        raw = self._stderr_filter.read_all(timeout=timeout)
-        try:
-            self._report = _parse_report(raw)
-        except NptcpError:
-            if not status.ok:
-                raise NptcpError(
-                    f"NPtcp transmitter exited with {status}; "
-                    f"stderr={raw[:200]!r}")
-            raise
-        return self._report
+    def _check_status(self, status, raw) -> None:
+        pass    # a parseable table is a result, whatever the exit status
 
     def mi_report(self, tool: str = "nptcp") -> None:
         """Emit MI artifacts mirroring tapi_nptcp_report_mi_log().
 
-        Per entry: one throughput (single, mebi) + one latency (single, micro).
-        The message size is embedded in the measurement name (deviation from the
-        C TAPI which uses NULL; pyte.mi has no NULL-name API).
-
-        Requires :meth:`wait` first.
+        Per entry: one throughput (single, mebi) + one latency (single,
+        micro).  The message size is embedded in the measurement name
+        (deviation from the C TAPI which uses NULL; pyte.mi has no
+        NULL-name API).  One Logger per entry, so the base's
+        single-logger mi_report() is overridden wholesale.
         """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
+        rep = self.wait()
         from pyte.mi import Aggr, Logger, Meas, Mult
-        for e in self._report.entries:
+        for e in rep.entries:
             name = f"[{e.bytes} bytes]"
             with Logger(tool) as logger:
                 logger.add(Meas.THROUGHPUT, name, Aggr.SINGLE,
                            e.throughput, Mult.MEBI)
                 logger.add(Meas.LATENCY, name, Aggr.SINGLE,
                            e.rtt, Mult.MICRO)
-
-    def close(self) -> None:
-        """Stop the transmitter (errors tolerated) and destroy the job."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
 
 
 @contextmanager
@@ -290,19 +260,15 @@ def run(pco: "RpcServer", opts: Opts):
     """Context manager: run an NPtcp *transmitter*; yield a :class:`Nptcp`.
 
     The results table is on **stderr** — a readable filter is attached
-    there. Stdout is logged at RING level.
+    there and handed to the handle as its output filter. Stdout is
+    logged at RING level.
     """
-    job = pco.job("NPtcp", opts.client_argv())
-    try:
-        stderr_filter = job.stderr.attach_filter(
-            name="nptcp_stderr", readable=True)
+    def _setup(job):
+        flt = job.stderr.attach_filter(name="nptcp_stderr", readable=True)
         job.stdout.log(level="RING")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    client = Nptcp(job, stderr_filter)
-    try:
-        yield client
-    finally:
-        client.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "NPtcp", opts.client_argv(),
+                            setup=_setup)
+    with _tool.running(Nptcp(job, flt)) as c:
+        yield c

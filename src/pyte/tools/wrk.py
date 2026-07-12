@@ -59,6 +59,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pyte.errors import WrkError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -307,78 +310,43 @@ def _parse_report(text: str) -> Report:
 # Wrk handle
 # ---------------------------------------------------------------------------
 
-class Wrk:
+class Wrk(_tool.ToolHandle):
     """Lifecycle manager for a running wrk job.
 
-    Normally created via :func:`run` (a context manager). All I/O happens
-    over ``pco.job("wrk", argv)``; the output arrives on stdout.
+    Normally created via :func:`run` (a context manager); the report
+    arrives on stdout.  wait() is parse-first and does not judge the
+    exit status of a run whose output parsed (mirrors the previous
+    hand-rolled behaviour).
     """
 
-    def __init__(self, job, stdout_filter):
-        self._job = job
-        self._stdout_filter = stdout_filter
-        self._report: Report | None = None
-        self._closed = False
+    tool = "wrk"
+    error_cls = WrkError
+    default_timeout = 120.0
 
-    def wait(self, timeout: float = 120.0) -> Report:
-        """Wait for wrk to finish, parse the output, return a Report.
+    def _parse(self, raw: str) -> Report:
+        return _parse_report(raw)
 
-        Caches the report. Raises :exc:`pyte.errors.WrkError` if the
-        process exits with an error and the output is also unparseable.
-        """
-        if self._report is not None:
-            return self._report
+    def _check_status(self, status, raw) -> None:
+        pass    # a parseable run is a result, whatever the exit status
 
-        from pyte.errors import WrkError
-
-        status = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
-        try:
-            self._report = _parse_report(raw)
-        except WrkError:
-            if not status.ok:
-                raise WrkError(
-                    f"wrk exited with {status}; stdout={raw[:200]!r}")
-            raise
-        return self._report
-
-    def mi_report(self, tool: str = "wrk") -> None:
-        """Emit MI artifacts mirroring tapi_wrk_report_mi_log().
-
-        Requires :meth:`wait` first.
-        """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Aggr, Logger, Meas, Mult
-        rep = self._report
-        with Logger(tool) as logger:
-            logger.add(Meas.THROUGHPUT, "", Aggr.MEAN,
-                       rep.bps * 8.0 / 1e6, Mult.MEGA)
-            logger.add(Meas.RPS, "", Aggr.MEAN, rep.req_per_sec, Mult.PLAIN)
-            logger.add(Meas.LATENCY, "per-thread", Aggr.MEAN,
-                       rep.thread_latency.mean, Mult.MICRO)
-            logger.add(Meas.LATENCY, "per-thread", Aggr.MAX,
-                       rep.thread_latency.max, Mult.MICRO)
-            logger.add(Meas.LATENCY, "per-thread", Aggr.STDEV,
-                       rep.thread_latency.stdev, Mult.MICRO)
-            logger.add(Meas.RPS, "per-thread", Aggr.MEAN,
-                       rep.thread_req_per_sec.mean, Mult.PLAIN)
-            logger.add(Meas.RPS, "per-thread", Aggr.MAX,
-                       rep.thread_req_per_sec.max, Mult.PLAIN)
-            logger.add(Meas.RPS, "per-thread", Aggr.STDEV,
-                       rep.thread_req_per_sec.stdev, Mult.PLAIN)
-
-    def close(self) -> None:
-        """Stop wrk (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+    def _mi(self, logger, rep: Report) -> None:
+        """Emit MI artifacts mirroring tapi_wrk_report_mi_log()."""
+        from pyte.mi import Aggr, Meas, Mult
+        logger.add(Meas.THROUGHPUT, "", Aggr.MEAN,
+                   rep.bps * 8.0 / 1e6, Mult.MEGA)
+        logger.add(Meas.RPS, "", Aggr.MEAN, rep.req_per_sec, Mult.PLAIN)
+        logger.add(Meas.LATENCY, "per-thread", Aggr.MEAN,
+                   rep.thread_latency.mean, Mult.MICRO)
+        logger.add(Meas.LATENCY, "per-thread", Aggr.MAX,
+                   rep.thread_latency.max, Mult.MICRO)
+        logger.add(Meas.LATENCY, "per-thread", Aggr.STDEV,
+                   rep.thread_latency.stdev, Mult.MICRO)
+        logger.add(Meas.RPS, "per-thread", Aggr.MEAN,
+                   rep.thread_req_per_sec.mean, Mult.PLAIN)
+        logger.add(Meas.RPS, "per-thread", Aggr.MAX,
+                   rep.thread_req_per_sec.max, Mult.PLAIN)
+        logger.add(Meas.RPS, "per-thread", Aggr.STDEV,
+                   rep.thread_req_per_sec.stdev, Mult.PLAIN)
 
 
 @contextmanager
@@ -395,17 +363,11 @@ def run(pco: "RpcServer", opts: Opts):
             rep = w.wait(timeout=30.0)
             print(rep.req_per_sec)
     """
-    job = pco.job("wrk", opts.to_argv())
-    try:
-        stdout_filter = job.stdout.attach_filter(
-            name="wrk_stdout", readable=True)
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="wrk_stdout", readable=True)
         job.stderr.log(level="ERROR")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    wrk_obj = Wrk(job, stdout_filter)
-    try:
-        yield wrk_obj
-    finally:
-        wrk_obj.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "wrk", opts.to_argv(), setup=_setup)
+    with _tool.running(Wrk(job, flt)) as w:
+        yield w

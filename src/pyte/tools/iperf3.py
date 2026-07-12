@@ -42,6 +42,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import IperfError
+from pyte.tools import _tool
 from pyte.tools._clientserver import serve
 from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
@@ -213,42 +215,35 @@ def _parse_report(obj: dict) -> Report:
     return Report(sent=sent, received=received, min_bps_per_stream=min_bps)
 
 
-class Iperf3:
+class Iperf3(_tool.ToolHandle):
     """Lifecycle manager for a running iperf3 *client* job.
 
-    Created via :func:`run`. The JSON report arrives on stdout (``-J``).
+    Created via :func:`run`. The JSON report arrives on stdout (``-J``);
+    both streams are dumped to the TE log (RING) before parsing,
+    mirroring the C tapi_performance perf_app_dump_output().  A
+    non-zero exit raises even when the JSON parsed: iperf3 prints a
+    JSON error object on failure and the parse already rejects it, so
+    a parseable non-error report with a bad exit is unusual.
     """
 
+    tool = "iperf3 client"
+    error_cls = IperfError
+    default_timeout = 60.0
+
     def __init__(self, job, stdout_filter, stderr_filter):
-        self._job = job
-        self._stdout_filter = stdout_filter
+        super().__init__(job, stdout_filter)
         self._stderr_filter = stderr_filter
-        self._report: Report | None = None
-        self._closed = False
 
-    def wait(self, timeout: float = 60.0) -> Report:
-        """Wait for the client to finish, parse JSON, return a Report.
-
-        Caches the report. Raises :exc:`pyte.errors.IperfError` on a
-        non-zero exit or unparseable output.
-
-        The full stdout and stderr are dumped to the TE log (RING) before
-        parsing, mirroring the C tapi_performance perf_app_dump_output().
-        """
-        if self._report is not None:
-            return self._report
-
+    def _read_output(self, timeout: float) -> str:
         from pyte import log
-        from pyte.errors import IperfError
-
-        status = self._job.wait(timeout=timeout)
         out = self._stdout_filter.read_all(timeout=timeout)
         err = self._stderr_filter.read_all(timeout=timeout)
-        # Mirror perf_app_dump_output(): RING the full stdout/stderr with the
-        # same "<bench> <tag> stdout|stderr:\n<...>" labelling the C uses.
         log.ring(f"iperf3 client stdout:\n{out}")
         log.ring(f"iperf3 client stderr:\n{err}")
-        raw = out
+        return out
+
+    def _parse(self, raw: str) -> Report:
+        # iperf3 may print diagnostics before the JSON: strip the prefix.
         json_start = raw.find("{")
         if json_start > 0:
             raw = raw[json_start:]
@@ -257,43 +252,19 @@ class Iperf3:
         except json.JSONDecodeError as exc:
             raise IperfError(
                 f"cannot parse iperf3 JSON: {exc}; "
-                f"exit={status}; stdout={raw[:200]!r}") from exc
-        report = _parse_report(obj)
-        if not status.ok:
-            # iperf3 prints a JSON error object and exits non-zero; the
-            # parse above already raised IperfError for the "error" field,
-            # so a non-zero exit with parseable non-error JSON is unusual.
-            raise IperfError(
-                f"iperf3 client exited with {status}")
-        self._report = report
-        return self._report
+                f"stdout={raw[:200]!r}") from exc
+        return _parse_report(obj)
+
+    def _mi(self, logger, rep: Report) -> None:
+        """Emit MI artifacts mirroring iperf3_report_mi_log()."""
+        from pyte.mi import Aggr, Meas, Mult
+        logger.add(Meas.THROUGHPUT, "Per-stream", Aggr.MIN,
+                   rep.min_bps_per_stream, Mult.PLAIN)
+        logger.add(Meas.THROUGHPUT, "Transfer", Aggr.SINGLE,
+                   rep.sent.bits_per_second, Mult.PLAIN)
 
     def mi_report(self, tool: str = "iperf3") -> None:
-        """Emit MI artifacts mirroring iperf3_report_mi_log().
-
-        Requires :meth:`wait` first.
-        """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        rep = self._report
-        from pyte.mi import Aggr, Logger, Meas, Mult
-        with Logger(tool) as logger:
-            logger.add(Meas.THROUGHPUT, "Per-stream", Aggr.MIN,
-                       rep.min_bps_per_stream, Mult.PLAIN)
-            logger.add(Meas.THROUGHPUT, "Transfer", Aggr.SINGLE,
-                       rep.sent.bits_per_second, Mult.PLAIN)
-
-    def close(self) -> None:
-        """Stop the client (errors tolerated) and destroy the job."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+        super().mi_report(tool)
 
 
 @contextmanager
@@ -322,20 +293,15 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 @contextmanager
 def run(pco: "RpcServer", opts: Opts):
     """Context manager: run an iperf3 *client*; yield an :class:`Iperf3`."""
-    job = pco.job("iperf3", opts.client_argv())
-    try:
-        # Capture stdout (the -J JSON, fed to the parser) and stderr; both are
-        # dumped to the TE log by wait() to mirror perf_app_dump_output().
-        stdout_filter = job.stdout.attach_filter(
-            name="iperf3_stdout", readable=True)
-        stderr_filter = job.stderr.attach_filter(
-            name="iperf3_stderr", readable=True)
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    client = Iperf3(job, stdout_filter, stderr_filter)
-    try:
-        yield client
-    finally:
-        client.close()
+    def _setup(job):
+        # Capture stdout (the -J JSON, fed to the parser) and stderr;
+        # both are dumped to the TE log by wait() to mirror
+        # perf_app_dump_output().
+        out = job.stdout.attach_filter(name="iperf3_stdout", readable=True)
+        err = job.stderr.attach_filter(name="iperf3_stderr", readable=True)
+        return out, err
+
+    job, (out, err) = _tool.launch(pco, "iperf3", opts.client_argv(),
+                                   setup=_setup)
+    with _tool.running(Iperf3(job, out, err)) as c:
+        yield c
