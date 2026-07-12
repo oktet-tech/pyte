@@ -14,12 +14,15 @@ wildcard.  "Exact beats wildcard" priority only applies when
 
 Memory notes:
     Group, Iter, Test and Entry hold borrowed C pointers owned by the Db
-    handle.  They are valid only while the Db is open; accessing them
-    after ``Db.close()`` (or after the ``with`` block exits) is
-    undefined behaviour.
+    handle.  They are valid only while the Db is open; every accessor
+    checks and raises :class:`TrcError` after ``Db.close()`` (or after
+    the ``with`` block exits) instead of dereferencing freed memory.
+    A Db dropped without ``close()`` is freed by a ``weakref.finalize``
+    callback.
 """
 from __future__ import annotations
 
+import weakref
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 
@@ -92,9 +95,15 @@ class _TagSet:
     def __init__(self, tags: Iterable[str]):
         from pyte._shim import lib
         self._h = lib.pyte_tq_strings_new()
-        for tag in tags:
-            check(lib.pyte_tq_strings_add(self._h, tag.encode()),
-                  f"tq_strings_add({tag})", TrcError)
+        try:
+            for tag in tags:
+                check(lib.pyte_tq_strings_add(self._h, tag.encode()),
+                      f"tq_strings_add({tag})", TrcError)
+        except BaseException:
+            # __enter__/__exit__ never run when __init__ raises: free
+            # the C allocation here or it leaks.
+            lib.pyte_tq_strings_free(self._h)
+            raise
 
     def __enter__(self):
         return self._h
@@ -110,33 +119,44 @@ class Entry:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, handle):
+    def __init__(self, db: "Db", handle):
+        self._db = db
         self._h = handle
+
+    def _handle(self):
+        """The borrowed C pointer; raises once the owning Db is closed."""
+        if self._db._h is None:
+            raise TrcError("TRC database is closed")
+        return self._h
 
     @property
     def status(self) -> str:
         """Test status string (e.g. "PASSED", "FAILED")."""
+        h = self._handle()
         from pyte._shim import lib
-        return status_name(lib.pyte_trc_entry_status(self._h))
+        return status_name(lib.pyte_trc_entry_status(h))
 
     @property
     def key(self) -> str | None:
         """Bug/ticket key associated with this entry, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_entry_key(self._h))
+        return _dec(lib.pyte_trc_entry_key(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_entry_notes(self._h))
+        return _dec(lib.pyte_trc_entry_notes(h))
 
     @property
     def verdicts(self) -> list[str]:
         """Ordered list of verdict strings for this entry."""
+        h = self._handle()
         from pyte._shim import lib
         result = []
-        v = lib.pyte_trc_entry_first_verdict(self._h)
+        v = lib.pyte_trc_entry_first_verdict(h)
         while v:
             result.append(_dec(lib.pyte_trc_verdict_str(v)))
             v = lib.pyte_trc_verdict_next(v)
@@ -149,8 +169,15 @@ class Group:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, handle):
+    def __init__(self, db: "Db", handle):
+        self._db = db
         self._h = handle
+
+    def _handle(self):
+        """The borrowed C pointer; raises once the owning Db is closed."""
+        if self._db._h is None:
+            raise TrcError("TRC database is closed")
+        return self._h
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, Group):
@@ -163,28 +190,32 @@ class Group:
     @property
     def tags_str(self) -> str | None:
         """Raw tag expression string (e.g. "linux&jumbo"), or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_result_tags(self._h))
+        return _dec(lib.pyte_trc_result_tags(h))
 
     @property
     def key(self) -> str | None:
         """Bug/ticket key for this group, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_result_key(self._h))
+        return _dec(lib.pyte_trc_result_key(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_result_notes(self._h))
+        return _dec(lib.pyte_trc_result_notes(h))
 
     def entries(self) -> list[Entry]:
         """All result entries in this group."""
+        h = self._handle()
         from pyte._shim import lib
         result = []
-        e = lib.pyte_trc_result_first_entry(self._h)
+        e = lib.pyte_trc_result_first_entry(h)
         while e:
-            result.append(Entry(e))
+            result.append(Entry(self._db, e))
             e = lib.pyte_trc_entry_next(e)
         return result
 
@@ -196,16 +227,17 @@ class Group:
         calls ``trc_is_result_expected``, and returns the matching
         Entry or None.
         """
+        h = self._handle()
         from pyte._shim import ffi, lib
         result = lib.pyte_test_result_new(status_value(status))
         try:
             for v in verdicts:
                 check(lib.pyte_test_result_add_verdict(result, v.encode()),
                       f"add_verdict({v!r})", TrcError)
-            entry_h = lib.trc_is_result_expected(self._h, result)
+            entry_h = lib.trc_is_result_expected(h, result)
             if entry_h == ffi.NULL:
                 return None
-            return Entry(entry_h)
+            return Entry(self._db, entry_h)
         finally:
             lib.pyte_test_result_free(result)
 
@@ -220,15 +252,22 @@ class Iter:
         self._db = db
         self._h = handle
 
+    def _handle(self):
+        """The borrowed C pointer; raises once the owning Db is closed."""
+        if self._db._h is None:
+            raise TrcError("TRC database is closed")
+        return self._h
+
     @property
     def args(self) -> list[tuple[str, str]]:
         """Ordered list of (name, value) argument pairs.
 
         An empty-string value means the argument is a wildcard.
         """
+        h = self._handle()
         from pyte._shim import lib
         result = []
-        a = lib.pyte_trc_iter_first_arg(self._h)
+        a = lib.pyte_trc_iter_first_arg(h)
         while a:
             name = _dec(lib.pyte_trc_arg_name(a)) or ""
             value = _dec(lib.pyte_trc_arg_value(a))
@@ -250,36 +289,41 @@ class Iter:
     @property
     def notes(self) -> str | None:
         """Free-form iteration notes, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_iter_notes(self._h))
+        return _dec(lib.pyte_trc_iter_notes(h))
 
     @property
     def filename(self) -> str | None:
         """Source XML filename, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_iter_filename(self._h))
+        return _dec(lib.pyte_trc_iter_filename(h))
 
     @property
     def file_pos(self) -> int:
         """Line number in the source XML file."""
+        h = self._handle()
         from pyte._shim import lib
-        return lib.pyte_trc_iter_file_pos(self._h)
+        return lib.pyte_trc_iter_file_pos(h)
 
     def default(self) -> Group | None:
         """The default result group (no tag expression), or None."""
+        it_h = self._handle()
         from pyte._shim import ffi, lib
-        h = lib.pyte_trc_iter_default_result(self._h)
+        h = lib.pyte_trc_iter_default_result(it_h)
         if h == ffi.NULL:
             return None
-        return Group(h)
+        return Group(self._db, h)
 
     def groups(self) -> list[Group]:
         """All tagged result groups for this iteration."""
+        it_h = self._handle()
         from pyte._shim import lib
         result = []
-        g = lib.pyte_trc_iter_first_result(self._h)
+        g = lib.pyte_trc_iter_first_result(it_h)
         while g:
-            result.append(Group(g))
+            result.append(Group(self._db, g))
             g = lib.pyte_trc_result_next(g)
         return result
 
@@ -288,18 +332,20 @@ class Iter:
 
         Delegates fully to the C library's tag-matching logic.
         """
+        it_h = self._handle()
         from pyte._shim import ffi, lib
         with _TagSet(tags) as tag_h:
             h = lib.trc_db_iter_get_exp_result(
-                self._h, tag_h, self._db.last_match)
+                it_h, tag_h, self._db.last_match)
         if h == ffi.NULL:
             return None
-        return Group(h)
+        return Group(self._db, h)
 
     def child_tests(self) -> Iterator["Test"]:
         """Iterate over child tests of this iteration (for package iters)."""
+        h = self._handle()
         from pyte._shim import ffi, lib
-        t = lib.pyte_trc_iter_first_test(self._h)
+        t = lib.pyte_trc_iter_first_test(h)
         while t != ffi.NULL:
             yield Test(self._db, t)
             t = lib.pyte_trc_test_next(t)
@@ -315,58 +361,73 @@ class Test:
         self._db = db
         self._h = handle
 
+    def _handle(self):
+        """The borrowed C pointer; raises once the owning Db is closed."""
+        if self._db._h is None:
+            raise TrcError("TRC database is closed")
+        return self._h
+
     @property
     def name(self) -> str:
         """Short test name (last path component)."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_test_name(self._h)) or ""
+        return _dec(lib.pyte_trc_test_name(h)) or ""
 
     @property
     def path(self) -> str:
         """Full slash-separated path from the DB root."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_test_path(self._h)) or ""
+        return _dec(lib.pyte_trc_test_path(h)) or ""
 
     @property
     def test_type(self) -> str:
         """Type string: "unknown", "script", "session", or "package"."""
+        h = self._handle()
         from pyte._shim import lib
-        return TEST_TYPES.get(lib.pyte_trc_test_type(self._h), "unknown")
+        return TEST_TYPES.get(lib.pyte_trc_test_type(h), "unknown")
 
     @property
     def aux(self) -> bool:
         """True if this is an auxiliary test entry."""
+        h = self._handle()
         from pyte._shim import lib
-        return bool(lib.pyte_trc_test_aux(self._h))
+        return bool(lib.pyte_trc_test_aux(h))
 
     @property
     def objective(self) -> str | None:
         """Test objective string, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_test_objective(self._h))
+        return _dec(lib.pyte_trc_test_objective(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_test_notes(self._h))
+        return _dec(lib.pyte_trc_test_notes(h))
 
     @property
     def filename(self) -> str | None:
         """Source XML filename, or None."""
+        h = self._handle()
         from pyte._shim import lib
-        return _dec(lib.pyte_trc_test_filename(self._h))
+        return _dec(lib.pyte_trc_test_filename(h))
 
     @property
     def file_pos(self) -> int:
         """Line number in the source XML file."""
+        h = self._handle()
         from pyte._shim import lib
-        return lib.pyte_trc_test_file_pos(self._h)
+        return lib.pyte_trc_test_file_pos(h)
 
     def iters(self) -> Iterator[Iter]:
         """Iterate over all iteration records for this test."""
+        h = self._handle()
         from pyte._shim import ffi, lib
-        it = lib.pyte_trc_test_first_iter(self._h)
+        it = lib.pyte_trc_test_first_iter(h)
         while it != ffi.NULL:
             yield Iter(self._db, it)
             it = lib.pyte_trc_iter_next(it)
@@ -381,6 +442,16 @@ class Db:
 
     def __init__(self, handle):
         self._h = handle
+        from pyte._shim import lib
+        # Frees the parsed DB if the object is dropped without close():
+        # otherwise the whole libxml2 tree + trc structures leak.
+        self._finalizer = weakref.finalize(self, lib.trc_db_close, handle)
+
+    def _live(self):
+        """The C handle; raises after close()."""
+        if self._h is None:
+            raise TrcError("TRC database is closed")
+        return self._h
 
     @classmethod
     def open(cls, path: str | PathLike) -> "Db":
@@ -394,8 +465,7 @@ class Db:
     def close(self) -> None:
         """Close the database; idempotent."""
         if self._h is not None:
-            from pyte._shim import lib
-            lib.trc_db_close(self._h)
+            self._finalizer()   # runs trc_db_close exactly once
             self._h = None
 
     def __enter__(self) -> "Db":
@@ -407,13 +477,15 @@ class Db:
     @property
     def last_match(self) -> bool:
         """Whether the last walker match was a 'last match' (new record)."""
+        h = self._live()
         from pyte._shim import lib
-        return bool(lib.pyte_trc_db_last_match(self._h))
+        return bool(lib.pyte_trc_db_last_match(h))
 
     def tests(self) -> Iterator[Test]:
         """Iterate over top-level test nodes in the database."""
+        h = self._live()
         from pyte._shim import ffi, lib
-        t = lib.pyte_trc_db_first_test(self._h)
+        t = lib.pyte_trc_db_first_test(h)
         while t != ffi.NULL:
             yield Test(self, t)
             t = lib.pyte_trc_test_next(t)
@@ -463,10 +535,11 @@ class Db:
         With allow_wild=False only exact (non-wildcard) records are
         considered, and None is returned if no exact record matches.
         """
+        db_h = self._live()
         from pyte._shim import ffi, lib
-        walker = lib.trc_db_new_walker(self._h)
+        walker = lib.trc_db_new_walker(db_h)
         try:
-            lib.trc_db_walker_go_to_test(walker, test._h)
+            lib.trc_db_walker_go_to_test(walker, test._handle())
             arr = ffi.new("trc_report_argument[]", len(args))
             keep = []
             for i, (name, value) in enumerate(args.items()):

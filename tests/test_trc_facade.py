@@ -84,6 +84,123 @@ def test_tag_expr_helpers():
         trc.parse_tag_expr("linux &&& bad")
 
 
+# ---------------------------------------------------------------------------
+# Use-after-close guards: Test/Iter/Group/Entry hold borrowed pointers
+# owned by the Db; after close() they must raise TrcError instead of
+# dereferencing freed memory in C.
+# ---------------------------------------------------------------------------
+
+def test_accessors_raise_after_close():
+    with trc.Db.open(DATA) as db:
+        echo, = db.find_tests("demo/echo")
+        it = db.match(echo, {"len": "1", "proto": "tcp"})
+        grp = it.exp_result(["linux", "jumbo"])
+        entry, = grp.entries()
+    # db closed by the with-block; every held object is now dead
+    with pytest.raises(trc.TrcError, match="closed"):
+        echo.name
+    with pytest.raises(trc.TrcError, match="closed"):
+        list(echo.iters())
+    with pytest.raises(trc.TrcError, match="closed"):
+        it.args
+    with pytest.raises(trc.TrcError, match="closed"):
+        it.exp_result(["linux"])
+    with pytest.raises(trc.TrcError, match="closed"):
+        grp.entries()
+    with pytest.raises(trc.TrcError, match="closed"):
+        grp.tags_str
+    with pytest.raises(trc.TrcError, match="closed"):
+        grp.matches("PASSED")
+    with pytest.raises(trc.TrcError, match="closed"):
+        entry.status
+    with pytest.raises(trc.TrcError, match="closed"):
+        entry.verdicts
+
+
+def test_db_methods_raise_after_close():
+    db = trc.Db.open(DATA)
+    db.close()
+    with pytest.raises(trc.TrcError, match="closed"):
+        list(db.tests())
+    with pytest.raises(trc.TrcError, match="closed"):
+        db.find_tests("demo/echo")
+    with pytest.raises(trc.TrcError, match="closed"):
+        db.last_match
+
+
+def test_db_close_is_idempotent():
+    db = trc.Db.open(DATA)
+    db.close()
+    db.close()      # second close: no error, no double free
+
+
+def test_db_finalizer_runs_on_gc():
+    """A Db dropped without close() is freed by its finalizer (no leak)."""
+    import gc
+
+    db = trc.Db.open(DATA)
+    fin = db._finalizer
+    assert fin.alive
+    del db
+    gc.collect()
+    assert not fin.alive    # trc_db_close ran via weakref.finalize
+
+    db2 = trc.Db.open(DATA)
+    fin2 = db2._finalizer
+    db2.close()
+    assert not fin2.alive   # explicit close consumed the finalizer
+
+
+def test_tagset_frees_on_partial_init_failure(monkeypatch):
+    """_TagSet must free its tqh_strings if an add fails mid-loop."""
+    import sys
+    import types
+
+    class FakeLib:
+        def __init__(self):
+            self.freed = []
+            self.adds = 0
+
+        def pyte_tq_strings_new(self):
+            return "tq-h"
+
+        def pyte_tq_strings_add(self, h, tag):
+            self.adds += 1
+            return 0 if self.adds == 1 else 12   # second add fails
+
+        def pyte_tq_strings_free(self, h):
+            self.freed.append(h)
+
+        # TeError construction helpers (required by pyte.errors.check())
+        PYTE_ETIMEDOUT = 110
+
+        def pyte_rc_error(self, rc):
+            return rc
+
+        def pyte_rc_module(self, rc):
+            return 0
+
+        def te_rc_mod2str(self, rc):
+            return b"TAPI"
+
+        def te_rc_err2str(self, rc):
+            return b"EFAIL"
+
+    class FakeFfi:
+        NULL = object()
+
+        @staticmethod
+        def string(b):
+            return b
+
+    lib = FakeLib()
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=FakeFfi(), lib=lib))
+    with pytest.raises(trc.TrcError):
+        trc._TagSet(["a", "b"])
+    assert lib.freed == ["tq-h"]
+
+
 # XML with two overlapping records: one exact iter (a=1) and one
 # wildcard iter (a=<wild>) that both match a=1.  lib/trc emits a
 # "Duplicated iteration" warning on stderr when the walker encounters
