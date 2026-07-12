@@ -32,10 +32,10 @@ def test_cfg_yaml_with_port_info():
         "  version: 2\n"
         "  interfaces: ['0000:04:00.0', '0000:04:00.1']\n"
         "  port_info:\n"
-        "    - ip: 1.1.1.1\n"
-        "      default_gw: 1.1.1.2\n"
-        "    - ip: 2.2.2.2\n"
-        "      default_gw: 2.2.2.1\n")
+        "    - ip: '1.1.1.1'\n"
+        "      default_gw: '1.1.1.2'\n"
+        "    - ip: '2.2.2.2'\n"
+        "      default_gw: '2.2.2.1'\n")
 
 
 def test_shell_command_derives_workdir():
@@ -70,10 +70,10 @@ def test_software_cfg_yaml_uses_ifaces_and_macs():
         "  version: 2\n"
         "  interfaces: ['trex0', 'trex1']\n"
         "  port_info:\n"
-        "    - src_mac: aa:bb:cc:dd:ee:01\n"
-        "      dest_mac: aa:bb:cc:dd:ee:02\n"
-        "    - src_mac: aa:bb:cc:dd:ee:02\n"
-        "      dest_mac: aa:bb:cc:dd:ee:01\n")
+        "    - src_mac: 'aa:bb:cc:dd:ee:01'\n"
+        "      dest_mac: 'aa:bb:cc:dd:ee:02'\n"
+        "    - src_mac: 'aa:bb:cc:dd:ee:02'\n"
+        "      dest_mac: 'aa:bb:cc:dd:ee:01'\n")
 
 
 def test_software_shell_command_adds_flag():
@@ -85,3 +85,27 @@ def test_software_shell_command_adds_flag():
     assert opts.shell_command("/tmp/x.yaml") == (
         "cd /home/kostik/trex && exec /home/kostik/trex/t-rex-64 "
         "-i --cfg /tmp/x.yaml -c 1 --software")
+
+
+def test_shell_command_quotes_paths():
+    """Paths reach sh -c: a space (or metacharacter) in the install dir
+    must not split the command or execute something else."""
+    opts = ServerOpts(trex_exec="/opt/my trex/t-rex-64",
+                      ports=["0000:04:00.0"])
+    cmd = opts.shell_command("/tmp/dir with space/x.yaml")
+    assert "'/opt/my trex'" in cmd
+    assert "'/opt/my trex/t-rex-64'" in cmd
+    assert "'/tmp/dir with space/x.yaml'" in cmd
+
+
+def test_cfg_yaml_macs_parse_as_strings():
+    """Unquoted colon-separated MACs are sexagesimal integers under
+    YAML 1.1 -- the rendered YAML must quote them."""
+    import yaml
+    opts = ServerOpts(
+        trex_exec="/x/t-rex-64", ports=["trex0"], software=True,
+        port_macs=[("00:11:22:33:44:55", "00:11:22:33:44:66")])
+    doc = yaml.safe_load(opts.cfg_yaml())
+    info = doc[0]["port_info"][0]
+    assert info["src_mac"] == "00:11:22:33:44:55"
+    assert isinstance(info["src_mac"], str)

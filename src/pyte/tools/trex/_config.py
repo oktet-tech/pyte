@@ -19,6 +19,7 @@ Two modes:
 from __future__ import annotations
 
 import os
+import shlex
 from dataclasses import dataclass, field
 
 
@@ -71,20 +72,28 @@ class ServerOpts:
             "  version: 2",
             f"  interfaces: [{ifaces}]",
         ]
+        # MACs/IPs are quoted like the interfaces: an unquoted
+        # colon-separated MAC is a sexagesimal INTEGER under YAML 1.1.
         if self.software and self.port_macs is not None:
             out.append("  port_info:")
             for src_mac, dest_mac in self.port_macs:
-                out.append(f"    - src_mac: {src_mac}")
-                out.append(f"      dest_mac: {dest_mac}")
+                out.append(f"    - src_mac: '{src_mac}'")
+                out.append(f"      dest_mac: '{dest_mac}'")
         elif self.port_info is not None:
             out.append("  port_info:")
             for ip, gw in self.port_info:
-                out.append(f"    - ip: {ip}")
-                out.append(f"      default_gw: {gw}")
+                out.append(f"    - ip: '{ip}'")
+                out.append(f"      default_gw: '{gw}'")
         return "\n".join(out) + "\n"
 
     def shell_command(self, cfg_path: str) -> str:
-        """Inner command for ``sh -c`` that runs TRex from its workdir."""
+        """Inner command for ``sh -c`` that runs TRex from its workdir.
+
+        Every interpolated path is shell-quoted: this string is
+        executed by ``sh -c``, so a space or metacharacter in the
+        install path must not split the command.
+        """
         software = " --software" if self.software else ""
-        return (f"cd {self.workdir} && exec {self.trex_exec} "
-                f"-i --cfg {cfg_path} -c {self.cores}{software}")
+        return (f"cd {shlex.quote(self.workdir)} && "
+                f"exec {shlex.quote(self.trex_exec)} "
+                f"-i --cfg {shlex.quote(cfg_path)} -c {self.cores}{software}")

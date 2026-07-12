@@ -86,10 +86,19 @@ def add_streams(cli, port, stream_specs):
             return STLTXMultiBurst(**kw)
         raise ValueError("unknown TX mode: %r" % (m,))
 
+    def _vm_expr(v):
+        if not v.lstrip().startswith("STLVm"):
+            raise ValueError("VM expression must start with STLVm: %r"
+                             % (v,))
+        # Empty __builtins__ is load-bearing: eval() with a globals
+        # dict LACKING the key injects the full builtins module, which
+        # would make the STLVm*-only containment above illusory.
+        return eval(v, {"__builtins__": {}}, vars(_api))  # noqa: S307
+
     streams = []
     for spec in stream_specs:
         buf = base64.b64decode(spec["pkt_b64"])
-        vm = ([eval(v, vars(_api)) for v in spec["vm"]]  # noqa: S307
+        vm = ([_vm_expr(v) for v in spec["vm"]]
               if spec["vm"] else None)
         builder = STLPktBuilder(pkt_buffer=buf, vm=vm)
         fs = None

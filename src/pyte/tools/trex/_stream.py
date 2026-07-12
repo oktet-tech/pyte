@@ -6,11 +6,13 @@ No shim/TE imports. Each type renders a JSON-able ``spec()`` dict shipped
 to the agent, where pyte.tools.trex._ops rebuilds the native trex.stl.api
 objects. The packet is a real Scapy packet built on the engine (pyte
 depends on Scapy); ``spec()`` ships its wire bytes (base64) so the agent
-needs no Scapy to parse a string and no engine-side code is evaluated on
-the agent. The field-engine VM has no engine representation (STLVm* lives
-only in the bundled trex lib), so it stays a list of expression strings
-evaluated agent-side; in wire-bytes mode its packet offsets must be
-numeric.
+needs no Scapy and never evaluates packet-describing code. The
+field-engine VM is the one exception: STLVm* has no engine
+representation (it lives only in the bundled trex lib), so it stays a
+list of expression strings evaluated agent-side — restricted to
+``STLVm*`` constructors in the trex.stl.api namespace with no builtins
+(see ``_ops.add_streams``). In wire-bytes mode its packet offsets must
+be numeric.
 """
 from __future__ import annotations
 
