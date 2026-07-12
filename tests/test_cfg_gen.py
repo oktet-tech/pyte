@@ -970,3 +970,53 @@ def test_target_has_optional_include_field():
     assert t.include is None
     t2 = _gen.Target("f.yml", "/agent/x", "x", include=("a",))
     assert t2.include == ("a",)
+
+
+# -- cm_dir(): TE CM source discovery ----------------------------------
+
+def _fake_gen_at(tmp_path, monkeypatch, *parts):
+    """Pretend _gen.py lives at tmp_path/<parts>; return its Path."""
+    gen_file = tmp_path.joinpath(*parts)
+    gen_file.parent.mkdir(parents=True, exist_ok=True)
+    gen_file.touch()
+    monkeypatch.setattr(_gen, "__file__", str(gen_file))
+    monkeypatch.delenv("TE_BASE", raising=False)
+    return gen_file
+
+
+def test_cm_dir_prefers_te_base(tmp_path, monkeypatch):
+    _fake_gen_at(tmp_path, monkeypatch,
+                 "ws", "pyte", "src", "pyte", "cfg", "_gen.py")
+    cm = tmp_path / "somewhere" / "te" / "doc" / "cm"
+    cm.mkdir(parents=True)
+    monkeypatch.setenv("TE_BASE", str(cm.parent.parent))
+    assert _gen.cm_dir() == cm
+
+
+def test_cm_dir_finds_te_sibling_in_standalone_layout(tmp_path,
+                                                      monkeypatch):
+    """Standalone workspace: ws/pyte + ws/te.  The old parents[5]
+    fallback assumed the python-ts embedded layout and resolved to a
+    nonexistent path here, silently disabling the drift gate."""
+    _fake_gen_at(tmp_path, monkeypatch,
+                 "ws", "pyte", "src", "pyte", "cfg", "_gen.py")
+    cm = tmp_path / "ws" / "te" / "doc" / "cm"
+    cm.mkdir(parents=True)
+    assert _gen.cm_dir() == cm
+
+
+def test_cm_dir_finds_te_sibling_in_submodule_layout(tmp_path,
+                                                     monkeypatch):
+    """python-ts embedded layout: ws/python-ts/lib/pyte + ws/te."""
+    _fake_gen_at(tmp_path, monkeypatch, "ws", "python-ts", "lib", "pyte",
+                 "src", "pyte", "cfg", "_gen.py")
+    cm = tmp_path / "ws" / "te" / "doc" / "cm"
+    cm.mkdir(parents=True)
+    assert _gen.cm_dir() == cm
+
+
+def test_cm_dir_raises_when_nothing_found(tmp_path, monkeypatch):
+    _fake_gen_at(tmp_path, monkeypatch,
+                 "ws", "pyte", "src", "pyte", "cfg", "_gen.py")
+    with pytest.raises(FileNotFoundError, match="CM source"):
+        _gen.cm_dir()

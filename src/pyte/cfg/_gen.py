@@ -531,16 +531,22 @@ TARGETS = [
 def cm_dir() -> Path:
     """Locate the TE CM SOURCE directory (te/doc/cm).
 
-    Prefers $TE_BASE/doc/cm; falls back to the sibling ``te`` checkout in
-    the workspace (``<repo>/../te/doc/cm``).  Raises FileNotFoundError if
-    neither exists.
+    Prefers $TE_BASE/doc/cm; otherwise looks for a ``te`` checkout
+    sibling to ANY ancestor of this file, which covers both known
+    layouts without hardcoding either: the standalone pyte repo
+    (``ws/pyte`` + ``ws/te``) and the suite submodule
+    (``ws/python-ts/lib/pyte`` + ``ws/te``).  A fixed parents[N]
+    index would silently pick the wrong root in the other layout —
+    and a wrong root here silently disables the drift gate (the
+    tests skip when the CM source is "absent").  Raises
+    FileNotFoundError when nothing is found.
     """
     candidates = []
     base = os.environ.get("TE_BASE")
     if base:
         candidates.append(Path(base) / "doc" / "cm")
-    repo = Path(__file__).resolve().parents[5]   # .../python-ts
-    candidates.append(repo.parent / "te" / "doc" / "cm")
+    candidates += [p / "te" / "doc" / "cm"
+                   for p in Path(__file__).resolve().parents]
     for c in candidates:
         if c.is_dir():
             return c
