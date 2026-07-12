@@ -179,16 +179,20 @@ class RpcServer:
         """Sleep on the agent side (a remote, not engine-side, delay).
 
         This TE has no rpc_sleep() RPC (checked tapi_rpc_unistd.h),
-        so the delay runs as a remote shell ``sleep``.  The RPC
-        timeout is raised for this one call to cover the sleep;
-        rcf_rpc resets it to the default afterwards (rpcs->timeout
-        is per-call).
+        so the delay runs as a remote shell ``sleep`` via
+        :meth:`system` — a SINGLE rpc_system() call whose raised
+        timeout provably covers the whole command.  (The multi-RPC
+        :meth:`sh` would get the raised timeout only on its FIRST
+        rpc; a sleep longer than the default RPC timeout could then
+        fail spuriously.)
         """
-        from pyte._shim import lib
         if seconds < 0:
             raise ValueError("seconds must be >= 0")
-        lib.pyte_rpc_set_timeout(self._h, int(seconds * 1000) + 10000)
-        self.sh(f"sleep {seconds:g}")
+        status = self.system(f"sleep {seconds:g}", timeout=seconds + 10.0)
+        if status is not None and status != 0:
+            from pyte.errors import RpcError
+            raise RpcError(0, f"sleep({seconds:g}) exited with status "
+                              f"{status}", "")
 
     def getenv(self, name: str) -> str | None:
         """Get an agent environment variable (None if unset)."""
