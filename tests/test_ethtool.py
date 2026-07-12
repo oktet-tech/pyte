@@ -126,3 +126,75 @@ def test_unparsed_command_keeps_raw_out():
     assert rep.err_code is ErrCode.OK
     assert rep.if_props is None and rep.ring is None
     assert "FEC parameters" in rep.out
+
+
+# -- exit status handling (run() no-raise policy keeps the status) ----------
+
+from pyte.job import JobStatus, StatusKind  # noqa: E402
+
+
+def test_failed_run_is_not_a_confident_parse():
+    """ethtool exit 71 (\"no such device\"): empty stdout must not parse
+    into IfProps(link=False) with err_code OK — indistinguishable from a
+    real link-down.  The failure surfaces as ErrCode.FAIL + status."""
+    st = JobStatus(StatusKind.EXITED, 71)
+    rep = _build_report(Cmd.NONE, "",
+                        "Cannot get device settings: No such device",
+                        status=st)
+    assert rep.err_code is ErrCode.FAIL
+    assert rep.if_props is None
+    assert rep.status == st
+
+
+def test_eopnotsupp_recognised_before_fail():
+    rep = _build_report(Cmd.SHOW_RING, "",
+                        "netlink error: Operation not supported",
+                        status=JobStatus(StatusKind.EXITED, 76))
+    assert rep.err_code is ErrCode.EOPNOTSUPP
+    assert rep.ring is None
+
+
+def test_ok_run_records_status():
+    rep = _build_report(Cmd.NONE,
+                        (DATA / "ethtool_props_lo.txt").read_text(), "",
+                        status=JobStatus(StatusKind.EXITED, 0))
+    assert rep.err_code is ErrCode.OK
+    assert rep.status.ok
+
+
+# -- run() teardown hygiene --------------------------------------------------
+
+class _FakeChannel:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def attach_filter(self, name=None, readable=True):
+        if self.fail:
+            raise RuntimeError("attach failed")
+        return self
+
+
+class _FakeJob:
+    def __init__(self):
+        self.events = []
+        self.stdout = _FakeChannel()
+        self.stderr = _FakeChannel(fail=True)
+
+    def destroy(self, *a, **k):
+        self.events.append("destroy")
+
+
+class _FakePco:
+    def __init__(self, job):
+        self._job = job
+
+    def job(self, program, args=None):
+        return self._job
+
+
+def test_run_destroys_job_when_filter_attach_fails():
+    from pyte.tools import ethtool
+    job = _FakeJob()
+    with pytest.raises(RuntimeError, match="attach failed"):
+        ethtool.run(_FakePco(job), Opts(if_name="eth0"))
+    assert job.events == ["destroy"]

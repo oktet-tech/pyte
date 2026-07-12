@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pyte.job import JobStatus
     from pyte.rpc import RpcServer
 
 
@@ -143,9 +144,15 @@ class Opts:
 # ---------------------------------------------------------------------------
 
 class ErrCode(enum.Enum):
-    """pyte representation of the C report err_code."""
+    """pyte representation of the C report err_code.
+
+    FAIL marks a non-zero ethtool exit whose stderr matched no known
+    pattern — the run failed for an unexpected reason (bad interface
+    name, permission, ...) and no section was parsed.
+    """
     OK = "ok"
     EOPNOTSUPP = "eopnotsupp"
+    FAIL = "fail"
 
 
 @dataclass(frozen=True)
@@ -189,6 +196,8 @@ class Report:
     stats: "dict[str, str] | None" = None
     pause: "Pause | None" = None
     ring: "Ring | None" = None
+    #: Job completion status (None only for offline-built reports).
+    status: "JobStatus | None" = None
 
     def get_stat(self, name: str) -> int:
         """Return a single statistic as an int (mirror tapi_ethtool_get_stat).
@@ -263,16 +272,24 @@ def _parse_stats(out: str) -> "dict[str, str]":
     return stats
 
 
-def _err_code(err: str) -> ErrCode:
+def _err_code(err: str, status: "JobStatus | None") -> ErrCode:
     if "Operation not supported" in err:
         return ErrCode.EOPNOTSUPP
+    if status is not None and not status.ok:
+        # Unexpected failure (bad device, permission, ...): do NOT
+        # parse the (usually empty) output into a confident report --
+        # e.g. Cmd.NONE would yield IfProps(link=False) from empty
+        # stdout, indistinguishable from a real link-down.
+        return ErrCode.FAIL
     return ErrCode.OK
 
 
-def _build_report(cmd: str, out: str, err: str) -> Report:
+def _build_report(cmd: str, out: str, err: str,
+                  status: "JobStatus | None" = None) -> Report:
     """Assemble a Report from raw stdout/stderr (offline-testable)."""
-    err_code = _err_code(err)
-    kwargs: dict = dict(cmd=cmd, out=out, err=err, err_code=err_code)
+    err_code = _err_code(err, status)
+    kwargs: dict = dict(cmd=cmd, out=out, err=err, err_code=err_code,
+                        status=status)
     if err_code is ErrCode.OK:
         if cmd == Cmd.NONE:
             kwargs["if_props"] = _parse_if_props(out)
@@ -296,7 +313,9 @@ def run(pco: "RpcServer", opts: Opts, timeout: float = 10.0) -> Report:
     ethtool is a short-lived command, so this runs it to completion
     (create + start + wait), reads stdout/stderr, and destroys the job.
     A non-zero ethtool exit is NOT raised here — it is reflected in
-    ``Report.err_code`` (mirroring the C TAPI). A parse failure (e.g.
+    ``Report.err_code`` (``EOPNOTSUPP`` when stderr says so, ``FAIL``
+    otherwise) and the completion status in ``Report.status``,
+    mirroring the C TAPI's no-raise policy.  A parse failure (e.g.
     unexpected ring output) raises EthtoolError.
 
     Example::
@@ -306,13 +325,15 @@ def run(pco: "RpcServer", opts: Opts, timeout: float = 10.0) -> Report:
         print(rep.get_stat("rx_packets"))
     """
     job = pco.job("ethtool", opts.to_argv())
-    out_filter = job.stdout.attach_filter(name="ethtool_out", readable=True)
-    err_filter = job.stderr.attach_filter(name="ethtool_err", readable=True)
     try:
+        out_filter = job.stdout.attach_filter(name="ethtool_out",
+                                              readable=True)
+        err_filter = job.stderr.attach_filter(name="ethtool_err",
+                                              readable=True)
         job.start()
-        job.wait(timeout=timeout)
+        status = job.wait(timeout=timeout)
         out = out_filter.read_all(timeout=timeout)
         err = err_filter.read_all(timeout=timeout)
     finally:
         job.destroy()
-    return _build_report(opts.cmd, out, err)
+    return _build_report(opts.cmd, out, err, status=status)
