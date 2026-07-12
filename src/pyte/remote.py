@@ -175,6 +175,10 @@ class RemotePython:
                 raise RemotePythonError(
                     "remote python runner died "
                     f"({self._job_status() or 'no status'})")
+            # Per-chunk .data decoding is safe HERE only because the
+            # runner emits json.dumps with the ensure_ascii=True
+            # default: every protocol byte is 7-bit, so no multibyte
+            # character can straddle a chunk boundary.
             self._buf += msg.data
 
     def _job_status(self) -> str | None:

@@ -78,15 +78,25 @@ class JobStatus:
 class JobMessage:
     """One message read from a job filter.
 
-    ``data`` is text decoded from UTF-8 (errors replaced with U+FFFD).
-    TE truncates data at interior NUL bytes before delivery, so
-    ``data`` may be shorter than the raw output.  This is asymmetric
-    with :meth:`InputChannel.send`, which is binary-safe.
+    ``raw`` is the exact received bytes; ``data`` decodes THIS
+    message's bytes as UTF-8 (errors replaced with U+FFFD).  Messages
+    are arbitrary stream chunks (agent pipe-read boundaries), so a
+    multibyte character split between two messages shows up as U+FFFD
+    in both messages' ``data`` — use :meth:`Filter.read_all` (or join
+    ``raw`` yourself) for boundary-safe text.  TE truncates data at
+    interior NUL bytes before delivery, so the payload may be shorter
+    than the raw output; this is asymmetric with
+    :meth:`InputChannel.send`, which is binary-safe.
     """
-    data: str
+    raw: bytes
     eos: bool
     dropped: int
     filter: "Filter"
+
+    @property
+    def data(self) -> str:
+        """This message's bytes decoded as UTF-8 (errors replaced)."""
+        return self.raw.decode("utf-8", errors="replace")
 
 
 class Channel:
@@ -281,9 +291,8 @@ class Filter:
             for i in range(n[0]):
                 if eos[0][i]:
                     continue
-                data = ffi.buffer(datas[0][i], lens[0][i])[:].decode(
-                    "utf-8", "replace")
-                out.append(JobMessage(data=data, eos=False, dropped=0,
+                raw = bytes(ffi.buffer(datas[0][i], lens[0][i]))
+                out.append(JobMessage(raw=raw, eos=False, dropped=0,
                                       filter=self))
             return out
         finally:
@@ -292,10 +301,15 @@ class Filter:
     def read_all(self, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Concatenate all message data until end-of-stream.
 
-        Calls :meth:`messages` internally; :exc:`pyte.errors.TimeoutError`
-        propagates if a receive times out mid-stream.
+        Joins the raw bytes of every message and decodes ONCE, so a
+        multibyte UTF-8 character split across message boundaries
+        (arbitrary agent pipe-read chunks) decodes correctly — unlike
+        joining per-message ``data``.  Calls :meth:`messages`
+        internally; :exc:`pyte.errors.TimeoutError` propagates if a
+        receive times out mid-stream.
         """
-        return "".join(m.data for m in self.messages(timeout=timeout))
+        raw = b"".join(m.raw for m in self.messages(timeout=timeout))
+        return raw.decode("utf-8", errors="replace")
 
     def __repr__(self) -> str:
         return f"<Filter {self.name} of {self._job.program}>"
@@ -328,11 +342,12 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
                 last: bool = False) -> JobMessage:
     """Read the next message from any of the given filters.
 
-    The returned :class:`JobMessage` ``data`` field is text decoded
-    from UTF-8 (errors replaced).  TE truncates output at interior NUL
-    bytes before delivery, so ``data`` may be shorter than the raw
-    output — asymmetric with :meth:`InputChannel.send` which is
-    binary-safe.
+    The returned :class:`JobMessage` carries the exact received bytes
+    in ``raw``; its ``data`` property decodes them per message (see
+    the JobMessage docstring for the chunk-boundary caveat).  TE
+    truncates output at interior NUL bytes before delivery, so the
+    payload may be shorter than the raw output — asymmetric with
+    :meth:`InputChannel.send` which is binary-safe.
 
     Raises :exc:`pyte.errors.TimeoutError` if nothing arrives in time.
     """
@@ -358,8 +373,8 @@ def receive_any(filters: list[Filter], timeout: float = DEFAULT_TIMEOUT,
         raise RuntimeError(
             "receive_any: message arrived from a filter not in the "
             "provided set")
-    return JobMessage(data=raw.decode("utf-8", errors="replace"),
-                      eos=bool(eos[0]), dropped=dropped[0], filter=flt)
+    return JobMessage(raw=raw, eos=bool(eos[0]), dropped=dropped[0],
+                      filter=flt)
 
 
 def poll(items: list[Channel | InputChannel | Filter],

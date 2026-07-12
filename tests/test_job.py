@@ -40,6 +40,8 @@ class FakeLib:
         #: queued (data: bytes, eos: bool) pairs for receive_many
         self.recv_bufs = []
         self.recv_rc = 0
+        #: queued (data: bytes, eos: bool) pairs for single receive
+        self.recv_queue = []
 
     def pyte_job_wrapper_add(self, job_h, tool, argv, prio, out):
         self.calls.append(("wrapper_add", job_h, bytes(tool),
@@ -65,6 +67,20 @@ class FakeLib:
 
     def pyte_job_receive_many_free(self, datas, lens, eos, count):
         self.calls.append(("receive_many_free", datas, lens, eos, count))
+
+    def pyte_job_receive(self, arr, n, timeout_ms, last,
+                         data, dlen, eos, dropped, src):
+        self.calls.append(("receive", list(arr), timeout_ms))
+        chunk, is_eos = self.recv_queue.pop(0)
+        data[0] = chunk
+        dlen[0] = len(chunk)
+        eos[0] = 1 if is_eos else 0
+        dropped[0] = 0
+        src[0] = arr[0]
+        return 0
+
+    def pyte_free_string(self, p):
+        self.calls.append(("free_string",))
 
     def pyte_job_set_tracing(self, job_h, trace):
         self.calls.append(("set_tracing", job_h, trace))
@@ -141,9 +157,9 @@ class FakeFfi:
             return list(init)
         if spec == "tapi_job_channel_t **":
             return [None]
-        if spec in ("char ***", "size_t **", "int **"):
+        if spec in ("char ***", "size_t **", "int **", "char **"):
             return [None]
-        if spec == "unsigned int *":
+        if spec in ("unsigned int *", "size_t *", "int *"):
             return [0]
         raise NotImplementedError(f"FakeFfi.new({spec!r})")
 
@@ -285,6 +301,47 @@ def test_read_many_error_no_free(monkeypatch):
 
     frees = [c for c in lib.calls if c[0] == "receive_many_free"]
     assert frees == [], "receive_many_free must not be called when rc != 0"
+
+
+# ---------------------------------------------------------------------------
+# UTF-8 across chunk boundaries: filter messages are arbitrary stream
+# chunks (agent pipe-read boundaries), so a multibyte character can be
+# split between two messages.  read_all() must join the raw bytes and
+# decode ONCE; per-message .data decoding is inherently lossy at the
+# boundary and is documented as such.
+# ---------------------------------------------------------------------------
+
+def test_read_all_decodes_across_chunk_boundaries(monkeypatch):
+    """b"caf\\xc3" + b"\\xa9!" is valid UTF-8 "café!" once joined."""
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_queue = [(b"caf\xc3", False), (b"\xa9!", False), (b"", True)]
+
+    assert flt.read_all() == "café!"
+
+
+def test_message_exposes_raw_bytes(monkeypatch):
+    """JobMessage carries the exact received bytes; .data decodes this
+    message's bytes alone (U+FFFD at a split boundary)."""
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_queue = [(b"caf\xc3", False)]
+
+    msg = flt.next()
+
+    assert msg.raw == b"caf\xc3"
+    assert msg.data == "caf�"
+
+
+def test_read_many_preserves_raw_bytes(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_bufs = [(b"a\xc3", False), (b"\xa9b", False), (b"", True)]
+
+    msgs = flt.read_many(0)
+
+    assert [m.raw for m in msgs] == [b"a\xc3", b"\xa9b"]
+    assert b"".join(m.raw for m in msgs).decode() == "aéb"
 
 
 # ---------------------------------------------------------------------------
