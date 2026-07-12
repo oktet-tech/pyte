@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pyte.log import _enc
-from pyte.rpc.server import SUPPRESSED
 
 
 class RpcFile:
@@ -35,27 +34,22 @@ class RpcFile:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"close({self.path})")
 
-    def write(self, data: bytes) -> int | None:
+    def write(self, data: bytes) -> int:
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
         rc = lib.pyte_rpc_write(self.server._h, self.fd, data, len(data),
                                 out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                      f"write({self.path}, "
-                                      f"{len(data)} bytes)")
-        if ret is SUPPRESSED:
-            return None
-        return ret
+        return self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                       f"write({self.path}, "
+                                       f"{len(data)} bytes)")
 
-    def read(self, size: int) -> bytes | None:
+    def read(self, size: int) -> bytes:
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_read(self.server._h, self.fd, buf, size, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+        self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"read({self.path}, {size})")
-        if ret is SUPPRESSED:
-            return None
         return bytes(ffi.buffer(buf, out[0]))
 
 
@@ -70,10 +64,8 @@ def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
     out = ffi.new("int *")
     rc = lib.pyte_rpc_open(server._h, _enc(path), flags,
                            lib.PYTE_MODE_0644, out)
-    ret = server._check_call(rc, out[0], lambda v: v >= 0,
+    server._check_call(rc, out[0], lambda v: v >= 0,
                              f"open({path}, {mode!r})")
-    if ret is SUPPRESSED:
-        return None
     return RpcFile(server, out[0], path)
 
 
@@ -93,18 +85,12 @@ def file_put(server, path: str, data: bytes) -> None:
     """Write data to a file on the RPC server (created or truncated).
 
     Convenience composition of open/write/close; writes in _CHUNK
-    pieces and follows short writes.  Inside expect_error() a
-    suppressed failure aborts the transfer silently.
+    pieces and follows short writes.
     """
-    f = open_file(server, path, "w")
-    if f is None:
-        return
-    with f:
+    with open_file(server, path, "w") as f:
         view = memoryview(data)
         while len(view) > 0:
             n = f.write(bytes(view[:_CHUNK]))
-            if n is None:
-                return
             if n == 0:
                 raise RuntimeError(
                     f"file_put({path}): write() returned 0 with "
@@ -116,15 +102,10 @@ def file_get(server, path: str) -> bytes:
     """Read a whole file from the RPC server.
 
     Convenience composition of open/read/close; loops in _CHUNK
-    pieces until rpc_read() returns 0 (EOF).  Inside expect_error()
-    a suppressed failure yields the data read so far (b"" if the
-    open itself failed).
+    pieces until rpc_read() returns 0 (EOF).
     """
-    f = open_file(server, path, "r")
-    if f is None:
-        return b""
     chunks = []
-    with f:
+    with open_file(server, path, "r") as f:
         while True:
             chunk = f.read(_CHUNK)
             if not chunk:

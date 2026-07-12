@@ -7,11 +7,27 @@ from contextlib import contextmanager
 
 from pyte.errors import RpcError, TestFail, check
 from pyte.log import _enc
+from typing import TYPE_CHECKING
 
-#: Returned by facade calls whose failure was swallowed by expect_error().
-SUPPRESSED = object()
+from pyte.rpc.iomux import Kind
+from pyte.rpc.socket import Family, SockType
+
+if TYPE_CHECKING:
+    from pyte.rpc.iomux import IoMux
+    from pyte.rpc.socket import RpcSocket
 
 _HOSTNAME_MAX = 256
+
+
+class ExpectedError:
+    """Yielded by :meth:`RpcServer.expect_error`.
+
+    After the block, ``error`` carries the caught :class:`RpcError`
+    (its ``code`` is the TE error part of the remote errno).
+    """
+
+    def __init__(self):
+        self.error = None
 
 
 class RpcServer:
@@ -26,8 +42,6 @@ class RpcServer:
         self.ta = ta
         self.name = name
         self._owned = owned
-        self._expected: int | None = None
-        self._expected_hit = False
 
     @classmethod
     def create(cls, ta: str, name: str) -> "RpcServer":
@@ -65,62 +79,65 @@ class RpcServer:
 
     # -- error plumbing used by all facades ---------------------------
     def _check_call(self, guard_rc: int, retval, ok, where: str):
-        """guard_rc: trampoline status; ok(retval): success predicate."""
+        """guard_rc: trampoline status; ok(retval): success predicate.
+
+        A failed call always raises RpcError carrying the remote
+        errno; there is no suppression state (expect_error() catches
+        the exception instead).
+        """
         from pyte._shim import ffi, lib
         check(guard_rc, where, RpcError)
-        failed = not ok(retval)
-        if not failed:
+        if ok(retval):
             return retval
         rpc_errno = lib.pyte_rpc_errno(self._h)
-        if self._expected is not None:
-            if (self._expected == 0 or
-                    lib.pyte_rc_error(rpc_errno) == self._expected):
-                self._expected_hit = True
-                return SUPPRESSED
         raise RpcError(
             rpc_errno, f"{where} -> {retval!r}",
             ffi.string(lib.pyte_rpc_err_msg(self._h)).decode(
                 errors="replace"))
 
     @contextmanager
-    def expect_error(self, expected_errno: int = 0):
-        """Assert that an RPC call inside the block fails.
+    def expect_error(self, expected_errno: int | None = None):
+        """Expect the RPC call in the block to fail (pytest.raises-style).
 
-        expected_errno: TE error code to require (0 = any error).
-        Raises TestFail if the block completes without a failure.
-        Facade calls whose failure is swallowed return None (or
-        SUPPRESSED for raw _check_call users).
+        Catches the :class:`RpcError` the failing call raises; when
+        *expected_errno* is given (a TE error code, e.g.
+        ``errors.ECONNREFUSED``) the caught error's ``code`` must
+        match, otherwise the error propagates.  Execution of the
+        block STOPS at the failing call — unlike the old suppression
+        model, no ``None``s flow through the rest of the block.
+        Raises TestFail if the block completes without an RpcError.
+
+        Yields an :class:`ExpectedError` whose ``error`` attribute
+        carries the caught exception after the block::
+
+            with pco.expect_error(errors.ECONNREFUSED) as info:
+                sock.connect(("127.0.0.1", 1))
+            log.ring(f"refused as expected: {info.error}")
         """
-        prev, prev_hit = self._expected, self._expected_hit
-        self._expected = expected_errno
-        self._expected_hit = False
+        info = ExpectedError()
         try:
-            yield self
-            hit = self._expected_hit
-        finally:
-            self._expected, self._expected_hit = prev, prev_hit
-        if not hit:
-            raise TestFail("expected an RPC error, but calls succeeded")
+            yield info
+        except RpcError as e:
+            if expected_errno is not None and e.code != expected_errno:
+                raise
+            info.error = e
+            return
+        raise TestFail("expected an RPC error, but the block succeeded")
 
     # -- curated calls -------------------------------------------------
-    def getpid(self) -> int | None:
+    def getpid(self) -> int:
         from pyte._shim import ffi, lib
         out = ffi.new("int *")
-        ret = self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
-                               lambda v: v >= 0, "getpid()")
-        if ret is SUPPRESSED:
-            return None
-        return ret
+        return self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
+                                lambda v: v >= 0, "getpid()")
 
-    def hostname(self) -> str | None:
+    def hostname(self) -> str:
         from pyte._shim import ffi, lib
         buf = ffi.new("char[]", _HOSTNAME_MAX)
         out = ffi.new("int *")
-        ret = self._check_call(
+        self._check_call(
             lib.pyte_rpc_gethostname(self._h, buf, _HOSTNAME_MAX - 1, out),
             out[0], lambda v: v == 0, "gethostname()")
-        if ret is SUPPRESSED:
-            return None
         return ffi.string(buf).decode(errors="replace")
 
     def sh(self, cmd: str) -> str:
@@ -134,17 +151,17 @@ class RpcServer:
         rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
                                         value)
         try:
-            ret = self._check_call(rc, (flag[0], value[0]),
-                                   lambda fv: fv == (0, 0),
-                                   f"sh({cmd!r})")
-            if ret is SUPPRESSED or pbuf[0] == ffi.NULL:
+            self._check_call(rc, (flag[0], value[0]),
+                             lambda fv: fv == (0, 0),
+                             f"sh({cmd!r})")
+            if pbuf[0] == ffi.NULL:
                 return ""
             return ffi.string(pbuf[0]).decode(errors="replace")
         finally:
             if pbuf[0] != ffi.NULL:
                 lib.pyte_free_string(pbuf[0])
 
-    def system(self, cmd: str, timeout: float | None = None) -> int | None:
+    def system(self, cmd: str, timeout: float | None = None) -> int:
         """Run cmd via a single rpc_system() call, return its exit status.
 
         A non-zero exit status is RETURNED, not raised — matching C
@@ -168,11 +185,9 @@ class RpcServer:
             _enc(cmd), flag, value)
         # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED
         # == 0); its exit status is reported via the return value.
-        ret = self._check_call(rc, (flag[0], value[0]),
-                               lambda fv: fv[0] == 0,
-                               f"system({cmd!r})")
-        if ret is SUPPRESSED:
-            return None
+        self._check_call(rc, (flag[0], value[0]),
+                         lambda fv: fv[0] == 0,
+                         f"system({cmd!r})")
         return value[0]
 
     def sleep(self, seconds: float) -> None:
@@ -189,7 +204,7 @@ class RpcServer:
         if seconds < 0:
             raise ValueError("seconds must be >= 0")
         status = self.system(f"sleep {seconds:g}", timeout=seconds + 10.0)
-        if status is not None and status != 0:
+        if status != 0:
             from pyte.errors import RpcError
             raise RpcError(0, f"sleep({seconds:g}) exited with status "
                               f"{status}", "")
@@ -201,11 +216,11 @@ class RpcServer:
         rc = lib.pyte_rpc_getenv(self._h, _enc(name), out)
         # rpc_getenv() returns NULL both for "unset" and "call
         # failed"; only the latter sets the remote errno.
-        ret = self._check_call(
+        self._check_call(
             rc, out[0],
             lambda v: v != ffi.NULL or lib.pyte_rpc_errno(self._h) == 0,
             f"getenv({name})")
-        if ret is SUPPRESSED or out[0] == ffi.NULL:
+        if out[0] == ffi.NULL:
             return None
         try:
             return ffi.string(out[0]).decode(errors="replace")
@@ -222,27 +237,20 @@ class RpcServer:
         self._check_call(rc, out[0], lambda v: v == 0,
                          f"setenv({name}={value!r})")
 
-    def socket(self, family=None, type=None):
-        """Create an :class:`~pyte.rpc.socket.RpcSocket` on this server.
+    def socket(self, family: Family = Family.INET,
+               type: SockType = SockType.STREAM) -> "RpcSocket":
+        """Create an :class:`~pyte.rpc.socket.RpcSocket` on this server."""
+        from pyte.rpc.socket import RpcSocket
+        return RpcSocket.open(self, family, type)
 
-        *family* is a :class:`~pyte.rpc.socket.Family` (default
-        ``Family.INET``); *type* a :class:`~pyte.rpc.socket.SockType`
-        (default ``SockType.STREAM``).
-        """
-        from pyte.rpc.socket import Family, RpcSocket, SockType
-        return RpcSocket.open(
-            self,
-            family if family is not None else Family.INET,
-            type if type is not None else SockType.STREAM)
-
-    def iomux(self, kind=None):
+    def iomux(self, kind: Kind = Kind.EPOLL) -> "IoMux":
         """Create an :class:`~pyte.rpc.iomux.IoMux` on this server.
 
-        *kind* is a :class:`~pyte.rpc.iomux.Kind` (default ``Kind.EPOLL``).
-        Returns an ``IoMux`` context manager that calls ``close()`` on exit.
+        Returns an ``IoMux`` context manager that calls ``close()`` on
+        exit.
         """
-        from pyte.rpc.iomux import IoMux, Kind
-        return IoMux.create(self, kind if kind is not None else Kind.EPOLL)
+        from pyte.rpc.iomux import IoMux
+        return IoMux.create(self, kind)
 
     def job(self, program: str, args: list[str] | None = None,
             env: dict[str, str] | None = None):

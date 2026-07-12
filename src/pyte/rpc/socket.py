@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from pyte.errors import check
 from pyte.log import _enc
-from pyte.rpc.server import SUPPRESSED
 
 
 class Msg(enum.Flag):
@@ -197,7 +196,7 @@ class RpcSocket:
 
     @classmethod
     def open(cls, server, family: Family = Family.INET,
-             type: SockType = SockType.STREAM) -> "RpcSocket | None":
+             type: SockType = SockType.STREAM) -> "RpcSocket":
         if not isinstance(family, Family):
             raise TypeError(
                 f"family must be a Family, not "
@@ -212,10 +211,8 @@ class RpcSocket:
                                  getattr(lib, family.value),
                                  getattr(lib, type.value),
                                  lib.PYTE_PROTO_DEF, out)
-        ret = server._check_call(rc, out[0], lambda v: v >= 0,
+        server._check_call(rc, out[0], lambda v: v >= 0,
                                  f"socket({family.name}, {type.name})")
-        if ret is SUPPRESSED:
-            return None
         return cls(server, out[0])
 
     def __enter__(self):
@@ -280,7 +277,7 @@ class RpcSocket:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"connect({addr})")
 
-    def accept(self) -> "RpcSocket | None":
+    def accept(self) -> "RpcSocket":
         from pyte._shim import ffi, lib
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -289,13 +286,11 @@ class RpcSocket:
         rc = lib.pyte_rpc_accept(self.server._h, self.fd,
                                  ffi.cast("struct sockaddr *", ss),
                                  sslen, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+        self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       "accept()")
-        if ret is SUPPRESSED:
-            return None
         return RpcSocket(self.server, out[0])
 
-    def getsockname(self) -> tuple[str, int] | None:
+    def getsockname(self) -> tuple[str, int]:
         from pyte._shim import ffi, lib
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -304,13 +299,11 @@ class RpcSocket:
         out = ffi.new("int *")
         rc = lib.pyte_rpc_getsockname(self.server._h, self.fd, sa, sslen,
                                       out)
-        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+        self.server._check_call(rc, out[0], lambda v: v == 0,
                                       "getsockname()")
-        if ret is SUPPRESSED:
-            return None
         return _parse_addr(ffi, lib, sa)
 
-    def getpeername(self) -> tuple[str, int] | None:
+    def getpeername(self) -> tuple[str, int]:
         from pyte._shim import ffi, lib
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -319,13 +312,11 @@ class RpcSocket:
         out = ffi.new("int *")
         rc = lib.pyte_rpc_getpeername(self.server._h, self.fd, sa, sslen,
                                       out)
-        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+        self.server._check_call(rc, out[0], lambda v: v == 0,
                                       "getpeername()")
-        if ret is SUPPRESSED:
-            return None
         return _parse_addr(ffi, lib, sa)
 
-    def getsockopt(self, opt: SockOpt) -> int | None:
+    def getsockopt(self, opt: SockOpt) -> int:
         """Read an int-valued socket option."""
         if not isinstance(opt, SockOpt):
             raise TypeError(
@@ -335,10 +326,8 @@ class RpcSocket:
         out = ffi.new("int *")
         rc = lib.pyte_rpc_getsockopt_int(self.server._h, self.fd,
                                          getattr(lib, opt.value), val, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v == 0,
+        self.server._check_call(rc, out[0], lambda v: v == 0,
                                       f"getsockopt({opt.name})")
-        if ret is SUPPRESSED:
-            return None
         return val[0]
 
     def shutdown(self, how: Shut = Shut.RDWR) -> None:
@@ -362,45 +351,38 @@ class RpcSocket:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"set_blocking({blocking})")
 
-    def get_blocking(self) -> bool | None:
+    def get_blocking(self) -> bool:
         """Return True if the socket is in blocking mode."""
         from pyte._shim import ffi, lib
         blk = ffi.new("int *")
         out = ffi.new("int *")
         rc = lib.pyte_sock_get_blocking(self.server._h, self.fd, blk, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+        self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       "get_blocking()")
-        if ret is SUPPRESSED:
-            return None
         return bool(blk[0])
 
-    def send(self, data: bytes, flags: Msg = Msg(0)) -> int | None:
+    def send(self, data: bytes, flags: Msg = Msg(0)) -> int:
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_send(self.server._h, self.fd, data, len(data),
                                bits, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                      f"send({len(data)} bytes)")
-        if ret is SUPPRESSED:
-            return None
-        return ret
+        return self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                       f"send({len(data)} bytes)")
 
-    def recv(self, size: int, flags: Msg = Msg(0)) -> bytes | None:
+    def recv(self, size: int, flags: Msg = Msg(0)) -> bytes:
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, bits,
                                out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+        self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recv({size})")
-        if ret is SUPPRESSED:
-            return None
         return bytes(ffi.buffer(buf, out[0]))
 
     def sendto(self, data: bytes, addr: tuple[str, int],
-               flags: Msg = Msg(0)) -> int | None:
+               flags: Msg = Msg(0)) -> int:
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         ss = _mk_addr(ffi, lib, addr)
@@ -408,14 +390,12 @@ class RpcSocket:
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_sendto(self.server._h, self.fd, data, len(data),
                                  bits, sa, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
-                                      f"sendto({len(data)} bytes, {addr})")
-        if ret is SUPPRESSED:
-            return None
-        return ret
+        return self.server._check_call(
+            rc, out[0], lambda v: v >= 0,
+            f"sendto({len(data)} bytes, {addr})")
 
     def recvfrom(self, size: int, flags: Msg = Msg(0),
-                 ) -> tuple[bytes, tuple[str, int]] | None:
+                 ) -> tuple[bytes, tuple[str, int]]:
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
         buf = ffi.new("uint8_t[]", size)
@@ -426,10 +406,8 @@ class RpcSocket:
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recvfrom(self.server._h, self.fd, buf, size,
                                    bits, sa, fromlen, out)
-        ret = self.server._check_call(rc, out[0], lambda v: v >= 0,
+        self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recvfrom({size})")
-        if ret is SUPPRESSED:
-            return None
         return bytes(ffi.buffer(buf, out[0])), _parse_addr(ffi, lib, sa)
 
     def sendmsg(self, buffers, addr=None, ancillary=(),
@@ -447,7 +425,7 @@ class RpcSocket:
                           types are forwarded; unknown values are silently
                           dropped by the RPC layer.
         :param flags:     send flags (:class:`Msg`).
-        :returns:         bytes sent, or ``None`` when error was suppressed.
+        :returns:         bytes sent.
         """
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
@@ -509,20 +487,18 @@ class RpcSocket:
             addr_bytes, port,
             c_levels, c_types, c_data_ptrs, c_lens, n_cmsg,
             bits, sent)
-        ret = self.server._check_call(rc, sent[0], lambda v: v >= 0,
+        self.server._check_call(rc, sent[0], lambda v: v >= 0,
                                       f"sendmsg({n_iov} iov, {n_cmsg} cmsg)")
-        if ret is SUPPRESSED:
-            return None
         return int(sent[0])
 
     def recvmsg(self, bufsize: int, ctrl_space: int = 0,
-                flags: Msg = Msg(0)) -> "RecvMsg | None":
+                flags: Msg = Msg(0)) -> "RecvMsg":
         """Receive a message with optional ancillary data.
 
         :param bufsize:    data buffer size in bytes.
         :param ctrl_space: bytes reserved for ancillary data (0 = none).
         :param flags:      receive flags (:class:`Msg`).
-        :returns:          :class:`RecvMsg` or ``None`` when suppressed.
+        :returns:          :class:`RecvMsg`.
 
         Ancillary data level/type values are host-native integers, but only
         TE-known socket levels (SOL_SOCKET, IPPROTO_IP, IPPROTO_IPV6,
@@ -550,10 +526,8 @@ class RpcSocket:
             p_from_addr, p_from_port,
             p_levels, p_types, p_datas, p_lens,
             p_n_cmsg, p_msg_flags, p_received)
-        ret = self.server._check_call(rc, p_received[0], lambda v: v >= 0,
+        self.server._check_call(rc, p_received[0], lambda v: v >= 0,
                                       f"recvmsg({bufsize})")
-        if ret is SUPPRESSED:
-            return None
 
         # Extract everything under try/finally: a failure mid-extraction
         # must not leak the shim's allocations.  The address decodes
