@@ -35,8 +35,9 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import CfgError, check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 _INT_CVT_NAMES = ("INT8", "UINT8", "INT16", "UINT16",
                   "INT32", "UINT32", "INT64", "UINT64")
@@ -61,7 +62,7 @@ def _to_py_kind(value: str, kind: str):
 
 def _cvt_kind(cvt: int) -> str:
     """Map a shim PYTE_CVT_* int to the kind used by _to_py_kind."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     if cvt == lib.PYTE_CVT_NONE:
         return "none"
     if cvt == lib.PYTE_CVT_BOOL:
@@ -75,7 +76,7 @@ def _cvt_kind(cvt: int) -> str:
 
 def _take_str(out) -> str:
     """Decode and free a C-allocated char* held in a char** out-param."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     s = ffi.string(out[0]).decode("utf-8", errors="replace")
     lib.pyte_free_string(out[0])
     out[0] = ffi.NULL
@@ -83,7 +84,7 @@ def _take_str(out) -> str:
 
 
 def _get_type(oid: str) -> int:
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("int *")
     check(lib.pyte_cfg_get_type(_enc(oid), out),
           f"cfg type of {oid}", CfgError)
@@ -95,7 +96,7 @@ def _raw_get(oid: str) -> tuple[str, int]:
 
     Isolated so get() is unit-testable by monkeypatching this.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("char **")
     t_out = ffi.new("int *")
     check(lib.pyte_cfg_get_str(_enc(oid), out, t_out),
@@ -118,7 +119,7 @@ def get(oid: str, sync: bool = False) -> bool | float | int | str | None:
 
 def _raw_set(oid: str, cvt: int, wire: str) -> None:
     """Shim seam: set an existing instance to `wire` as CVT `cvt`."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_set_str(_enc(oid), cvt, _enc(wire)),
           f"cfg set {oid}={wire!r}", CfgError)
 
@@ -140,7 +141,7 @@ def set(oid: str, value, cvt: int | None = None) -> None:  # noqa: A001
 
 def add(oid: str, value=None) -> CfgNode:
     """Add an instance; value type is derived from the Python type."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
 
     # Try to look up the declared CVT from the object descriptor.  The
     # object OID has no instance names: strip every ":name" suffix so
@@ -182,14 +183,14 @@ def add(oid: str, value=None) -> CfgNode:
 
 def delete(oid: str, children: bool = False) -> None:
     """Delete an instance (and optionally its children)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_del(_enc(oid), 1 if children else 0),
           f"cfg delete {oid}", CfgError)
 
 
 def find(pattern: str) -> list[CfgNode]:
     """Find instances by wildcard pattern, e.g. "/agent:A/env:*"."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     n = ffi.new("unsigned int *")
     handles = ffi.new("cfg_handle **")
     check(lib.pyte_cfg_find_pattern(_enc(pattern), n, handles),
@@ -208,14 +209,14 @@ def find(pattern: str) -> list[CfgNode]:
 
 def synchronize(oid: str, subtree: bool = True) -> None:
     """Re-read the (sub)tree state from the test agents."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_synchronize(_enc(oid), 1 if subtree else 0),
           f"cfg synchronize {oid}", CfgError)
 
 
 def _backup_create() -> str:
     """Shim seam: snapshot the configuration; return the backup name."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("char **")
     check(lib.pyte_cfg_backup_create(out), "cfg backup create", CfgError)
     return _take_str(out)
@@ -223,14 +224,14 @@ def _backup_create() -> str:
 
 def _backup_restore(name: str) -> None:
     """Shim seam: restore the named snapshot."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_backup_restore(_enc(name)),
           f"cfg backup restore {name}", CfgError)
 
 
 def _backup_release(name: str) -> None:
     """Shim seam: release (free) the named backup."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_backup_release(_enc(name)),
           f"cfg backup release {name}", CfgError)
 
@@ -282,7 +283,7 @@ def transaction():
 
 def wait_changes() -> None:
     """Wait for pending configuration changes to propagate to agents."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_wait_changes(), "cfg wait_changes", CfgError)
 
 
@@ -369,7 +370,7 @@ def net_all_assign_ip(af: str = "inet") -> None:
     """Assign subnets + node addresses to every /net (needs root TAs)."""
     if af not in ("inet", "inet6"):
         raise ValueError(f"af must be 'inet' or 'inet6', got {af!r}")
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_all_assign_ip(1 if af == "inet6" else 0),
           f"net_all_assign_ip({af})", CfgError)
 
@@ -383,7 +384,7 @@ def net_assign_subnet(net: str, af: str = "inet") -> None:
     """
     if af not in ("inet", "inet6"):
         raise ValueError(f"af must be 'inet' or 'inet6', got {af!r}")
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_assign_subnet(_enc(net),
                                          1 if af == "inet6" else 0),
           f"net_assign_subnet({net}, {af})", CfgError)

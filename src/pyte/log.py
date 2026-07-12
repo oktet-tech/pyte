@@ -3,21 +3,25 @@
 """TE logging: direct API + stdlib logging bridge."""
 from __future__ import annotations
 
+from pyte._util import shim_lib as _shim_lib
+
 import logging
 
+from pyte._util import enc
 
-def _enc(text: str) -> bytes:
-    """Encode for the C side; never let bad text break logging."""
-    return text.encode("utf-8", "backslashreplace")
+
+# The implementation lives in pyte._util (shared infra); the name stays
+# importable here for existing callers.
+_enc = enc
 
 
 def _lvl(name: str) -> int:
-    from pyte._shim import lib
+    lib = _shim_lib()
     return getattr(lib, f"TE_LL_{name}")
 
 
 def _emit(level_name: str, user: str, text: str) -> None:
-    from pyte._shim import lib
+    lib = _shim_lib()
     lib.pyte_log(_lvl(level_name), _enc(user), _enc(text))
 
 
@@ -47,13 +51,13 @@ def step_push(text: str) -> None:
     The nested block is collapsed by default in the HTML log (INFO
     level); pair with step_pop().
     """
-    from pyte._shim import lib
+    lib = _shim_lib()
     lib.pyte_step_push(_enc(text))
 
 
 def step_pop(text: str = "") -> None:
     """Decrement the nesting level (close a step_push); log ``text``."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     lib.pyte_step_pop(_enc(text))
 
 

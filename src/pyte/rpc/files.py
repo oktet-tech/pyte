@@ -3,7 +3,8 @@
 """RPC files: pythonic facade over tapi_rpc_unistd file calls."""
 from __future__ import annotations
 
-from pyte.log import _enc
+from pyte._util import shim as _shim
+from pyte._util import enc as _enc
 
 
 class RpcFile:
@@ -25,7 +26,7 @@ class RpcFile:
         return f"<RpcFile {self.path!r} fd={self.fd} on {self.server!r}>"
 
     def close(self) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         if self.fd < 0:
             return
         out = ffi.new("int *")
@@ -35,7 +36,7 @@ class RpcFile:
                                 f"close({self.path})")
 
     def write(self, data: bytes) -> int:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_rpc_write(self.server._h, self.fd, data, len(data),
                                 out)
@@ -44,7 +45,7 @@ class RpcFile:
                                        f"{len(data)} bytes)")
 
     def read(self, size: int) -> bytes:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_read(self.server._h, self.fd, buf, size, out)
@@ -55,7 +56,7 @@ class RpcFile:
 
 def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
     """Open a file on the RPC server; mode is "r", "w" or "a"."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     flags = {
         "r": lib.PYTE_O_RDONLY,
         "w": lib.PYTE_O_WRONLY | lib.PYTE_O_CREAT | lib.PYTE_O_TRUNC,
@@ -71,7 +72,7 @@ def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
 
 def unlink(server, path: str) -> None:
     """Remove a file on the RPC server."""
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("int *")
     rc = lib.pyte_rpc_unlink(server._h, _enc(path), out)
     server._check_call(rc, out[0], lambda v: v == 0, f"unlink({path})")

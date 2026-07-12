@@ -40,6 +40,7 @@ from contextlib import contextmanager
 from importlib import resources
 from typing import TYPE_CHECKING, Iterator
 
+from pyte._util import shim_lib as _shim_lib
 from pyte.errors import RemotePythonError
 
 if TYPE_CHECKING:
@@ -164,7 +165,7 @@ class RemotePython:
         """
         if self._server is None:
             return
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_rpc_set_silent(self._server, 1 if on else 0)
 
     # -- transport (overridden by unit-test fakes) ----------------------

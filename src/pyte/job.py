@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Iterator
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
 from pyte.errors import TimeoutError as TeTimeoutError
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 if TYPE_CHECKING:
     from pyte.rpc.server import RpcServer
@@ -55,7 +56,7 @@ def _log_level(level: int | str | None) -> int:
         return 0
     if isinstance(level, int):
         return level
-    from pyte._shim import lib
+    lib = _shim_lib()
     try:
         return getattr(lib, f"TE_LL_{level}")
     except AttributeError:
@@ -174,7 +175,7 @@ class InputChannel:
     def send(self, data: str | bytes) -> None:
         """Write data to the job's stdin (binary-safe)."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
         check(lib.pyte_job_send(h, raw, len(raw)),
               f"job.send({self._job.program})")
@@ -212,7 +213,7 @@ class Filter:
         :meth:`messages` waits for the correct number of eos messages.
         """
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         arr = ffi.new("tapi_job_channel_t *[]", [channel._handle()])
         check(lib.pyte_job_filter_add(h, arr, 1),
               f"filter_add_channels({self.name})")
@@ -226,7 +227,7 @@ class Filter:
         marked dead and any further use raises RuntimeError.
         """
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         arr = ffi.new("tapi_job_channel_t *[]", [channel._handle()])
         check(lib.pyte_job_filter_remove(h, arr, 1),
               f"filter_remove_channels({self.name})")
@@ -291,7 +292,7 @@ class Filter:
         bulk shim call does not carry per-message drop counts).
         """
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         flts = ffi.new("tapi_job_channel_t *[]", [h])
         datas = ffi.new("char ***")
         lens = ffi.new("size_t **")
@@ -332,7 +333,7 @@ class Filter:
 def _attach_filter(channels: list[Channel], *, name: str | None,
                    readable: bool, log_level: int | str | None,
                    regex: str | None, group: int) -> Filter:
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     if not channels:
         raise ValueError("no channels to attach the filter to")
     job = channels[0]._job
@@ -366,7 +367,7 @@ def receive_any(filters: list[Filter],
 
     Raises :exc:`pyte.errors.TimeoutError` if nothing arrives in time.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     if not filters:
         raise ValueError("no filters to receive from")
     arr = ffi.new("tapi_job_channel_t *[]", [f._handle() for f in filters])
@@ -398,7 +399,7 @@ def poll(items: list[Channel | InputChannel | Filter],
 
     Raises pyte.errors.TimeoutError if none becomes ready in time.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     if not items:
         raise ValueError("no channels to poll")
     arr = ffi.new("tapi_job_channel_t *[]", [i._handle() for i in items])
@@ -423,7 +424,7 @@ class Wrapper:
         if self._job._h is None:
             # The owning job was destroyed; TE freed its wrappers too.
             return
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_job_wrapper_delete(self._h), "job.wrapper_delete")
         self._deleted = True
 
@@ -472,7 +473,7 @@ class Job:
         created so that a Python-side exception (e.g. encoding error)
         cannot leak an allocated factory handle.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         # Build argv/env arrays first; a Python error here leaks nothing.
         # Keep the cdata strings alive in locals across the call.
         argv_strs = [ffi.new("char[]", _enc(a)) for a in [program, *args]]
@@ -495,7 +496,7 @@ class Job:
     def _alloc_out(self) -> None:
         if self._stdout is None:
             h = self._handle()
-            from pyte._shim import ffi, lib
+            ffi, lib = _shim()
             o = ffi.new("tapi_job_channel_t **")
             e = ffi.new("tapi_job_channel_t **")
             check(lib.pyte_job_out_channels(h, o, e),
@@ -526,7 +527,7 @@ class Job:
         """
         if self._stdin is None:
             h = self._handle()
-            from pyte._shim import ffi, lib
+            ffi, lib = _shim()
             i = ffi.new("tapi_job_channel_t **")
             check(lib.pyte_job_in_channel(h, i),
                   f"job.alloc_input_channels({self.program})")
@@ -558,7 +559,7 @@ class Job:
     def start(self) -> None:
         """Actually run the job."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_job_start(h), f"job.start({self.program})")
 
     def wait(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobStatus:
@@ -569,7 +570,7 @@ class Job:
         the same TimeoutError as other timeouts.
         """
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         otype = ffi.new("int *")
         oval = ffi.new("int *")
         rc = lib.pyte_job_wait(h, _ms(timeout), otype, oval)
@@ -587,7 +588,7 @@ class Job:
              signal: int | signal.Signals = signal.SIGTERM) -> None:
         """Terminate gracefully; SIGKILL after timeout expires."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_job_stop(h, _signo(signal), _ms(timeout)),
               f"job.stop({self.program})")
 
@@ -619,7 +620,7 @@ class Job:
         priority is "low", "default" or "high"; wrappers stack right
         to left within a priority level.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         try:
             prio = {"low": lib.PYTE_JOB_WRAPPER_PRIORITY_LOW,
                     "default": lib.PYTE_JOB_WRAPPER_PRIORITY_DEFAULT,
@@ -646,7 +647,7 @@ class Job:
         """
         if self._h is None:      # after destroy(): no-op, mirrors destroy()
             return               # idempotence; a NULL handle would crash in C
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_job_set_tracing(self._h, 1 if enable else 0)
 
     @contextmanager
@@ -666,7 +667,7 @@ class Job:
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_job_kill(h, _signo(signal)),
               f"job.kill({self.program}, {signal})")
 
@@ -679,7 +680,7 @@ class Job:
         dereference freed memory in C — they raise RuntimeError
         instead.
         """
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._h is not None:
             check(lib.pyte_job_destroy(self._h, _ms(timeout)),
                   f"job.destroy({self.program})")

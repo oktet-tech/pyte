@@ -8,8 +8,9 @@ its handle explicitly via free() or in __del__.
 """
 from __future__ import annotations
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 from pyte.tad.dsl import Layer, Stack, stack
 
 #: Default receive timeout (seconds).
@@ -29,7 +30,7 @@ def validate(text: str, kind: str) -> None:
     escape hatches.  Raises ValueError with the failing symbol
     position on bad text.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     try:
         k = _VALIDATE_KINDS[kind]
     except KeyError:
@@ -54,7 +55,7 @@ _sessions: dict[str, int] = {}
 def _session(ta: str) -> int:
     """Get (or create and cache) an RCF session on the agent."""
     if ta not in _sessions:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         check(lib.pyte_ta_session(_enc(ta), out), f"ta_session({ta})")
         _sessions[ta] = out[0]
@@ -95,7 +96,7 @@ class Packet:
         Genuinely signed fields (TTL, flags) should use the default
         ``unsigned=False``.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int64_t *")
         check(lib.pyte_pkt_read_int(self._h, _enc(labels), out),
               f"pkt.int_field({labels})")
@@ -107,7 +108,7 @@ class Packet:
     @property
     def payload(self) -> bytes:
         """Packet payload (b"" when absent or empty)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ln = ffi.new("size_t *", 0)
         rc = lib.pyte_pkt_payload(self._h, ffi.NULL, ln)
         if rc == 0:
@@ -121,7 +122,7 @@ class Packet:
     def free(self) -> None:
         """Free the underlying asn_value (idempotent)."""
         if self._h is not None:
-            from pyte._shim import lib
+            lib = _shim_lib()
             lib.pyte_pkt_free(self._h)
             self._h = None
 
@@ -144,7 +145,7 @@ class Receiver:
         self._done = False
 
     def _finish(self, wait: bool) -> list[Packet]:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         if self._done:
             raise RuntimeError("receive operation already finished")
         out = ffi.new("pyte_pkts *")
@@ -207,7 +208,7 @@ class Csap:
         return obj
 
     def _setup(self, ta: str, stack_id: str, spec_text: str) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         self.ta = ta
         self.stack_id = stack_id
         self._session = _session(ta)
@@ -244,7 +245,7 @@ class Csap:
 
     def send_asn(self, text: str, blocking: bool = True) -> None:
         """Send one packet from raw NDN template text."""
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_csap_send(_enc(self.ta), self._session,
                                  self._handle, _enc(text),
                                  1 if blocking else 0),
@@ -259,7 +260,7 @@ class Csap:
         layer choice).  count = 0 means no packet limit; collect the
         result with the returned Receiver's wait() or stop().
         """
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._rx is not None and not self._rx._done:
             raise RuntimeError("a receive operation is already active")
         if pattern is None:
@@ -288,7 +289,7 @@ class Csap:
         silent swallow here would hide the root cause of a subsequent
         csap_destroy failure.
         """
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._handle is None:
             return
         if self._rx is not None and not self._rx._done:

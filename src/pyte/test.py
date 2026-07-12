@@ -13,9 +13,10 @@ from contextlib import contextmanager
 from typing import Callable
 
 from pyte import log
+from pyte._util import shim_lib as _shim_lib
 from pyte._params import Params, parse_argv
 from pyte.errors import TestFail, TestSkip
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 EXIT_SIGINT = 0x2
 EXIT_SIGUSR2 = 0x4
@@ -32,20 +33,20 @@ class Test:
 
     # -- structure ---------------------------------------------------
     def step(self, text: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_step(_enc(text))
 
     def substep(self, text: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_substep(_enc(text))
 
     def verdict(self, text: str, error: bool = False) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         lvl = lib.TE_LL_ERROR if error else lib.TE_LL_RING
         lib.pyte_verdict(lvl, _enc(text))
 
     def artifact(self, text: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_artifact(lib.TE_LL_RING, _enc(text))
 
     # -- outcome -----------------------------------------------------
@@ -131,7 +132,7 @@ def start(name: str | None = None):
     global _current
     if _current is not None:
         raise RuntimeError("test.start() already active")
-    from pyte._shim import lib
+    lib = _shim_lib()
 
     entity = name or os.path.basename(sys.argv[0])
     params = Params(parse_argv(sys.argv[1:]))

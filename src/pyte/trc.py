@@ -26,6 +26,7 @@ import weakref
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import TrcError, check
 
 # Public re-export so callers can do ``from pyte.trc import TrcError``.
@@ -52,7 +53,7 @@ _STATUS_BY_NAME: dict[str, int] = {}
 def _statuses() -> dict[int, str]:
     global _STATUS_BY_VALUE, _STATUS_BY_NAME
     if not _STATUS_BY_VALUE:
-        from pyte._shim import lib
+        lib = _shim_lib()
         _STATUS_BY_VALUE = {
             lib.PYTE_TE_TEST_INCOMPLETE: "INCOMPLETE",
             lib.PYTE_TE_TEST_UNSPEC: "UNSPEC",
@@ -83,7 +84,7 @@ def status_value(name: str) -> int:
 
 def _dec(cdata) -> str | None:
     """Decode a const char* to str, returning None for NULL."""
-    from pyte._shim import ffi
+    ffi = _shim()[0]
     if cdata == ffi.NULL:
         return None
     return ffi.string(cdata).decode("utf-8", "backslashreplace")
@@ -93,7 +94,7 @@ class _TagSet:
     """tqh_strings holder for a set of run tags (context manager)."""
 
     def __init__(self, tags: Iterable[str]):
-        from pyte._shim import lib
+        lib = _shim_lib()
         self._h = lib.pyte_tq_strings_new()
         try:
             for tag in tags:
@@ -109,7 +110,7 @@ class _TagSet:
         return self._h
 
     def __exit__(self, *exc):
-        from pyte._shim import lib
+        lib = _shim_lib()
         lib.pyte_tq_strings_free(self._h)
 
 
@@ -133,28 +134,28 @@ class Entry:
     def status(self) -> str:
         """Test status string (e.g. "PASSED", "FAILED")."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return status_name(lib.pyte_trc_entry_status(h))
 
     @property
     def key(self) -> str | None:
         """Bug/ticket key associated with this entry, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_entry_key(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_entry_notes(h))
 
     @property
     def verdicts(self) -> list[str]:
         """Ordered list of verdict strings for this entry."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         result = []
         v = lib.pyte_trc_entry_first_verdict(h)
         while v:
@@ -191,27 +192,27 @@ class Group:
     def tags_str(self) -> str | None:
         """Raw tag expression string (e.g. "linux&jumbo"), or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_result_tags(h))
 
     @property
     def key(self) -> str | None:
         """Bug/ticket key for this group, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_result_key(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_result_notes(h))
 
     def entries(self) -> list[Entry]:
         """All result entries in this group."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         result = []
         e = lib.pyte_trc_result_first_entry(h)
         while e:
@@ -228,7 +229,7 @@ class Group:
         Entry or None.
         """
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         result = lib.pyte_test_result_new(status_value(status))
         try:
             for v in verdicts:
@@ -265,7 +266,7 @@ class Iter:
         An empty-string value means the argument is a wildcard.
         """
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         result = []
         a = lib.pyte_trc_iter_first_arg(h)
         while a:
@@ -290,27 +291,27 @@ class Iter:
     def notes(self) -> str | None:
         """Free-form iteration notes, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_iter_notes(h))
 
     @property
     def filename(self) -> str | None:
         """Source XML filename, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_iter_filename(h))
 
     @property
     def file_pos(self) -> int:
         """Line number in the source XML file."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return lib.pyte_trc_iter_file_pos(h)
 
     def default(self) -> Group | None:
         """The default result group (no tag expression), or None."""
         it_h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         h = lib.pyte_trc_iter_default_result(it_h)
         if h == ffi.NULL:
             return None
@@ -319,7 +320,7 @@ class Iter:
     def groups(self) -> list[Group]:
         """All tagged result groups for this iteration."""
         it_h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         result = []
         g = lib.pyte_trc_iter_first_result(it_h)
         while g:
@@ -333,7 +334,7 @@ class Iter:
         Delegates fully to the C library's tag-matching logic.
         """
         it_h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         with _TagSet(tags) as tag_h:
             h = lib.trc_db_iter_get_exp_result(
                 it_h, tag_h, self._db.last_match)
@@ -344,7 +345,7 @@ class Iter:
     def child_tests(self) -> Iterator["Test"]:
         """Iterate over child tests of this iteration (for package iters)."""
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         t = lib.pyte_trc_iter_first_test(h)
         while t != ffi.NULL:
             yield Test(self._db, t)
@@ -371,62 +372,62 @@ class Test:
     def name(self) -> str:
         """Short test name (last path component)."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_test_name(h)) or ""
 
     @property
     def path(self) -> str:
         """Full slash-separated path from the DB root."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_test_path(h)) or ""
 
     @property
     def test_type(self) -> str:
         """Type string: "unknown", "script", "session", or "package"."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return TEST_TYPES.get(lib.pyte_trc_test_type(h), "unknown")
 
     @property
     def aux(self) -> bool:
         """True if this is an auxiliary test entry."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return bool(lib.pyte_trc_test_aux(h))
 
     @property
     def objective(self) -> str | None:
         """Test objective string, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_test_objective(h))
 
     @property
     def notes(self) -> str | None:
         """Free-form notes, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_test_notes(h))
 
     @property
     def filename(self) -> str | None:
         """Source XML filename, or None."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return _dec(lib.pyte_trc_test_filename(h))
 
     @property
     def file_pos(self) -> int:
         """Line number in the source XML file."""
         h = self._handle()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return lib.pyte_trc_test_file_pos(h)
 
     def iters(self) -> Iterator[Iter]:
         """Iterate over all iteration records for this test."""
         h = self._handle()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         it = lib.pyte_trc_test_first_iter(h)
         while it != ffi.NULL:
             yield Iter(self._db, it)
@@ -442,7 +443,7 @@ class Db:
 
     def __init__(self, handle):
         self._h = handle
-        from pyte._shim import lib
+        lib = _shim_lib()
         # Frees the parsed DB if the object is dropped without close():
         # otherwise the whole libxml2 tree + trc structures leak.
         self._finalizer = weakref.finalize(self, lib.trc_db_close, handle)
@@ -456,7 +457,7 @@ class Db:
     @classmethod
     def open(cls, path: str | PathLike) -> "Db":
         """Open a TRC XML database, applying XInclude if needed."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("te_trc_db **")
         check(lib.pyte_trc_db_open(str(path).encode(), out),
               f"trc_db_open({path})", TrcError)
@@ -478,13 +479,13 @@ class Db:
     def last_match(self) -> bool:
         """Whether the last walker match was a 'last match' (new record)."""
         h = self._live()
-        from pyte._shim import lib
+        lib = _shim_lib()
         return bool(lib.pyte_trc_db_last_match(h))
 
     def tests(self) -> Iterator[Test]:
         """Iterate over top-level test nodes in the database."""
         h = self._live()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         t = lib.pyte_trc_db_first_test(h)
         while t != ffi.NULL:
             yield Test(self, t)
@@ -536,7 +537,7 @@ class Db:
         considered, and None is returned if no exact record matches.
         """
         db_h = self._live()
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         walker = lib.trc_db_new_walker(db_h)
         try:
             lib.trc_db_walker_go_to_test(walker, test._handle())
@@ -572,7 +573,7 @@ def _logic_expr_reset() -> None:
     clean state.  This function performs that cleanup call; it is called
     unconditionally after any failed logic_expr_parse.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("logic_expr **")
     lib.logic_expr_parse(b"_reset_", out)
 
@@ -583,7 +584,7 @@ def _parse_logic_expr(expr: str):
     Drains the scanner state on failure — the ONLY sanctioned
     logic_expr_parse call site; see _logic_expr_reset().
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("logic_expr **")
     if lib.logic_expr_parse(expr.encode(), out) != 0:
         _logic_expr_reset()
@@ -597,7 +598,7 @@ def parse_tag_expr(expr: str) -> None:
     The parsed expression is freed immediately; this function is only
     useful to validate that *expr* is syntactically correct.
     """
-    from pyte._shim import lib
+    lib = _shim_lib()
     lib.logic_expr_free(_parse_logic_expr(expr))
 
 
@@ -607,7 +608,7 @@ def quiet_logging() -> None:
     Suppresses lib/trc warnings like "Duplicated iteration" that
     otherwise go through an unset/IPC logging backend.
     """
-    from pyte._shim import lib
+    lib = _shim_lib()
     lib.pyte_trc_quiet_logging()
 
 
@@ -619,7 +620,7 @@ def tag_expr_matches(expr: str | None, tags: Iterable[str]) -> bool:
     """
     if not expr:
         return True
-    from pyte._shim import lib
+    lib = _shim_lib()
     parsed = _parse_logic_expr(expr)
     try:
         with _TagSet(tags) as tag_h:

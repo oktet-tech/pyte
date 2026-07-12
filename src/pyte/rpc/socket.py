@@ -6,8 +6,9 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 
 class Msg(enum.Flag):
@@ -64,7 +65,7 @@ def _ensure_msg_bits() -> None:
     """Populate MSG_BITS lazily from the shim constants."""
     if MSG_BITS:
         return
-    from pyte._shim import lib
+    lib = _shim_lib()
     for member, const in _MSG_CONSTS.items():
         MSG_BITS[member] = int(getattr(lib, const))
 
@@ -205,7 +206,7 @@ class RpcSocket:
             raise TypeError(
                 f"type must be a SockType, not "
                 f"{type.__class__.__name__}")
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_rpc_socket(server._h,
                                  getattr(lib, family.value),
@@ -226,7 +227,7 @@ class RpcSocket:
         return f"<RpcSocket fd={self.fd} on {self.server!r}>"
 
     def close(self) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         if self.fd < 0:
             return
         out = ffi.new("int *")
@@ -244,7 +245,7 @@ class RpcSocket:
         if not isinstance(opt, SockOpt):
             raise TypeError(
                 f"opt must be a SockOpt, not {opt.__class__.__name__}")
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         optname = getattr(lib, opt.value)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_setsockopt_int(self.server._h, self.fd,
@@ -253,7 +254,7 @@ class RpcSocket:
                                 f"setsockopt({opt.name}, {value})")
 
     def bind(self, addr: tuple[str, int]) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
@@ -262,14 +263,14 @@ class RpcSocket:
                                 f"bind({addr})")
 
     def listen(self, backlog: int = 5) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_rpc_listen(self.server._h, self.fd, backlog, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"listen({backlog})")
 
     def connect(self, addr: tuple[str, int]) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
@@ -278,7 +279,7 @@ class RpcSocket:
                                 f"connect({addr})")
 
     def accept(self) -> "RpcSocket":
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
                         ffi.sizeof("struct sockaddr_storage"))
@@ -291,7 +292,7 @@ class RpcSocket:
         return RpcSocket(self.server, out[0])
 
     def getsockname(self) -> tuple[str, int]:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
                         ffi.sizeof("struct sockaddr_storage"))
@@ -304,7 +305,7 @@ class RpcSocket:
         return _parse_addr(ffi, lib, sa)
 
     def getpeername(self) -> tuple[str, int]:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
                         ffi.sizeof("struct sockaddr_storage"))
@@ -321,7 +322,7 @@ class RpcSocket:
         if not isinstance(opt, SockOpt):
             raise TypeError(
                 f"opt must be a SockOpt, not {opt.__class__.__name__}")
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         val = ffi.new("int *")
         out = ffi.new("int *")
         rc = lib.pyte_rpc_getsockopt_int(self.server._h, self.fd,
@@ -335,7 +336,7 @@ class RpcSocket:
         if not isinstance(how, Shut):
             raise TypeError(
                 f"how must be a Shut, not {how.__class__.__name__}")
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_rpc_shutdown(self.server._h, self.fd,
                                    getattr(lib, how.value), out)
@@ -344,7 +345,7 @@ class RpcSocket:
 
     def set_blocking(self, blocking: bool) -> None:
         """Set blocking (True) or non-blocking (False) mode (via fcntl)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_sock_set_blocking(self.server._h, self.fd,
                                         1 if blocking else 0, out)
@@ -353,7 +354,7 @@ class RpcSocket:
 
     def get_blocking(self) -> bool:
         """Return True if the socket is in blocking mode."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         blk = ffi.new("int *")
         out = ffi.new("int *")
         rc = lib.pyte_sock_get_blocking(self.server._h, self.fd, blk, out)
@@ -363,7 +364,7 @@ class RpcSocket:
 
     def send(self, data: bytes, flags: Msg = Msg(0)) -> int:
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_send(self.server._h, self.fd, data, len(data),
                                bits, out)
@@ -372,7 +373,7 @@ class RpcSocket:
 
     def recv(self, size: int, flags: Msg = Msg(0)) -> bytes:
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, bits,
@@ -384,7 +385,7 @@ class RpcSocket:
     def sendto(self, data: bytes, addr: tuple[str, int],
                flags: Msg = Msg(0)) -> int:
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("ssize_t *")
@@ -397,7 +398,7 @@ class RpcSocket:
     def recvfrom(self, size: int, flags: Msg = Msg(0),
                  ) -> tuple[bytes, tuple[str, int]]:
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         buf = ffi.new("uint8_t[]", size)
         ss = ffi.new("struct sockaddr_storage *")
         fromlen = ffi.new("socklen_t *",
@@ -428,7 +429,7 @@ class RpcSocket:
         :returns:         bytes sent.
         """
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
 
         buffers = list(buffers)
         if not buffers:
@@ -506,7 +507,7 @@ class RpcSocket:
         RPC conversion; unknown values arrive mangled (SOL_MAX + WARN).
         """
         bits = _msg_bits(flags)
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
 
         p_data = ffi.new("uint8_t **")
         p_data_len = ffi.new("size_t *")

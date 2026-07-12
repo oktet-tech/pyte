@@ -23,6 +23,8 @@ exactly these shapes.
 """
 from __future__ import annotations
 
+from pyte._util import shim_lib as _shim_lib
+
 from contextlib import contextmanager
 
 from pyte import cfg
@@ -30,7 +32,7 @@ from pyte import cfg
 
 def _cvt_int(name: str) -> int:
     """Resolve a CVT name ("INT32") to its shim PYTE_CVT_* int."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     return getattr(lib, f"PYTE_CVT_{name}")
 
 

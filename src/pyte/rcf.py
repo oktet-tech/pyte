@@ -28,8 +28,9 @@ import random
 import tempfile
 from dataclasses import dataclass
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import RcfError, check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 
 def _split_ta_list(block: bytes) -> list[str]:
@@ -89,7 +90,7 @@ def _conf_pairs(host: str | None, port: int,
 
 
 def agents() -> list[str]:
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
 
     def _call(size):
         buf = ffi.new("char[]", size)
@@ -121,7 +122,7 @@ class RcfAgent:
     # -- info -----------------------------------------------------------
     @property
     def type(self) -> str:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         buf = ffi.new("char[]", lib.PYTE_RCF_MAX_NAME)
         check(lib.pyte_rcf_ta_type(_enc(self.name), buf),
               f"rcf.type({self.name})", RcfError)
@@ -129,7 +130,7 @@ class RcfAgent:
 
     @property
     def info(self) -> AgentInfo:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         typ = ffi.new("char **")
         rcflib = ffi.new("char **")
         confstr = ffi.new("char **")
@@ -149,19 +150,19 @@ class RcfAgent:
 
     # -- files ------------------------------------------------------------
     def put_file(self, local: str, remote: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_rcf_put_file(_enc(self.name), _enc(local),
                                     _enc(remote)),
               f"put_file({local} -> {self.name}:{remote})", RcfError)
 
     def get_file(self, remote: str, local: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_rcf_get_file(_enc(self.name), _enc(remote),
                                     _enc(local)),
               f"get_file({self.name}:{remote} -> {local})", RcfError)
 
     def del_file(self, remote: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_rcf_del_file(_enc(self.name), _enc(remote)),
               f"del_file({self.name}:{remote})", RcfError)
 
@@ -187,7 +188,7 @@ class RcfAgent:
     # -- control ------------------------------------------------------------
     def restart(self, boot_params: str | None = None) -> None:
         """Restart the TA process (remote, rebootable agents only)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         check(lib.pyte_rcf_ta_restart(
                   _enc(self.name),
                   _enc(boot_params) if boot_params else ffi.NULL),
@@ -195,7 +196,7 @@ class RcfAgent:
 
     def flush_logs(self) -> None:
         """Ask the Logger to pump out this TA's accumulated log now."""
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_rcf_ta_flush_logs(_enc(self.name)),
               f"flush_logs({self.name})", RcfError)
 
@@ -223,7 +224,7 @@ class DynamicAgent(RcfAgent):
         _removed).  An externally-deleted /rcf subtree surfaces as
         CfgError by design — that is not a repeated remove().
         """
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._removed:
             return
         if self.managed:
@@ -289,7 +290,7 @@ def add_agent(name: str, host: str | None = None, type: str = "linux",
     if sudo and not managed:
         raise ValueError("sudo=True requires managed=True "
                          "(the raw RCF path starts agents unprivileged)")
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     flags = lib.PYTE_RCF_TA_REBOOTABLE if rebootable else 0
     if managed:
         pairs = _conf_pairs(host, port or _pick_port(), sudo)

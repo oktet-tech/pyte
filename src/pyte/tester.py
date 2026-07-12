@@ -19,18 +19,19 @@ Usage (in ts/prologue.py)::
 """
 from __future__ import annotations
 
+from pyte._util import shim_lib as _shim_lib
 from pyte.errors import check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 
 def modify_reqs(expr: str) -> None:
     """AND a requirement expression into the session filter."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_reqs_modify(_enc(expr)), f"modify_reqs({expr!r})")
 
 
 def add_trc_tag(name: str, value: str | None = None) -> None:
     """Add a runtime TRC tag (root prologue only, enforced by TE)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_tags_add_tag(_enc(name), _enc(value or "")),
           f"add_trc_tag({name!r})")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import enum
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import RpcError, check
 
 
@@ -65,7 +66,7 @@ def _ensure_event_bits() -> None:
     """Populate EVENT_BITS lazily from the shim constants."""
     if EVENT_BITS:
         return
-    from pyte._shim import lib
+    lib = _shim_lib()
     for member, const in _EVT_CONSTS.items():
         EVENT_BITS[member] = int(getattr(lib, const))
 
@@ -118,7 +119,7 @@ class IoMux:
     @classmethod
     def create(cls, server, kind: Kind = Kind.EPOLL) -> "IoMux":
         """Create a new iomux of the given *kind* on *server*."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         if not isinstance(kind, Kind):
             raise TypeError(
                 f"kind must be a Kind, not {type(kind).__name__}")
@@ -140,7 +141,7 @@ class IoMux:
         """Destroy the remote multiplexer (idempotent)."""
         if self._h is None:
             return
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_iomux_destroy(self._h),
               f"iomux_destroy on {self._server!r}", RpcError)
         self._h = None
@@ -158,7 +159,7 @@ class IoMux:
         """Add *sock_or_fd* to the multiplexer watching *events*."""
         if self._h is None:
             raise RuntimeError("IoMux is closed")
-        from pyte._shim import lib
+        lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
         check(lib.pyte_iomux_add(self._h, fd, bits),
@@ -168,7 +169,7 @@ class IoMux:
         """Modify the watched *events* for *sock_or_fd*."""
         if self._h is None:
             raise RuntimeError("IoMux is closed")
-        from pyte._shim import lib
+        lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
         check(lib.pyte_iomux_mod(self._h, fd, bits),
@@ -178,7 +179,7 @@ class IoMux:
         """Remove *sock_or_fd* from the multiplexer."""
         if self._h is None:
             raise RuntimeError("IoMux is closed")
-        from pyte._shim import lib
+        lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         check(lib.pyte_iomux_del(self._h, fd),
               f"iomux_del(fd={fd})", RpcError)
@@ -202,7 +203,7 @@ class IoMux:
             raise ValueError(
                 f"timeout must not be negative, got {timeout!r} "
                 "(use None to block forever)")
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         timeout_ms = -1 if timeout is None else int(timeout * 1000)
         n_out = ffi.new("int *")
         revts_p = ffi.new("int **")

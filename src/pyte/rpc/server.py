@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import RpcError, TestFail, check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 from typing import TYPE_CHECKING
 
 from pyte.rpc.iomux import Kind
@@ -45,7 +46,7 @@ class RpcServer:
 
     @classmethod
     def create(cls, ta: str, name: str) -> "RpcServer":
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("rcf_rpc_server **")
         check(lib.pyte_rpc_server_create(_enc(ta), _enc(name), out),
               f"rpc_server_create({ta}, {name})", RpcError)
@@ -61,7 +62,7 @@ class RpcServer:
         """
         if not self._owned:
             return
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._h is not None:
             check(lib.pyte_rpc_server_destroy(self._h),
                   f"rpc_server_destroy({self.name})", RpcError)
@@ -85,7 +86,7 @@ class RpcServer:
         errno; there is no suppression state (expect_error() catches
         the exception instead).
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         check(guard_rc, where, RpcError)
         if ok(retval):
             return retval
@@ -126,13 +127,13 @@ class RpcServer:
 
     # -- curated calls -------------------------------------------------
     def getpid(self) -> int:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         return self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
                                 lambda v: v >= 0, "getpid()")
 
     def hostname(self) -> str:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         buf = ffi.new("char[]", _HOSTNAME_MAX)
         out = ffi.new("int *")
         self._check_call(
@@ -142,7 +143,7 @@ class RpcServer:
 
     def sh(self, cmd: str) -> str:
         """Run a shell command on the agent, return its stdout."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         pbuf = ffi.new("char **")
         flag = ffi.new("int *")
         value = ffi.new("int *")
@@ -175,7 +176,7 @@ class RpcServer:
         :meth:`sh`), the timeout covers the whole command.  rcf_rpc
         resets the timeout to the default afterwards.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be > 0")
         flag = ffi.new("int *")
@@ -211,7 +212,7 @@ class RpcServer:
 
     def getenv(self, name: str) -> str | None:
         """Get an agent environment variable (None if unset)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("char **")
         rc = lib.pyte_rpc_getenv(self._h, _enc(name), out)
         # rpc_getenv() returns NULL both for "unset" and "call
@@ -230,7 +231,7 @@ class RpcServer:
     def setenv(self, name: str, value: str,
                overwrite: bool = True) -> None:
         """Set an agent environment variable."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("int *")
         rc = lib.pyte_rpc_setenv(self._h, _enc(name), _enc(value),
                                  1 if overwrite else 0, out)

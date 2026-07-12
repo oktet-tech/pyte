@@ -23,17 +23,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import EnvError, check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 
-def _take_str(out) -> str:
-    """Decode and free a C-allocated char* held in a char** out-param."""
-    from pyte._shim import ffi, lib
-    s = ffi.string(out[0]).decode("utf-8", errors="replace")
-    lib.pyte_free_string(out[0])
-    out[0] = ffi.NULL
-    return s
+# Shared impl in pyte._util; the local name stays for callers/tests.
+from pyte._util import take_str as _take_str  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -79,7 +75,7 @@ class Env:
     @classmethod
     def bind(cls, cfg: str) -> "Env":
         """Parse + bind an environment configuration string."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("tapi_env **")
         check(lib.pyte_env_new(out), "env new", EnvError)
         rc = lib.pyte_env_get(_enc(cfg), out[0])
@@ -90,7 +86,7 @@ class Env:
 
     def close(self) -> None:
         """Free the environment (closes env-created RPC servers)."""
-        from pyte._shim import lib
+        lib = _shim_lib()
         if self._h is not None:
             h, self._h = self._h, None   # struct is freed even on error
             check(lib.pyte_env_free(h), "env free", EnvError)
@@ -105,7 +101,7 @@ class Env:
     # -- lookups -------------------------------------------------------
     def _miss(self, kind: str, name: str, rc: int):
         """Raise for a failed lookup: friendly ENOENT, else check()."""
-        from pyte._shim import lib
+        lib = _shim_lib()
         if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ENOENT):
             raise EnvError(f"env has no {kind} {name!r} "
                            f"(env: {self._cfg})")
@@ -113,7 +109,7 @@ class Env:
 
     def pco(self, name: str):
         """The named RPC server (created by the env; env-owned)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         from pyte.rpc.server import RpcServer
         out = ffi.new("rcf_rpc_server **")
         rc = lib.pyte_env_get_pco(self._h, _enc(name), out)
@@ -132,7 +128,7 @@ class Env:
         into the env (unlike the C TEST_GET_ADDR macro).  For "ether"
         addresses no port slot exists and port= is silently ignored.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ip_out = ffi.new("char **")
         fam_out = ffi.new("char **")
         port_out = ffi.new("int *")
@@ -153,7 +149,7 @@ class Env:
 
     def iface(self, name: str) -> EnvIface:
         """The named interface: OS name, ifindex, owning agent."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         n_out = ffi.new("char **")
         idx = ffi.new("unsigned int *")
         rc = lib.pyte_env_get_if(self._h, _enc(name), n_out, idx)
@@ -169,7 +165,7 @@ class Env:
     def host(self, name: str = "") -> str:
         """TA name of the named host ("" = the first host declared in
         the env string)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("char **")
         rc = lib.pyte_env_get_host_ta(self._h, _enc(name), out)
         if rc != 0:
@@ -183,7 +179,7 @@ class Env:
         ENOENT (net not found) raises EnvError; ENODATA (net found but
         no subnet of that family) stores None in the result field.
         """
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         subnets = []
         for v6 in (0, 1):
             s_out = ffi.new("char **")

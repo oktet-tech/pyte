@@ -3,6 +3,8 @@
 """TE error model: te_errno -> exceptions."""
 from __future__ import annotations
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
+
 import builtins
 
 
@@ -10,7 +12,7 @@ class TeError(Exception):
     """A TE API call failed with a te_errno status."""
 
     def __init__(self, rc: int, where: str = ""):
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         self.rc = rc
         self.module = lib.pyte_rc_module(rc)
         self.code = lib.pyte_rc_error(rc)
@@ -174,7 +176,7 @@ def __getattr__(name: str):
     AttributeError while PYTE_ETIMEDOUT existed).
     """
     if name.startswith("E") and name.isupper():
-        from pyte._shim import lib
+        lib = _shim_lib()
         try:
             return getattr(lib, f"PYTE_{name}")
         except AttributeError:
@@ -186,7 +188,7 @@ def __dir__() -> list[str]:
     """Module contents plus the shim's errno constants (discoverable)."""
     names = set(globals())
     try:
-        from pyte._shim import lib
+        lib = _shim_lib()
         names.update(n[len("PYTE_"):] for n in dir(lib)
                      if n.startswith("PYTE_E"))
     except Exception:  # noqa: BLE001  shim absent: plain module dir
@@ -200,7 +202,7 @@ def check(rc: int, where: str = "", cls: type[TeError] = TeError) -> None:
     Timeouts always raise pyte.errors.TimeoutError regardless of cls.
     """
     if rc != 0:
-        from pyte._shim import lib
+        lib = _shim_lib()
         if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ETIMEDOUT):
             raise TimeoutError(rc, where)
         raise cls(rc, where)

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import enum
 
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
 
 
@@ -78,7 +79,7 @@ _BITS: dict[enum.Enum, int] = {}
 def _const(member: enum.Enum) -> int:
     """Resolve an MI enum member to its shim integer (cached)."""
     if member not in _BITS:
-        from pyte._shim import lib
+        lib = _shim_lib()
         _BITS[member] = int(getattr(lib, member.value))
     return _BITS[member]
 
@@ -113,7 +114,7 @@ class Logger:
         self._open()
 
     def _open(self) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         out = ffi.new("te_mi_logger **")
         rc = lib.pyte_mi_meas_create(self._tool.encode(), out)
         check(rc, f"mi.Logger({self._tool!r})")

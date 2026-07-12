@@ -21,13 +21,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pyte import cfg, log
+from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.cfg import SubObject
 from pyte.cfg.gen.agent import Agent as _GenAgent
 from pyte.cfg.gen.interface import Interface as _GenInterface
 from pyte.cfg.gen.interface import Phy as _GenPhy
 from pyte.cfg.gen.sys import Sys as _GenSys
 from pyte.errors import CfgError, check
-from pyte.log import _enc
+from pyte._util import enc as _enc
 
 
 def _parse_dst(spec: str) -> tuple[str, int]:
@@ -151,7 +152,7 @@ class Iface(_GenInterface):
         return [(na.name, na.value) for na in self.net_addr]
 
     def addr_add(self, ip: str, prefix: int, broadcast: bool = True) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_cfg_if_addr_add(_enc(self.agent), _enc(self.name),
                                        _enc(ip), prefix, broadcast),
               f"addr_add({ip}/{prefix})", CfgError)
@@ -218,7 +219,7 @@ class AgentNet:
 
     def route_add(self, dst: str, gw: str | None = None,
                   dev: str | None = None, metric: int = 0) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ip, prefix = _parse_dst(dst)
         check(lib.pyte_cfg_route_add(
                   _enc(self.name), _enc(ip), prefix,
@@ -228,7 +229,7 @@ class AgentNet:
 
     def route_del(self, dst: str, gw: str | None = None,
                   dev: str | None = None, metric: int = 0) -> None:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         ip, prefix = _parse_dst(dst)
         check(lib.pyte_cfg_route_del(
                   _enc(self.name), _enc(ip), prefix,
@@ -251,14 +252,14 @@ class AgentNet:
 
     def neigh_add(self, ip: str, mac: str, iface: str,
                   static: bool = True) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         raw = _parse_mac(mac)
         check(lib.pyte_cfg_neigh_add(_enc(self.name), _enc(iface),
                                      _enc(ip), raw, static),
               f"neigh_add({ip})", CfgError)
 
     def neigh_del(self, ip: str, iface: str) -> None:
-        from pyte._shim import lib
+        lib = _shim_lib()
         check(lib.pyte_cfg_neigh_del(_enc(self.name), _enc(iface),
                                      _enc(ip)),
               f"neigh_del({ip})", CfgError)
@@ -284,7 +285,7 @@ class AgentNet:
         return _GenSys(self.name)
 
     def sysctl(self, path: str) -> int | str:
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         p = _sys_path(path)
         out = ffi.new("int *")
         rc = lib.pyte_cfg_sys_get_int(_enc(self.name), _enc(p), out)
@@ -304,7 +305,7 @@ class AgentNet:
 
     def sysctl_set(self, path: str, value: int | str) -> int | str:
         """Set and return the previous value (for cleanup restore)."""
-        from pyte._shim import ffi, lib
+        ffi, lib = _shim()
         p = _sys_path(path)
         if isinstance(value, int):
             old = ffi.new("int *")
@@ -330,20 +331,20 @@ def agent(name: str) -> AgentNet:
 
 def net_remove_empty() -> None:
     """Remove /net networks with no nodes (tapi_cfg_net_remove_empty)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_remove_empty(), "net.remove_empty", CfgError)
 
 
 def net_reserve_all() -> None:
     """Reserve every /net node as an agent resource
     (tapi_cfg_net_reserve_all)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_reserve_all(), "net.reserve_all", CfgError)
 
 
 def net_all_up(force: bool = False) -> None:
     """Bring every /net node interface up (tapi_cfg_net_all_up)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_all_up(1 if force else 0),
           f"net.all_up(force={force})", CfgError)
 
@@ -351,7 +352,7 @@ def net_all_up(force: bool = False) -> None:
 def net_delete_all_ip4() -> None:
     """Delete all IPv4 addresses on /net node interfaces
     (tapi_cfg_net_delete_all_ip4_addresses)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_delete_all_ip4_addresses(),
           "net.delete_all_ip4", CfgError)
 
@@ -367,7 +368,7 @@ def net_all_assign_ip(af: str = "inet") -> None:
 def net_update_pci_fn_to_interface() -> None:
     """Switch all /net nodes from PCI function to interface references
     (tapi_cfg_net_nodes_update_pci_fn_to_interface, all node types)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_net_update_pci_fn_to_interface(),
           "net.update_pci_fn_to_interface", CfgError)
 
@@ -379,7 +380,7 @@ def alloc_net_addr(pool_oid: str) -> str:
     net's ip4 subnet); consecutive calls hand out consecutive
     addresses.
     """
-    from pyte._shim import ffi, lib
+    ffi, lib = _shim()
     out = ffi.new("char **")
     check(lib.pyte_cfg_alloc_net_addr(_enc(pool_oid), out),
           f"net.alloc_net_addr({pool_oid})", CfgError)
@@ -392,7 +393,7 @@ def alloc_net_addr(pool_oid: str) -> str:
 def if_add_net_addr(ta: str, ifname: str, addr: str, prefix: int) -> None:
     """Add an IPv4 address to an agent interface, no broadcast
     (tapi_cfg_base_if_add_net_addr with set_bcast=false)."""
-    from pyte._shim import lib
+    lib = _shim_lib()
     check(lib.pyte_cfg_if_addr_add(_enc(ta), _enc(ifname), _enc(addr),
                                    prefix, 0),
           f"net.if_add_net_addr({addr}/{prefix})", CfgError)
