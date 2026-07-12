@@ -165,13 +165,19 @@ class Shut(enum.Enum):
 
 
 def _mk_addr(ffi, lib, addr: tuple[str, int]):
-    """(ip, port) -> (struct sockaddr *, keepalive storage)."""
+    """(ip, port) -> owning struct sockaddr_storage cdata.
+
+    Returns the OWNER, not a cast pointer: in cffi a cast does not keep
+    the owning cdata alive, so callers cast to ``struct sockaddr *`` at
+    the call site, where the returned owner stays alive in a local for
+    the duration of the C call.
+    """
     ip, port = addr
     ss = ffi.new("struct sockaddr_storage *")
     sslen = ffi.new("socklen_t *")
     check(lib.pyte_sockaddr_in4(_enc(ip), port, ss, sslen),
           f"sockaddr({ip}, {port})")
-    return ffi.cast("struct sockaddr *", ss), ss
+    return ss
 
 
 def _parse_addr(ffi, lib, sa) -> tuple[str, int]:
@@ -251,7 +257,8 @@ class RpcSocket:
 
     def bind(self, addr: tuple[str, int]) -> None:
         from pyte._shim import ffi, lib
-        sa, _keep = _mk_addr(ffi, lib, addr)
+        ss = _mk_addr(ffi, lib, addr)
+        sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_bind(self.server._h, self.fd, sa, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
@@ -266,7 +273,8 @@ class RpcSocket:
 
     def connect(self, addr: tuple[str, int]) -> None:
         from pyte._shim import ffi, lib
-        sa, _keep = _mk_addr(ffi, lib, addr)
+        ss = _mk_addr(ffi, lib, addr)
+        sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
         rc = lib.pyte_rpc_connect(self.server._h, self.fd, sa, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
@@ -395,7 +403,8 @@ class RpcSocket:
                flags: Msg = Msg(0)) -> int | None:
         bits = _msg_bits(flags)
         from pyte._shim import ffi, lib
-        sa, _keep = _mk_addr(ffi, lib, addr)
+        ss = _mk_addr(ffi, lib, addr)
+        sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_sendto(self.server._h, self.fd, data, len(data),
                                  bits, sa, out)
@@ -546,30 +555,26 @@ class RpcSocket:
         if ret is SUPPRESSED:
             return None
 
-        # extract received data
-        data = bytes(ffi.buffer(p_data[0], p_data_len[0]))
-        lib.pyte_free_string(ffi.cast("char *", p_data[0]))
+        # Extract everything under try/finally: a failure mid-extraction
+        # must not leak the shim's allocations.  The address decodes
+        # with errors="replace", consistent with the rest of the package
+        # (a strict decode here was the plausible leak trigger).
+        try:
+            data = bytes(ffi.buffer(p_data[0], p_data_len[0]))
+            addr_str = ffi.string(p_from_addr[0]).decode(
+                "utf-8", errors="replace")
+            ancillary = [
+                (int(p_levels[0][i]), int(p_types[0][i]),
+                 bytes(ffi.buffer(p_datas[0][i], int(p_lens[0][i]))))
+                for i in range(int(p_n_cmsg[0]))]
+        finally:
+            lib.pyte_free_string(ffi.cast("char *", p_data[0]))
+            lib.pyte_free_string(p_from_addr[0])
+            if int(p_n_cmsg[0]) > 0:
+                lib.pyte_free_cmsgs(p_levels[0], p_types[0],
+                                    p_datas[0], p_lens[0],
+                                    int(p_n_cmsg[0]))
 
-        # extract source address
-        addr_str = ffi.string(p_from_addr[0]).decode()
-        lib.pyte_free_string(p_from_addr[0])
-        if addr_str:
-            addr = (addr_str, int(p_from_port[0]))
-        else:
-            addr = None
-
-        # extract control messages
-        n = int(p_n_cmsg[0])
-        ancillary = []
-        if n > 0:
-            for i in range(n):
-                lvl = int(p_levels[0][i])
-                typ = int(p_types[0][i])
-                dlen = int(p_lens[0][i])
-                dat = bytes(ffi.buffer(p_datas[0][i], dlen))
-                ancillary.append((lvl, typ, dat))
-            lib.pyte_free_cmsgs(p_levels[0], p_types[0],
-                                p_datas[0], p_lens[0], n)
-
+        addr = (addr_str, int(p_from_port[0])) if addr_str else None
         return RecvMsg(data=data, ancillary=ancillary, addr=addr,
                        flags=_msg_flag(int(p_msg_flags[0])))

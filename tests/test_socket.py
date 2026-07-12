@@ -201,3 +201,24 @@ def test_recvmsg_decodes_flags_to_msg(monkeypatch):
     assert rm.data == b"hello"
     assert isinstance(rm.flags, Msg)
     assert rm.flags == Msg.TRUNC | Msg.CTRUNC
+
+
+def test_mk_addr_returns_owning_storage():
+    """_mk_addr must return the owning cdata, not a cast pointer: a
+    cffi cast does not keep the owner alive, so returning the cast
+    made every future caller a use-after-free landmine."""
+    sentinel = object()
+
+    class Ffi:
+        def new(self, spec, *a):
+            if spec == "struct sockaddr_storage *":
+                return sentinel
+            return [0]
+
+    class Lib:
+        def pyte_sockaddr_in4(self, ip, port, ss, sslen):
+            assert ss is sentinel
+            return 0
+
+    ss = sockmod._mk_addr(Ffi(), Lib(), ("192.0.2.1", 80))
+    assert ss is sentinel

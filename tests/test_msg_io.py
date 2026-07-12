@@ -261,7 +261,7 @@ class FakeLib:
         self.calls.append(("free_cmsgs", n))
 
     def pyte_free_string(self, p):
-        pass
+        self.calls.append(("free_string",))
 
     def pyte_rpc_errno(self, rpcs):
         return 0
@@ -475,3 +475,57 @@ def test_ancillary_level_type_must_be_int(monkeypatch):
     # type is a float instead of int
     with pytest.raises(ValueError, match="type"):
         sock.sendmsg([b"x"], ancillary=[(0, 2.0, b"\x40")])
+
+
+# -- recvmsg memory hygiene ---------------------------------------------------
+
+def test_recvmsg_bad_addr_bytes_decode_with_replace(monkeypatch):
+    """A non-UTF-8 source address must not raise (and leak the C
+    buffers): decode with errors=\"replace\" like the rest of pyte."""
+    lib = FakeLib()
+    lib._recv_addr = b"\xff\xfe\x00"
+    lib._recv_levels = []
+    lib._recv_types = []
+    lib._recv_datas = []
+    _install_fake(monkeypatch, lib)
+    sock = RpcSocket(FakeServer(), 7)
+
+    msg = sock.recvmsg(64)
+
+    assert msg.addr == ("��", 5000)
+    frees = [c for c in lib.calls if c[0] == "free_string"]
+    assert len(frees) == 2   # data + from_addr
+
+
+def test_recvmsg_frees_buffers_when_extraction_raises(monkeypatch):
+    """If extraction fails mid-way, every C allocation is still freed."""
+
+    class BoomArray:
+        def __getitem__(self, idx):
+            raise RuntimeError("boom during extraction")
+
+    class BoomLib(FakeLib):
+        def pyte_rpc_recvmsg(self, rpcs, s, bufsize, ctrl_space, flags,
+                             data_out, data_len_out,
+                             from_addr_out, from_port_out,
+                             levels_out, types_out, datas_out, lens_out,
+                             n_cmsg_out, msg_flags_out, received_out):
+            super().pyte_rpc_recvmsg(
+                rpcs, s, bufsize, ctrl_space, flags,
+                data_out, data_len_out, from_addr_out, from_port_out,
+                levels_out, types_out, datas_out, lens_out,
+                n_cmsg_out, msg_flags_out, received_out)
+            lens_out[0] = BoomArray()   # poison the cmsg length array
+            return 0
+
+    lib = BoomLib()
+    _install_fake(monkeypatch, lib)
+    sock = RpcSocket(FakeServer(), 7)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        sock.recvmsg(64, ctrl_space=256)
+
+    frees = [c for c in lib.calls if c[0] == "free_string"]
+    assert len(frees) == 2, "data and from_addr must be freed on failure"
+    assert [c for c in lib.calls if c[0] == "free_cmsgs"], \
+        "cmsg arrays must be freed on failure"
