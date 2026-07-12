@@ -87,15 +87,20 @@ class RemoteObject:
     back by the marshalling rule (JSON-able -> value, else another
     proxy).  Underscore-prefixed attributes are not proxied.
 
-    Only attribute access and calls are proxied — indexing, len(),
-    iteration, and comparisons are NOT and fail or misbehave
-    engine-side; fetch values and operate locally, or do it inside a
-    shipped function.
+    Only attribute READS and calls are proxied — assignment raises
+    (a silently-local attribute would shadow the remote one on later
+    reads too), and indexing, len(), iteration, and comparisons are
+    NOT proxied and fail or misbehave engine-side; fetch values and
+    operate locally, or do it inside a shipped function.
+
+    A garbage-collected proxy queues its handle for release; the next
+    request on the session piggybacks the queued handles so the
+    runner can drop the objects (no extra round trip).
     """
 
     def __init__(self, session: "RemotePython", handle: int):
-        self._session = session
-        self._handle = handle
+        object.__setattr__(self, "_session", session)
+        object.__setattr__(self, "_handle", handle)
 
     def __getattr__(self, name: str):
         if name.startswith("_"):
@@ -103,11 +108,25 @@ class RemoteObject:
         return self._session._request(
             {"op": "getattr", "obj": self._handle, "name": name})
 
+    def __setattr__(self, name: str, value) -> None:
+        raise AttributeError(
+            f"RemoteObject does not proxy attribute assignment "
+            f"({name!r}); mutate the object inside a shipped function")
+
     def __call__(self, *args, **kwargs):
         s = self._session
         return s._request({"op": "callobj", "obj": self._handle,
                            "args": s._encode_args(args),
                            "kwargs": s._encode_kwargs(kwargs)})
+
+    def __del__(self):
+        # Queue the handle for release on the next request.  No I/O
+        # here: GC may fire mid-request, and a nested send would
+        # corrupt the request/response pairing.  Never raise.
+        try:
+            self._session._dead.append(self._handle)
+        except Exception:  # noqa: BLE001  interpreter shutdown etc.
+            pass
 
     def __repr__(self) -> str:
         return f"<RemoteObject #{self._handle}>"
@@ -125,6 +144,14 @@ class RemotePython:
         self._buf = ""
         # rcf_rpc_server* handle (pyte.RpcServer._h); None for test fakes.
         self._server = server
+        #: Why the session became unusable (None while healthy).  Set on
+        #: timeout/eos: the request/response pairing is then broken (a
+        #: late reply may still be in flight) and any further request
+        #: would read it as its own answer.
+        self._broken: str | None = None
+        #: Handles of garbage-collected RemoteObjects, released by
+        #: piggybacking on the next request ("free" field).
+        self._dead: list[int] = []
 
     def _set_silent(self, on: bool) -> None:
         """Quiet (on) / restore (off) RPC logging for the transport.
@@ -153,8 +180,13 @@ class RemotePython:
         """Read one response line from the stdout filter.
 
         Filter messages are stream chunks, not lines: accumulate and
-        split on newlines under a single deadline.  An eos message
-        means the runner died.
+        split on newlines under a single deadline.  The deadline is
+        enforced even while data keeps arriving — a stream flowing
+        without newlines (e.g. a subprocess spawned by shipped code
+        inheriting fd 1) must not hold the call forever.  An eos
+        message means the runner died.  Every failure marks the
+        session broken: the pairing with a possibly-in-flight reply
+        cannot be trusted afterwards.
         """
         assert self._flt is not None
         deadline = time.monotonic() + timeout
@@ -165,16 +197,29 @@ class RemotePython:
                 if line.strip():
                     return json.loads(line)
                 continue
-            remaining = max(deadline - time.monotonic(), 0.001)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._broken = (
+                    f"receive deadline ({timeout:g}s) exceeded while "
+                    "data kept arriving without a newline")
+                raise RemotePythonError(
+                    f"session broken: {self._broken}")
             self._set_silent(True)
             try:
-                msg = self._flt.next(timeout=remaining)  # raises TimeoutError
+                msg = self._flt.next(timeout=remaining)
+            except TimeoutError:
+                # builtins.TimeoutError catches pyte.errors.TimeoutError
+                # too; the sent request's reply is still in flight.
+                self._broken = (
+                    f"a request timed out after {timeout:g}s; its late "
+                    "reply may still be in flight")
+                raise
             finally:
                 self._set_silent(False)
             if msg.eos:
-                raise RemotePythonError(
-                    "remote python runner died "
-                    f"({self._job_status() or 'no status'})")
+                self._broken = ("remote python runner died "
+                                f"({self._job_status() or 'no status'})")
+                raise RemotePythonError(self._broken)
             # Per-chunk .data decoding is safe HERE only because the
             # runner emits json.dumps with the ensure_ascii=True
             # default: every protocol byte is 7-bit, so no multibyte
@@ -219,8 +264,16 @@ class RemotePython:
 
     # -- protocol ----------------------------------------------------------
     def _request(self, req: dict, timeout: float | None = None):
+        if self._broken is not None:
+            raise RemotePythonError(
+                f"session unusable: {self._broken}; start a new "
+                "remote.python() session")
         self._last_id += 1
         req = {"id": self._last_id, **req}
+        if self._dead:
+            # Release garbage-collected proxies' remote objects, no
+            # extra round trip.
+            req["free"], self._dead = self._dead, []
         self._send(req)
         resp = self._recv(timeout if timeout is not None
                           else self._timeout)
@@ -244,8 +297,8 @@ class RemotePython:
         and the result follow the marshalling rule.
 
         After a per-call timeout the session is out of sync (the late
-        reply is still in flight) and should be abandoned rather than
-        reused.
+        reply is still in flight): it is marked broken and any further
+        request raises — start a new remote.python() session.
         """
         src, fname = _extract_source(fn)
         return self._request({"op": "call", "src": src, "fname": fname,

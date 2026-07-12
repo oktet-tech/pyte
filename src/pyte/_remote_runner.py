@@ -110,6 +110,11 @@ class Runner:
                                "traceback": traceback.format_exc()})
                 continue
             rid = req.get("id")
+            # Handles of engine-side garbage-collected proxies ride
+            # along on any request; drop them before dispatching
+            # (unknown handles are ignored -- release is best-effort).
+            for handle in req.get("free") or []:
+                self._objects.pop(handle, None)
             if req.get("op") == "shutdown":
                 self._respond({"id": rid, "ok": True, "value": None})
                 return

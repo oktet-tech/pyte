@@ -209,3 +209,22 @@ def test_ref_key_collision_stashed_as_ref(runner):
     assert set(resp["value"]) == {"__pyte_ref__"}
     # The handle must NOT be 123 — it's a runner-assigned handle.
     assert resp["value"]["__pyte_ref__"] != 123
+
+
+def test_free_field_drops_handles(runner):
+    """A request's \"free\" list releases stashed objects up front."""
+    resp = runner.request("import", module="io")
+    handle = resp["value"]["__pyte_ref__"]
+    # piggyback the free on an unrelated request
+    resp = runner.request("call", src=SRC_ADD, fname="add",
+                          args=[1, 2], free=[handle])
+    assert resp["ok"] and resp["value"] == 3
+    # the handle is gone: getattr on it is now a KeyError error response
+    resp = runner.request("getattr", obj=handle, name="StringIO")
+    assert not resp["ok"] and resp["type"] == "KeyError"
+
+
+def test_free_unknown_handle_is_ignored(runner):
+    resp = runner.request("call", src=SRC_ADD, fname="add",
+                          args=[1, 2], free=[9999])
+    assert resp["ok"] and resp["value"] == 3

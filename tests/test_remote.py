@@ -250,3 +250,107 @@ def test_bridge_end_to_end(bridge):
         bridge.call(boom)
     # The session survives a remote exception.
     assert bridge.call(parse_csv_line, "p,q") == ["p", "q"]
+
+
+# ---------------------------------------------------------------------------
+# P0.18: proxy assignment, deadline enforcement, desync flag, handle release
+# ---------------------------------------------------------------------------
+
+def test_proxy_setattr_raises():
+    """Assignment is not proxied; silently setting a local attribute
+    (which later reads would return!) must be refused instead."""
+    s = FakeSession()
+    obj = remote.RemoteObject(s, 3)
+    with pytest.raises(AttributeError, match="assignment"):
+        obj.isolation_level = None
+    assert s.sent == []
+    # reads still see the remote object, not a stale local shadow
+    _reply_to(s, 42)
+    assert obj.isolation_level == 42
+
+
+class _FirehoseFilter:
+    """Always has data, never a newline: a subprocess spawned by shipped
+    code that inherits fd 1 produces exactly this."""
+
+    def __init__(self, limit=1000):
+        self.calls = 0
+        self.limit = limit
+
+    def next(self, timeout):
+        self.calls += 1
+        assert self.calls <= self.limit, \
+            "_recv looped past its deadline without raising"
+        return SimpleNamespace(data="no newline here ", eos=False,
+                               dropped=0, filter=self)
+
+
+def test_recv_enforces_deadline_when_data_flows():
+    """Chunks arriving without newlines must not keep _recv alive past
+    its deadline (the old max(remaining, 1ms) clamp looped forever)."""
+    flt = _FirehoseFilter()
+    s = remote.RemotePython(job=None, flt=flt, timeout=5.0)
+    with pytest.raises(RemotePythonError, match="deadline|timed out"):
+        s._recv(0.0)
+
+
+class _NeverFilter:
+    def next(self, timeout):
+        raise TimeoutError("no data")
+
+
+class _SendOnlySession(remote.RemotePython):
+    def _send(self, req):
+        pass
+
+
+def test_timeout_marks_session_broken():
+    """After a per-call timeout the late reply is still in flight; the
+    session must refuse reuse instead of reading the stale reply and
+    failing with a confusing protocol-error later."""
+    s = _SendOnlySession(job=None, flt=_NeverFilter(), timeout=0.01)
+    with pytest.raises(TimeoutError):
+        s.call(outer, 1)
+    with pytest.raises(RemotePythonError, match="unusable|desync"):
+        s.call(outer, 2)
+
+
+def test_eos_marks_session_broken():
+    flt = _StubFilter([None])
+    s = _SendOnlySession(job=None, flt=flt, timeout=5.0)
+    s._job_status = lambda: None
+    with pytest.raises(RemotePythonError, match="died"):
+        s.call(outer, 1)
+    # second use: refused up front, filter not touched (chunks empty)
+    with pytest.raises(RemotePythonError, match="unusable|died"):
+        s.call(outer, 2)
+
+
+def test_dropped_proxy_frees_handle_on_next_request():
+    """A garbage-collected proxy queues its handle; the next request
+    piggybacks it as \"free\" so the runner can drop the object."""
+    import gc
+
+    s = FakeSession()
+    obj = remote.RemoteObject(s, 7)
+    del obj
+    gc.collect()
+    _reply_to(s, None)
+    s.call(outer, 1)
+    assert s.sent[0].get("free") == [7]
+
+
+def test_bridge_dropped_proxy_releases_remote_object(bridge):
+    """End-to-end: after the proxy dies, the remote handle is gone."""
+    import gc
+
+    sio_mod = bridge.import_module("io")
+    buf = sio_mod.StringIO()
+    handle = buf._handle
+    del buf
+    gc.collect()
+    # any next request carries the free list and drops the handle
+    assert bridge.call(parse_csv_line, "a,b") == ["a", "b"]
+    stale = remote.RemoteObject(bridge, handle)
+    with pytest.raises(RemotePythonError, match="KeyError"):
+        stale.getvalue()
