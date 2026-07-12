@@ -21,6 +21,16 @@ def write_cfg(text):
     return path
 
 
+def remove_file(path):
+    """Best-effort removal of a session temp file (teardown)."""
+    import os
+    try:
+        os.remove(path)
+    except OSError:
+        return {"removed": False}
+    return {"removed": True}
+
+
 def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
     """Import the bundled STL client, connect (with retry), return it."""
     import sys

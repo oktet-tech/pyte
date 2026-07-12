@@ -80,10 +80,13 @@ class Client:
         log.ring("trex: traffic started")
         log.step_pop()
 
-    def wait_on_traffic(self, timeout: float = 0) -> None:
-        log.step_push(f"wait_on_traffic (timeout={timeout or 'inf'})")
-        # timeout=0 → native default (block); pass None to the agent for that.
-        self._call(_ops.wait_on_traffic, timeout or None)
+    def wait_on_traffic(self, timeout: float | None = None) -> None:
+        """Block until traffic stops; None (the native default) waits
+        forever.  A numeric timeout — including 0 — is passed through
+        untouched."""
+        log.step_push("wait_on_traffic (timeout="
+                      f"{'inf' if timeout is None else timeout})")
+        self._call(_ops.wait_on_traffic, timeout)
         log.step_pop("traffic finished")
 
     def get_stats(self, ports: list[int] | None = None) -> dict[int, PortStats]:
@@ -163,28 +166,37 @@ def session(pco: "RpcServer", opts: ServerOpts,
         with remote.python(pco) as rem:
             cfg_path = rem.call(_ops.write_cfg, opts.cfg_yaml())
             log.ring(f"trex cfg: {cfg_path}")
-            job = pco.job("/bin/sh", ["-c", opts.shell_command(cfg_path)])
-            job.stdout.log(level="RING")
-            job.stderr.log(level="WARN")
-            job.start()
             try:
-                cli = rem.call(_ops.bootstrap,
-                               os.path.join(opts.workdir, TREX_PYLIB),
-                               "127.0.0.1", opts.sync_port, opts.async_port,
-                               connect_timeout, timeout=connect_timeout + 15)
-            except RemotePythonError as exc:
-                raise TrexError(
-                    f"TRex STL server did not come up on {pco.ta}: "
-                    f"{exc}") from exc
-            log.ring("trex: STL client connected")
-            log.step_pop(f"TRex STL ready on {pco.ta}")
-            popped = True
-            client = Client(rem, cli, ports)
-            try:
-                yield client
-            finally:
+                job = pco.job("/bin/sh", ["-c", opts.shell_command(cfg_path)])
+                job.stdout.log(level="RING")
+                job.stderr.log(level="WARN")
+                job.start()
                 try:
-                    rem.call(_ops.disconnect, cli)
+                    cli = rem.call(_ops.bootstrap,
+                                   os.path.join(opts.workdir, TREX_PYLIB),
+                                   "127.0.0.1", opts.sync_port,
+                                   opts.async_port, connect_timeout,
+                                   timeout=connect_timeout + 15)
+                except RemotePythonError as exc:
+                    raise TrexError(
+                        f"TRex STL server did not come up on {pco.ta}: "
+                        f"{exc}") from exc
+                log.ring("trex: STL client connected")
+                log.step_pop(f"TRex STL ready on {pco.ta}")
+                popped = True
+                client = Client(rem, cli, ports)
+                try:
+                    yield client
+                finally:
+                    try:
+                        rem.call(_ops.disconnect, cli)
+                    except Exception:   # noqa: BLE001  best-effort teardown
+                        pass
+            finally:
+                # The mkstemp'd cfg would otherwise accumulate on a
+                # shared DUT, one file per session.
+                try:
+                    rem.call(_ops.remove_file, cfg_path)
                 except Exception:   # noqa: BLE001  best-effort teardown
                     pass
     finally:

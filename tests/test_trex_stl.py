@@ -75,3 +75,81 @@ def test_client_get_stats_parses():
     ps = c.get_stats(ports=[0])[0]
     assert ps.tx_pkts == 1000
     assert ps.loss_pkts == 2
+
+
+def test_wait_on_traffic_default_blocks_forever():
+    c, rem = _client()
+    c.wait_on_traffic()
+    op, args, _ = rem.calls[-1]
+    assert op == "wait_on_traffic"
+    assert args[1] is None          # native "block until done"
+
+
+def test_wait_on_traffic_explicit_zero_is_zero():
+    """timeout=0 must mean zero seconds, not silently block forever
+    (the old `timeout or None` turned any falsy float into None)."""
+    c, rem = _client()
+    c.wait_on_traffic(timeout=0)
+    op, args, _ = rem.calls[-1]
+    assert args[1] == 0
+
+
+def test_wait_on_traffic_explicit_value_passes_through():
+    c, rem = _client()
+    c.wait_on_traffic(timeout=12.5)
+    _, args, _ = rem.calls[-1]
+    assert args[1] == 12.5
+
+
+def test_session_removes_cfg_on_teardown(monkeypatch):
+    """The mkstemp'd cfg YAML on the agent must not accumulate across
+    runs on a shared DUT: teardown removes it best-effort."""
+    from contextlib import contextmanager
+
+    from pyte.tools.trex import _config
+
+    calls = []
+
+    class FakeRem:
+        def call(self, fn, *args, **kwargs):
+            calls.append((fn.__name__, args))
+            if fn.__name__ == "write_cfg":
+                return "/tmp/pyte_trex_x.yaml"
+            if fn.__name__ == "bootstrap":
+                return object()     # the remote cli
+            return None
+
+    @contextmanager
+    def fake_python(pco, timeout=30.0, interpreter="python3"):
+        yield FakeRem()
+
+    class FakeChannel:
+        def log(self, level=None):
+            pass
+
+    class FakeJob:
+        stdout = FakeChannel()
+        stderr = FakeChannel()
+
+        def start(self):
+            pass
+
+        def destroy(self, *a, **k):
+            pass
+
+    class FakePco:
+        ta = "Agt_A"
+
+        def job(self, program, args=None):
+            return FakeJob()
+
+    monkeypatch.setattr("pyte.remote.python", fake_python)
+    # session() logs via the real shim; quiet it (no TE logger here)
+    from pyte import log
+    monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
+    monkeypatch.setattr(log, "step_pop", lambda *a, **k: None)
+    monkeypatch.setattr(log, "ring", lambda *a, **k: None)
+    opts = _config.ServerOpts(trex_exec="/x/t-rex-64", ports=["0000:04:00.0"])
+    with stl.session(FakePco(), opts):
+        pass
+    assert ("remove_file", ("/tmp/pyte_trex_x.yaml",)) in calls
