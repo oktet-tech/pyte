@@ -9,6 +9,7 @@ lifecycle — never argv building or output parsing, which stay per-tool.
 """
 from __future__ import annotations
 
+import signal as _signal
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -27,7 +28,7 @@ class Endpoint:
 @contextmanager
 def serve(pco: "RpcServer", program: str, argv: list[str], *,
           host: str, port: int, ready_delay: float = 1.0,
-          term: str = "SIGINT"):
+          term: int | _signal.Signals = _signal.SIGINT):
     """Run a server job for the duration of the ``with`` block.
 
     Starts ``pco.job(program, argv)``, logs its stderr, waits
@@ -51,7 +52,7 @@ def serve(pco: "RpcServer", program: str, argv: list[str], *,
     finally:
         from pyte.errors import TeError
         try:
-            job.stop()
+            job.stop(signal=term)
         except TeError:
             pass
         job.destroy()
