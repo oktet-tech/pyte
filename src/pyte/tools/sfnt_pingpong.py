@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pyte.tools._clientserver import serve
+from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
 if TYPE_CHECKING:
@@ -59,7 +60,6 @@ if TYPE_CHECKING:
 
 _VALID_PROTO = frozenset({"tcp", "udp"})
 _VALID_MUXER = frozenset({"none", "poll", "select", "epoll"})
-_VALID_IPVERSIONS = frozenset({"4", "6"})
 
 
 @dataclass(frozen=True)
@@ -122,10 +122,7 @@ class Opts:
             raise ValueError(
                 f"unknown muxer {self.muxer!r}; "
                 f"valid: {sorted(_VALID_MUXER)}")
-        if self.ipversion is not None and self.ipversion not in _VALID_IPVERSIONS:
-            raise ValueError(
-                f"unknown ipversion {self.ipversion!r}; "
-                f"valid: {sorted(_VALID_IPVERSIONS)}")
+        check_ipversion(self.ipversion)
 
     def server_argv(self) -> list[str]:
         """Build the sfnt-pingpong server argument list (without argv[0]).

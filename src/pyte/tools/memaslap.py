@@ -61,9 +61,10 @@ class CfgOpts:
 
 
 def _addr(v) -> str:
-    if hasattr(v, "pair"):
-        v = v.pair
-    return f"{v[0]}:{v[1]}"
+    """AddrLike -> the "host:port" form memaslap's -s wants."""
+    from pyte.tools._tool import addr_host_port
+    host, port = addr_host_port(v)
+    return f"{host}:{port}"
 
 
 def _pick_last(values: list[str], what: str) -> str:

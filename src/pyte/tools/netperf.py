@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pyte.tools._clientserver import serve
+from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
 if TYPE_CHECKING:
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
 
 _VALID_TESTS = frozenset({"TCP_STREAM", "UDP_STREAM", "TCP_MAERTS",
                            "TCP_RR", "UDP_RR"})
-_VALID_IPVERSIONS = frozenset({"4", "6"})
 
 
 @dataclass(frozen=True)
@@ -112,10 +112,7 @@ class Opts:
             raise ValueError(
                 f"unknown test_name {self.test_name!r}; "
                 f"valid: {sorted(_VALID_TESTS)}")
-        if self.ipversion is not None and self.ipversion not in _VALID_IPVERSIONS:
-            raise ValueError(
-                f"unknown ipversion {self.ipversion!r}; "
-                f"valid: {sorted(_VALID_IPVERSIONS)}")
+        check_ipversion(self.ipversion)
 
     def server_argv(self, bind: str) -> list[str]:
         """Build the netserver argument list (without argv[0]).

@@ -131,63 +131,10 @@ class IoEngine(enum.Enum):
     POSIXAIO = "posixaio"
 
 
-def _coerce(cls, field, v):
-    """Accept an enum member or a (case-insensitive) member-name string."""
-    if isinstance(v, cls):
-        return v
-    if isinstance(v, str):
-        try:
-            return cls[v.upper()]
-        except KeyError:
-            valid = [m.name.lower() for m in cls]
-            raise ValueError(
-                f"unknown {field} {v!r}; valid: {valid}") from None
-    raise TypeError(
-        f"{field} must be {cls.__name__} or str, not "
-        f"{v.__class__.__name__}")
-
-
-def _parse_size(size: str | int | None) -> int | None:
-    """Parse a fio-style size string to bytes.
-
-    Accepts integers (pass through) or strings with optional suffix:
-    k/K → ×1024, m/M → ×1024², g/G → ×1024³.  No suffix means bytes.
-    Raises ValueError on unrecognised suffix, on unparsable numeric
-    parts (e.g. "1.5g"), or on non-positive values.
-
-    Returns None when size is None (unset).
-    """
-    if size is None:
-        return None
-    if isinstance(size, int):
-        if size <= 0:
-            raise ValueError(
-                f"size must be positive, got {size!r}")
-        return size
-    s = size.strip()
-    suffix = s[-1].lower() if s else ""
-    multiplier = 1
-    body = s
-    if suffix in ("k", "m", "g"):
-        body = s[:-1]
-        multiplier = {"k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024}[suffix]
-    elif not s:
-        raise ValueError(
-            f"unrecognised size {size!r}; "
-            "use an integer or a string like '4k', '16m', '1g'")
-    elif not s[-1].isdigit():
-        raise ValueError(
-            f"unrecognised size {size!r}; "
-            "use an integer or a string like '4k', '16m', '1g'")
-    if not body.lstrip("-").isdigit():
-        raise ValueError(
-            f"unparsable numeric in size {size!r}; "
-            "only whole-number sizes are supported (e.g. '4k', '16m', '1g')")
-    result = int(body) * multiplier
-    if result <= 0:
-        raise ValueError(
-            f"size must be positive, got {size!r}")
-    return result
+# Shared helpers (promoted FROM this module to pyte.tools._tool/_units;
+# aliased so internal call sites and tests keep their names).
+from pyte.tools._tool import coerce_enum as _coerce  # noqa: E402
+from pyte.tools._units import parse_size as _parse_size  # noqa: E402
 
 
 @dataclass(frozen=True)

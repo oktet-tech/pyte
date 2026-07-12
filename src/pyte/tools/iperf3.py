@@ -43,13 +43,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pyte.tools._clientserver import serve
+from pyte.tools._tool import check_ipversion
 from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
 _VALID_PROTOCOLS = frozenset({"tcp", "udp"})
-_VALID_IPVERSIONS = frozenset({"4", "6"})
 
 
 @dataclass(frozen=True)
@@ -105,10 +105,7 @@ class Opts:
             raise ValueError(
                 f"unknown protocol {self.protocol!r}; "
                 f"valid: {sorted(_VALID_PROTOCOLS)}")
-        if self.ipversion is not None and self.ipversion not in _VALID_IPVERSIONS:
-            raise ValueError(
-                f"unknown ipversion {self.ipversion!r}; "
-                f"valid: {sorted(_VALID_IPVERSIONS)}")
+        check_ipversion(self.ipversion)
 
     def server_argv(self) -> list[str]:
         """Build the iperf3 server argument list (without argv[0])."""

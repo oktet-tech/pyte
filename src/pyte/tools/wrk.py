@@ -66,72 +66,11 @@ if TYPE_CHECKING:
 # Unit-scale dictionaries (mirror tapi_wrk.c parse_unit tables)
 # ---------------------------------------------------------------------------
 
-#: time → microseconds
-_TIME_US: dict[str, float] = {
-    "us": 1,
-    "ms": 1e3,
-    "s":  1e6,
-    "m":  60e6,
-    "h":  3600e6,
-}
-
-#: metric counts → base (scale ×1000)
-_METRIC: dict[str, float] = {
-    "":  1,
-    "k": 1e3,
-    "M": 1e6,
-    "G": 1e9,
-    "T": 1e12,
-    "P": 1e15,
-}
-
-#: percent: bare float (no suffix)
-_PERCENT: dict[str, float] = {"": 1.0}
-
-#: binary sizes → base (scale ×1024)
-_BINARY: dict[str, float] = {
-    "":  1,
-    "K": 1024,
-    "M": 1024 ** 2,
-    "G": 1024 ** 3,
-    "T": 1024 ** 4,
-    "P": 1024 ** 5,
-}
-
-
-def _parse_unit(token: str, scale_map: dict[str, float]) -> float:
-    """Parse a numeric token with an optional unit suffix.
-
-    Splits *token* into a numeric prefix and a unit suffix, then
-    multiplies by the scale from *scale_map*.
-
-    Percent tokens (e.g. ``"89.00%"``) strip the trailing ``%`` and
-    return the plain float (scale_map is ignored for these).
-
-    Examples::
-
-        _parse_unit("456.78us", _TIME_US)  → 456.78
-        _parse_unit("2.50ms",   _TIME_US)  → 2500.0
-        _parse_unit("12.34k",   _METRIC)   → 12340.0
-        _parse_unit("3.50M",    _BINARY)   → 3670016.0
-        _parse_unit("89.00%",   _TIME_US)  → 89.0
-    """
-    if token.endswith("%"):
-        return float(token[:-1])
-    # Split into leading numeric part and trailing unit suffix.
-    # Walk backwards to find where digits/dots end and letters start.
-    i = len(token)
-    while i > 0 and token[i - 1].isalpha():
-        i -= 1
-    numeric = token[:i]
-    suffix = token[i:]
-    value = float(numeric)
-    scale = scale_map.get(suffix)
-    if scale is None:
-        raise ValueError(
-            f"unknown unit {suffix!r} in token {token!r}; "
-            f"valid: {sorted(scale_map)}")
-    return value * scale
+from pyte.tools._units import (BINARY as _BINARY,  # noqa: E402
+                               METRIC as _METRIC,
+                               PERCENT as _PERCENT,
+                               TIME_US as _TIME_US,
+                               parse_unit as _parse_unit)
 
 
 # ---------------------------------------------------------------------------

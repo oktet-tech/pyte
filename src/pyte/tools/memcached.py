@@ -62,11 +62,8 @@ class Verbose(enum.Enum):
 
 def _addr_port(v) -> str:
     """(host, port) tuple, pyte.env.Addr, or int port -> port string."""
-    if hasattr(v, "pair"):
-        v = v.pair
-    if isinstance(v, tuple):
-        return str(v[1])
-    return str(int(v))
+    from pyte.tools._tool import addr_port
+    return str(addr_port(v))
 
 
 @dataclass(frozen=True)
