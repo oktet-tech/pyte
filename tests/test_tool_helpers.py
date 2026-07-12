@@ -162,6 +162,9 @@ class FakeJob:
         self.events.append(("wait", timeout))
         return self.status
 
+    def start(self):
+        self.events.append(("start",))
+
     def stop(self, *a, **k):
         self.events.append(("stop",))
         if self.stop_error:
@@ -314,3 +317,70 @@ def test_mi_report_auto_waits(monkeypatch):
 
     WithMi(FakeJob(), FakeFilter("data")).mi_report()
     assert seen == [("demo", {"parsed": "data"})]
+
+
+# -- launch()/running(): the hardened job bring-up ------------------------
+
+class FakePco:
+    def __init__(self, job):
+        self._job = job
+        self.created = None
+
+    def job(self, program, args=None):
+        self.created = (program, args)
+        return self._job
+
+
+def test_launch_creates_sets_up_starts():
+    job = FakeJob()
+    pco = FakePco(job)
+
+    got_job, extras = _tool.launch(
+        pco, "fio", ["--a"],
+        setup=lambda j: (j.events.append(("setup",)), {"flt": "s"})[1])
+
+    assert got_job is job and extras == {"flt": "s"}
+    assert pco.created == ("fio", ["--a"])
+    # setup (filter attachment) must run BEFORE start
+    assert job.events == [("setup",), ("start",)]
+
+
+def test_launch_destroys_on_setup_failure():
+    job = FakeJob()
+
+    def boom(j):
+        raise RuntimeError("attach failed")
+
+    with pytest.raises(RuntimeError, match="attach failed"):
+        _tool.launch(FakePco(job), "t", [], setup=boom)
+    assert job.events == [("destroy",)]
+
+
+def test_launch_destroys_on_start_failure():
+    class NoStartJob(FakeJob):
+        def start(self):
+            raise TeError(12)
+
+    job = NoStartJob()
+    with pytest.raises(TeError):
+        _tool.launch(FakePco(job), "t", [])
+    assert job.events == [("destroy",)]
+
+
+def test_running_closes_on_exit_and_exception():
+    class H:
+        closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    h = H()
+    with _tool.running(h) as got:
+        assert got is h
+    assert h.closed == 1
+
+    h2 = H()
+    with pytest.raises(RuntimeError, match="body"):
+        with _tool.running(h2):
+            raise RuntimeError("body failed")
+    assert h2.closed == 1

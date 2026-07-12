@@ -15,6 +15,8 @@ lifecycle.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from pyte.errors import ToolError
 
 # ---------------------------------------------------------------------------
@@ -108,6 +110,41 @@ def addr_port(v) -> int:
     if isinstance(v, tuple):
         return int(v[1])
     return int(v)
+
+
+# ---------------------------------------------------------------------------
+# Job bring-up / teardown
+# ---------------------------------------------------------------------------
+
+
+def launch(pco, program: str, argv: list[str], *, setup=None):
+    """Create, set up, and start a tool job; returns ``(job, extras)``.
+
+    The hardened bring-up every wrapper hand-rolled a variant of: any
+    failure between job creation and a successful start() destroys the
+    job before the exception propagates (older wrappers leaked the job
+    when a second filter attach failed).  ``setup(job)`` attaches
+    filters/wrappers — it runs BEFORE start(), as channels must — and
+    whatever it returns (typically the readable filters) comes back as
+    ``extras``.
+    """
+    job = pco.job(program, argv)
+    try:
+        extras = None if setup is None else setup(job)
+        job.start()
+    except BaseException:
+        job.destroy()
+        raise
+    return job, extras
+
+
+@contextmanager
+def running(handle):
+    """Yield *handle*, close() it on exit — the tail of every run() CM."""
+    try:
+        yield handle
+    finally:
+        handle.close()
 
 
 # ---------------------------------------------------------------------------
