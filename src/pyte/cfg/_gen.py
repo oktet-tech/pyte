@@ -460,6 +460,13 @@ class Target:
     module: str    # e.g. "sys" -> gen/sys.py
     include: tuple[str, ...] | None = None  # root emits ONLY these
     #                                       # direct children (else all)
+    #: OID -> instance-key parameter name, for CM entries whose ``name:``
+    #: is missing although the runtime node is a collection.  The CM YAML
+    #: is documentation-grade: e.g. /agent/sys/net/ipv4/conf carries no
+    #: name: yet the agent lists instances keyed by interface
+    #: (all/default/<ifname>, conf_sys_tree.c) -- without the override
+    #: every knob under it would compose an OID that never exists.
+    force_collection: dict[str, str] = field(default_factory=dict)
 
 
 # The /agent root mixes agent-wide scalars with large separate subtrees
@@ -474,7 +481,13 @@ AGENT_MEMBERS = (
 )
 
 TARGETS = [
-    Target("cm_sys.yml", "/agent/sys", "sys"),
+    Target("cm_sys.yml", "/agent/sys", "sys",
+           force_collection={
+               "/agent/sys/net/ipv4/conf": "ifname",
+               "/agent/sys/net/ipv4/neigh": "ifname",
+               "/agent/sys/net/ipv6/conf": "ifname",
+               "/agent/sys/net/ipv6/neigh": "ifname",
+           }),
     Target("cm_base.yml", "/agent/interface", "interface"),
     Target("cm_base.yml", "/agent", "agent", include=AGENT_MEMBERS),
     Target("cm_pci.yml", "/agent/hardware/pci", "pci"),
@@ -518,7 +531,14 @@ def generate_from(files: dict[str, str],
     """
     out: dict[str, str] = {}
     for t in targets:
-        node = _root_node(parse_cm(files[t.cm_file]), t.root_oid)
+        entries = parse_cm(files[t.cm_file])
+        for e in entries:
+            key = t.force_collection.get(e.oid)
+            if key:
+                # Correct documentation-grade CM: treat the entry as a
+                # collection keyed by *key* (see Target.force_collection).
+                e.name = key
+        node = _root_node(entries, t.root_oid)
         out[t.module] = emit_module(node, t.module, include=t.include)
     return out
 

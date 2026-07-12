@@ -4,6 +4,7 @@
 """System settings from /proc/sys/."""
 from pyte.cfg import (
     CfgObject,
+    Collection,
     IntKnob,
     StrKnob,
     SubObject,
@@ -92,8 +93,8 @@ class NetIpv4(CfgObject):
     ip_default_ttl = IntKnob("ip_default_ttl", cvt_name="INT32")
     tcp_congestion_control = StrKnob("tcp_congestion_control")
     icmp_ratelimit = IntKnob("icmp_ratelimit", cvt_name="INT32")
-    conf = SubObject("conf", NetIpv4Conf)
-    neigh = SubObject("neigh", NetIpv4Neigh)
+    conf = Collection("conf", NetIpv4Conf)
+    neigh = Collection("neigh", NetIpv4Neigh)
     route = SubObject("route", NetIpv4Route)
 
 
@@ -115,9 +116,9 @@ class NetIpv6Route(CfgObject):
 
 
 class NetIpv6(CfgObject):
-    neigh = SubObject("neigh", NetIpv6Neigh)
+    neigh = Collection("neigh", NetIpv6Neigh)
     auto_flowlabels = IntKnob("auto_flowlabels", cvt_name="INT32")
-    conf = SubObject("conf", NetIpv6Conf)
+    conf = Collection("conf", NetIpv6Conf)
     route = SubObject("route", NetIpv6Route)
     fib_multipath_hash_policy = IntKnob(
         "fib_multipath_hash_policy",

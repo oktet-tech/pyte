@@ -632,6 +632,73 @@ def test_generate_from_text_map_emits_modules():
         in out["sys"]
 
 
+# -- force_collection: CM entries whose name: is missing although the
+# runtime node is a collection (documentation-grade CM metadata) -------
+
+_CONF_LIKE_YAML = """
+- register:
+    - oid: "/agent/sys"
+      type: none
+      access: read_only
+      d: |
+         System settings.
+    - oid: "/agent/sys/net"
+      type: none
+      access: read_only
+    - oid: "/agent/sys/net/ipv4"
+      type: none
+      access: read_only
+    - oid: "/agent/sys/net/ipv4/conf"
+      type: none
+      access: read_only
+      d: |
+         System settings from /proc/sys/net/ipv4/conf/.
+         Name: name of a directory under */conf/
+    - oid: "/agent/sys/net/ipv4/conf/rp_filter"
+      type: int32
+      access: read_write
+"""
+
+
+def test_force_collection_emits_collection_not_subobject():
+    """A forced OID is emitted as Collection although CM has no name:.
+
+    /agent/sys/net/ipv4/conf is keyed by interface name at runtime
+    (all/default/<ifname>, conf_sys_tree.c) but cm_sys.yml omits name:,
+    so without the override every knob under it composes a dead OID
+    (/agent:X/sys:/net:/ipv4:/conf:/rp_filter: never exists).
+    """
+    out = _gen.generate_from(
+        {"cm_sys.yml": _CONF_LIKE_YAML},
+        [_gen.Target("cm_sys.yml", "/agent/sys", "sys",
+                     force_collection={
+                         "/agent/sys/net/ipv4/conf": "ifname"})])
+    src = out["sys"]
+    assert 'conf = Collection("conf", NetIpv4Conf)' in src
+    assert 'conf = SubObject' not in src
+    # interior singletons (net, ipv4) legitimately stay SubObjects
+    assert 'net = SubObject("net", Net)' in src
+
+
+def test_force_collection_only_touches_listed_oids():
+    out = _gen.generate_from(
+        {"cm_sys.yml": _CONF_LIKE_YAML},
+        [_gen.Target("cm_sys.yml", "/agent/sys", "sys")])
+    src = out["sys"]
+    # without the override the old (broken) SubObject shape is kept
+    assert 'conf = SubObject("conf", NetIpv4Conf)' in src
+
+
+def test_sys_target_forces_ifname_collections():
+    sys_t = next(t for t in _gen.TARGETS if t.module == "sys")
+    assert sys_t.force_collection == {
+        "/agent/sys/net/ipv4/conf": "ifname",
+        "/agent/sys/net/ipv4/neigh": "ifname",
+        "/agent/sys/net/ipv6/conf": "ifname",
+        "/agent/sys/net/ipv6/neigh": "ifname",
+    }
+
+
 # -- volatile -> sync=True --------------------------------------------
 
 def test_parse_captures_volatile():
