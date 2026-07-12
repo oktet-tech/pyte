@@ -20,224 +20,107 @@ class TeError(Exception):
         super().__init__(f"{prefix}{mod}-{err} (0x{rc:x})")
 
 
+class _RcOrMsg:
+    """Constructor mixin: accept a te_errno OR a plain message.
+
+    ``Cls(rc, where)`` behaves like :class:`TeError`;
+    ``Cls("message"[, where])`` raises with the plain (where-prefixed)
+    message and rc/module/code of 0 — most tool/subsystem failures
+    (bad exit status, unparseable output, lookup miss) have no
+    te_errno behind them.
+    """
+
+    def __init__(self, rc_or_msg, where: str = ""):
+        if isinstance(rc_or_msg, str):  # non-errno path: plain message
+            Exception.__init__(
+                self, f"{where}: {rc_or_msg}" if where else rc_or_msg)
+            self.rc = 0
+            self.module = 0
+            self.code = 0
+        else:
+            super().__init__(rc_or_msg, where)
+
+
 class CfgError(TeError):
     """Configurator request failed."""
 
 
-class TrcError(TeError):
+class TrcError(_RcOrMsg, TeError):
     """TRC database access failure."""
 
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):  # non-errno path: plain message
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
 
-
-class EnvError(TeError):
+class EnvError(_RcOrMsg, TeError):
     """tapi_env binding or lookup failed.
 
     Message-only when raised for a lookup miss (rc 0), or carries the
-    te_errno of a failed bind (TrcError-style dual path).
+    te_errno of a failed bind.
     """
 
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
 
+class ToolError(_RcOrMsg, TeError):
+    """A pyte.tools wrapper failed: bad exit, unparseable output, ...
 
-class FioError(TeError):
-    """fio subprocess failed or produced unreadable output.
-
-    Message-only when raised for a failed exit or parse error (no
-    te_errno behind it), like TrcError's string path.
+    The semantic base of every per-tool error, so ``except ToolError``
+    catches any tool failure.  Subclasses add nothing but a docstring;
+    the shared machinery (pyte.tools._tool) raises them through this
+    class's dual-path constructor.
     """
 
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):  # non-errno path: plain message
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+
+class FioError(ToolError):
+    """fio subprocess failed or produced unreadable output."""
 
 
-class PingError(TeError):
-    """Raised when the ping tool fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):  # non-errno path: plain message
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class PingError(ToolError):
+    """ping failed or its output cannot be parsed."""
 
 
-class IperfError(TeError):
-    """Raised when iperf/iperf3 fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):  # non-errno path: plain message
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class IperfError(ToolError):
+    """iperf/iperf3 failed or its output cannot be parsed."""
 
 
-class TrexError(TeError):
-    """Raised when TRex (STL) fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):  # non-errno path: plain message
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class TrexError(ToolError):
+    """TRex (STL) failed or its output cannot be parsed."""
 
 
-class WrkError(TeError):
-    """Raised when wrk fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class WrkError(ToolError):
+    """wrk failed or its output cannot be parsed."""
 
 
-class NetperfError(TeError):
-    """Raised when netperf/netserver fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class NetperfError(ToolError):
+    """netperf/netserver failed or its output cannot be parsed."""
 
 
-class SfntError(TeError):
-    """Raised when sfnt-pingpong fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class SfntError(ToolError):
+    """sfnt-pingpong failed or its output cannot be parsed."""
 
 
-class NptcpError(TeError):
-    """Raised when NPtcp fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class NptcpError(ToolError):
+    """NPtcp failed or its output cannot be parsed."""
 
 
-class MemcachedError(TeError):
-    """Raised when memcached fails or mc-stats output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class MemcachedError(ToolError):
+    """memcached failed or mc-stats output cannot be parsed."""
 
 
-class MemaslapError(TeError):
-    """Raised when memaslap fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class MemaslapError(ToolError):
+    """memaslap failed or its output cannot be parsed."""
 
 
-class MemtierError(TeError):
-    """Raised when memtier_benchmark fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class MemtierError(ToolError):
+    """memtier_benchmark failed or its output cannot be parsed."""
 
 
-class Mke2fsError(TeError):
-    """Raised when mke2fs fails or the requested journal is missing."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class Mke2fsError(ToolError):
+    """mke2fs failed or the requested journal is missing."""
 
 
-class EthtoolError(TeError):
-    """Raised when ethtool fails or its output cannot be parsed."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class EthtoolError(ToolError):
+    """ethtool failed or its output cannot be parsed."""
 
 
-class SshError(TeError):
-    """Raised when ssh/sshd fails."""
-
-    def __init__(self, rc_or_msg, where: str = ""):
-        if isinstance(rc_or_msg, str):
-            Exception.__init__(self, rc_or_msg)
-            self.rc = 0
-            self.module = 0
-            self.code = 0
-        else:
-            super().__init__(rc_or_msg, where)
+class SshError(ToolError):
+    """ssh/sshd failed."""
 
 
 class RcfError(TeError):
@@ -282,16 +165,33 @@ class TestSkip(Exception):
     """Raise (or call test.skip()) to mark the test skipped."""
 
 
-_ERRNO_NAMES = {"ECONNREFUSED", "ENOENT", "ENODATA", "ENOPROTOOPT",
-                "EPERM"}
-
-
 def __getattr__(name: str):
-    """Expose TE error codes (errors.ECONNREFUSED, ...) lazily."""
-    if name in _ERRNO_NAMES:
+    """Expose TE error codes (errors.ECONNREFUSED, ...) lazily.
+
+    Any ALL-CAPS ``E*`` name is forwarded to the shim's ``PYTE_<name>``
+    constant, so the symbolic surface grows with the shim instead of a
+    hand-curated allowlist (errors.ETIMEDOUT used to raise
+    AttributeError while PYTE_ETIMEDOUT existed).
+    """
+    if name.startswith("E") and name.isupper():
         from pyte._shim import lib
-        return getattr(lib, f"PYTE_{name}")
+        try:
+            return getattr(lib, f"PYTE_{name}")
+        except AttributeError:
+            pass
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Module contents plus the shim's errno constants (discoverable)."""
+    names = set(globals())
+    try:
+        from pyte._shim import lib
+        names.update(n[len("PYTE_"):] for n in dir(lib)
+                     if n.startswith("PYTE_E"))
+    except Exception:  # noqa: BLE001  shim absent: plain module dir
+        pass
+    return sorted(names)
 
 
 def check(rc: int, where: str = "", cls: type[TeError] = TeError) -> None:
