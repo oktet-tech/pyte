@@ -152,22 +152,28 @@ def start(name: str | None = None):
 
     t = Test(params)
     _current = t
-    t.step("Test start")
-
-    if "te_rand_seed" in params:
-        seed = params.int("te_rand_seed")
-        random.seed(seed)
-        log.ring(f"Pseudo-random seed is {seed}")
-
-    # Route everything into the TE Logger: it does its own level
-    # filtering, while the stdlib root logger defaults to WARNING.
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    if not any(isinstance(h, log.TeLogHandler) for h in root.handlers):
-        root.addHandler(log.TeLogHandler())
 
     result = 1
     try:
+        # The setup tail runs inside the try so a failure here (e.g. a
+        # malformed te_rand_seed, or a TE error from the step message)
+        # is logged and exits through the normal cleanup/sys.exit path
+        # below instead of escaping the generator as a raw exception
+        # that skips cleanups and leaves _current set.
+        t.step("Test start")
+
+        if "te_rand_seed" in params:
+            seed = params.int("te_rand_seed")
+            random.seed(seed)
+            log.ring(f"Pseudo-random seed is {seed}")
+
+        # Route everything into the TE Logger: it does its own level
+        # filtering, while the stdlib root logger defaults to WARNING.
+        root = logging.getLogger()
+        root.setLevel(logging.DEBUG)
+        if not any(isinstance(h, log.TeLogHandler) for h in root.handlers):
+            root.addHandler(log.TeLogHandler())
+
         yield t
         result = 0
     except TestSkip as e:
