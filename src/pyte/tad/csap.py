@@ -46,8 +46,8 @@ def validate(text: str, kind: str) -> None:
         raise ValueError(f"invalid NDN {kind}: {msg}")
 
 #: Cached RCF session per agent (one session is enough for a suite).
-#: Assumes agents live for the whole run; if an agent restarts the cache
-#: must be cleared manually (or the process restarted).
+#: Assumes agents live for the whole run; after an agent restart call
+#: reset_sessions() so the next Csap creates a fresh session.
 _sessions: dict[str, int] = {}
 
 
@@ -59,6 +59,20 @@ def _session(ta: str) -> int:
         check(lib.pyte_ta_session(_enc(ta), out), f"ta_session({ta})")
         _sessions[ta] = out[0]
     return _sessions[ta]
+
+
+def reset_sessions(ta: str | None = None) -> None:
+    """Drop the cached RCF session for *ta* (or all agents when None).
+
+    Call after an agent restart/reboot: the cached session id is dead
+    then and every subsequent Csap on that agent would silently use
+    it.  Csaps created earlier still hold the stale id and must be
+    recreated by the caller.
+    """
+    if ta is None:
+        _sessions.clear()
+    else:
+        _sessions.pop(ta, None)
 
 
 class Packet:
@@ -133,8 +147,6 @@ class Receiver:
         from pyte._shim import ffi, lib
         if self._done:
             raise RuntimeError("receive operation already finished")
-        self._done = True
-        self._csap._rx = None
         out = ffi.new("pyte_pkts *")
         fn = lib.pyte_csap_recv_wait if wait else lib.pyte_csap_recv_stop
         rc = fn(_enc(self._csap.ta), self._csap._session,
@@ -145,7 +157,18 @@ class Receiver:
         # report what arrived and let the test judge the count.
         if (rc != 0 and lib.pyte_rc_error(rc) !=
                 lib.pyte_rc_error(lib.PYTE_ETIMEDOUT)):
+            # The operation did NOT complete (RCF hiccup, agent gone):
+            # keep the receiver active so destroy() still attempts the
+            # stop, and free the partial packets deterministically
+            # instead of leaving them to GC timing.
+            for p in pkts:
+                p.free()
             check(rc, "csap.recv")
+        # Mark finished only now: a failed finish must not make Python
+        # believe no receive is active while the agent-side operation
+        # may still be running.
+        self._done = True
+        self._csap._rx = None
         return pkts
 
     def stop(self) -> list[Packet]:
@@ -258,15 +281,22 @@ class Csap:
 
     # -- lifecycle -----------------------------------------------------
     def destroy(self) -> None:
-        """Destroy the CSAP (idempotent); stops any active receive."""
+        """Destroy the CSAP (idempotent); stops any active receive.
+
+        A failing receive-stop is tolerated (the CSAP is going away and
+        csap_destroy stops receives agent-side anyway) but logged: a
+        silent swallow here would hide the root cause of a subsequent
+        csap_destroy failure.
+        """
         from pyte._shim import lib
         if self._handle is None:
             return
         if self._rx is not None and not self._rx._done:
             try:
                 self._rx.stop()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                import pyte.log as _log
+                _log.warn(f"csap receive stop failed during destroy: {e}")
         check(lib.pyte_csap_destroy(_enc(self.ta), self._session,
                                     self._handle),
               f"csap_destroy({self.stack_id})")
