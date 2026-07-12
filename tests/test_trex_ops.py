@@ -7,6 +7,11 @@ pyte.remote ships them by source with inspect.getsource and rejects
 closures/lambdas. _extract_source raising would mean a runtime failure on
 the agent, so assert every op passes it now.
 """
+import sys
+import types
+
+import pytest
+
 from pyte.remote import _extract_source
 from pyte.tools.trex import _ops
 
@@ -23,11 +28,6 @@ def test_all_ops_are_shippable():
 
 
 # -- add_streams VM eval containment -----------------------------------------
-
-import sys
-import types
-
-import pytest
 
 
 def _install_fake_trex(monkeypatch):

@@ -98,6 +98,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pyte.errors import FioError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc.server import RpcServer
 
@@ -372,43 +375,21 @@ def _parse_report(obj: dict) -> Report:
     )
 
 
-# ---------------------------------------------------------------------------
-# Fio: lifecycle class
-# ---------------------------------------------------------------------------
-
-class Fio:
+class Fio(_tool.ToolHandle):
     """Lifecycle manager for a running fio job.
 
     Normally created via :func:`run` which is a context manager.
     All I/O happens over ``pco.job("fio", argv)``; the JSON report
     arrives on stdout.  No shim imports: pure Python over pyte.job.
+    wait() is status-first: a failed fio run has no parseable JSON.
     """
 
-    def __init__(self, job, stdout_filter):
-        self._job = job
-        self._stdout_filter = stdout_filter
-        self._report: Report | None = None
-        self._closed = False
+    tool = "fio"
+    error_cls = FioError
+    default_timeout = 120.0
+    wait_policy = "status-first"
 
-    def wait(self, timeout: float = 120.0) -> Report:
-        """Wait for fio to finish, parse JSON, return :class:`Report`.
-
-        Caches the report; subsequent calls return the cached value.
-        Raises :exc:`pyte.errors.FioError` on non-zero exit or JSON
-        parse failure.
-        """
-        if self._report is not None:
-            return self._report
-
-        from pyte.errors import FioError
-        from pyte.job import JobStatus
-
-        status: JobStatus = self._job.wait(timeout=timeout)
-        raw = self._stdout_filter.read_all(timeout=timeout)
-
-        if not status.ok:
-            raise FioError(
-                f"fio exited with {status}; stdout={raw[:200]!r}")
+    def _parse(self, raw: str) -> Report:
         # fio may emit diagnostic lines (e.g. iodepth capped warnings)
         # to stdout before the JSON block.  Strip any prefix up to the
         # first '{' so json.loads sees only the JSON object.
@@ -421,54 +402,34 @@ class Fio:
             raise FioError(
                 f"cannot parse fio JSON output: {exc}; "
                 f"stdout={raw[:200]!r}") from exc
-        self._report = _parse_report(obj)
-        return self._report
+        return _parse_report(obj)
 
-    def mi_report(self, tool: str = "fio") -> None:
+    def _mi(self, logger, rep: Report) -> None:
         """Emit MI measurement artifacts mirroring tapi_fio_mi_report().
 
-        KBYTE2MBIT(x) = x * 8 / 1000.0 (KiB/s → Mbit/s).
-
-        Requires :meth:`wait` to have been called first.
+        KBYTE2MBIT(x) = x * 8 / 1000.0 (KiB/s -> Mbit/s).
         """
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Aggr, Logger, Meas, Mult
-
-        rep = self._report
+        from pyte.mi import Aggr, Meas, Mult
 
         def kbyte2mbit(x: float) -> float:
             return x * 8 / 1000.0
 
-        with Logger(tool) as logger:
-            logger.add(Meas.THROUGHPUT, "Read throughput", Aggr.MEAN,
-                       kbyte2mbit(rep.read.bandwidth.mean), Mult.MEBI)
-            logger.add(Meas.IOPS, "Read iops", Aggr.MEAN,
-                       rep.read.iops.mean, Mult.PLAIN)
-            logger.add(Meas.LATENCY, "Read clat 99.00 percentile",
-                       Aggr.PERCENTILE,
-                       rep.read.clatency.percentiles.p99_00 / 1000.0,
-                       Mult.MICRO)
-            logger.add(Meas.THROUGHPUT, "Write throughput", Aggr.MEAN,
-                       kbyte2mbit(rep.write.bandwidth.mean), Mult.MEBI)
-            logger.add(Meas.IOPS, "Write iops", Aggr.MEAN,
-                       rep.write.iops.mean, Mult.PLAIN)
-            logger.add(Meas.LATENCY, "Write clat 99.00 percentile",
-                       Aggr.PERCENTILE,
-                       rep.write.clatency.percentiles.p99_00 / 1000.0,
-                       Mult.MICRO)
-
-    def close(self) -> None:
-        """Stop fio (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+        logger.add(Meas.THROUGHPUT, "Read throughput", Aggr.MEAN,
+                   kbyte2mbit(rep.read.bandwidth.mean), Mult.MEBI)
+        logger.add(Meas.IOPS, "Read iops", Aggr.MEAN,
+                   rep.read.iops.mean, Mult.PLAIN)
+        logger.add(Meas.LATENCY, "Read clat 99.00 percentile",
+                   Aggr.PERCENTILE,
+                   rep.read.clatency.percentiles.p99_00 / 1000.0,
+                   Mult.MICRO)
+        logger.add(Meas.THROUGHPUT, "Write throughput", Aggr.MEAN,
+                   kbyte2mbit(rep.write.bandwidth.mean), Mult.MEBI)
+        logger.add(Meas.IOPS, "Write iops", Aggr.MEAN,
+                   rep.write.iops.mean, Mult.PLAIN)
+        logger.add(Meas.LATENCY, "Write clat 99.00 percentile",
+                   Aggr.PERCENTILE,
+                   rep.write.clatency.percentiles.p99_00 / 1000.0,
+                   Mult.MICRO)
 
 
 @contextmanager
@@ -484,22 +445,15 @@ def run(pco: "RpcServer", opts: Opts):
             rep = f.wait(timeout=60.0)
             print(rep.read.iops.mean)
     """
-    job = pco.job("fio", opts.to_argv())
-    try:
-        # Attach a readable stdout filter for JSON collection.
-        # fio writes the JSON report to stdout; stderr carries human-readable
-        # progress and is forwarded to the TE log unread.  (C's fio_internal.c
-        # reads stderr and logs stdout; pyte inverts this because the JSON
-        # output arrives on stdout, not stderr.)
-        stdout_filter = job.stdout.attach_filter(
-            name="fio_stdout", readable=True)
+    def _setup(job):
+        # fio writes the JSON report to stdout; stderr carries
+        # human-readable progress and is forwarded to the TE log
+        # unread.  (C's fio_internal.c reads stderr and logs stdout;
+        # pyte inverts this because the JSON arrives on stdout.)
+        flt = job.stdout.attach_filter(name="fio_stdout", readable=True)
         job.stderr.log(level="ERROR")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    fio_obj = Fio(job, stdout_filter)
-    try:
-        yield fio_obj
-    finally:
-        fio_obj.close()
+        return flt
+
+    job, flt = _tool.launch(pco, "fio", opts.to_argv(), setup=_setup)
+    with _tool.running(Fio(job, flt)) as f:
+        yield f

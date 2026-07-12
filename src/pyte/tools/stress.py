@@ -24,6 +24,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import ToolError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -67,28 +70,25 @@ class Opts:
         return argv
 
 
-class Stress:
+class Stress(_tool.ToolHandle):
     """Lifecycle manager for a running stress job (no report)."""
 
+    tool = "stress"
+    error_cls = ToolError
+    default_timeout = 60.0
+
     def __init__(self, job):
-        self._job = job
-        self._closed = False
+        super().__init__(job)
 
-    def wait(self, timeout: float = 60.0) -> bool:
-        """Wait for stress to finish; return True iff it exited cleanly."""
-        return self._job.wait(timeout=timeout).ok
+    def wait(self, timeout: float | None = None):
+        """Wait for stress to finish; return the JobStatus.
 
-    def close(self) -> None:
-        """Stop stress (SIGTERM, errors tolerated) and destroy the job."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+        BREAKING (was ``-> bool``): the status carries which signal
+        killed the run, not just success -- check ``status.ok``.
+        """
+        if timeout is None:
+            timeout = self.default_timeout
+        return self._job.wait(timeout=timeout)
 
 
 @contextmanager
@@ -100,18 +100,12 @@ def run(pco: "RpcServer", opts: Opts):
     Example::
 
         with stress.run(pco, stress.Opts(cpu=1, timeout=2)) as s:
-            assert s.wait()
+            assert s.wait().ok
     """
-    job = pco.job("stress", opts.to_argv())
-    try:
+    def _setup(job):
         job.stdout.log(level="RING")
         job.stderr.log(level="ERROR")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    stress_obj = Stress(job)
-    try:
-        yield stress_obj
-    finally:
-        stress_obj.close()
+
+    job, _ = _tool.launch(pco, "stress", opts.to_argv(), setup=_setup)
+    with _tool.running(Stress(job)) as s:
+        yield s

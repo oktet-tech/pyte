@@ -35,7 +35,11 @@ from __future__ import annotations
 import enum
 from contextlib import contextmanager
 from dataclasses import dataclass
+import signal as _signal
 from typing import TYPE_CHECKING
+
+from pyte.errors import SshError
+from pyte.tools import _tool
 
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
@@ -140,31 +144,37 @@ class ServerOpts:
         return argv
 
 
-class Ssh:
-    """Lifecycle manager for an ssh or sshd job (mirror tapi_ssh_t)."""
+class Ssh(_tool.ToolHandle):
+    """Lifecycle manager for an ssh or sshd job (mirror tapi_ssh_t).
+
+    Factories return the handle UNSTARTED (tapi_ssh creates then
+    starts); close() destroys without a graceful stop, matching the C
+    teardown (the _stop_for_close no-op below).
+    """
+
+    tool = "ssh"
+    error_cls = SshError
+    default_timeout = 3.0    # the C wait time
 
     def __init__(self, job):
-        self._job = job
-        self._closed = False
+        super().__init__(job)
 
     def start(self) -> None:
         """Start the ssh/sshd process."""
         self._job.start()
 
-    def wait(self, timeout: float = 3.0):
-        """Wait for the process to finish (default 3 s, the C wait time)."""
+    def wait(self, timeout: float | None = None):
+        """Wait for the process to finish; returns the JobStatus."""
+        if timeout is None:
+            timeout = self.default_timeout
         return self._job.wait(timeout=timeout)
 
-    def kill(self, signal: int | str = "SIGTERM") -> None:
+    def kill(self, signal: "int | _signal.Signals" = _signal.SIGTERM) -> None:
         """Send a signal to the process."""
         self._job.kill(signal)
 
-    def destroy(self) -> None:
-        """Destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        self._job.destroy()
+    def _stop_for_close(self) -> None:
+        pass    # C behaviour: destroy only, no graceful stop
 
 
 def client(pco: "RpcServer", opts: ClientOpts) -> Ssh:
@@ -184,23 +194,25 @@ def server(pco: "RpcServer", opts: ServerOpts) -> Ssh:
 
 
 @contextmanager
-def run(pco: "RpcServer", opts, *, as_server: bool = False):
-    """Context manager: create + start an ssh (or sshd) job, then destroy.
+def run(pco: "RpcServer", opts):
+    """Context manager: create + start an ssh (or sshd) job, then close.
 
-    Pass a :class:`ClientOpts` (default) or a :class:`ServerOpts` with
-    ``as_server=True``. Yields the :class:`Ssh` handle.
+    Dispatches on the opts type: :class:`ServerOpts` runs sshd,
+    :class:`ClientOpts` runs ssh.  BREAKING (P1.1 sweep): the
+    redundant ``as_server`` flag is gone -- the opts type already
+    says which side this is -- and teardown is ``close()`` like every
+    other tool handle (was ``destroy()``).
 
     Example::
 
-        with ssh.run(pco, ssh.ServerOpts(port=2222), as_server=True) as srv:
+        with ssh.run(pco, ssh.ServerOpts(port=2222)) as srv:
             with ssh.run(pco, ssh.ClientOpts(
                     destination="127.0.0.1", port=2222,
                     command="true")) as cli:
                 cli.wait(timeout=10.0)
     """
-    app = server(pco, opts) if as_server else client(pco, opts)
-    try:
-        app.start()
-        yield app
-    finally:
-        app.destroy()
+    app = (server(pco, opts) if isinstance(opts, ServerOpts)
+           else client(pco, opts))
+    with _tool.running(app) as a:
+        a.start()
+        yield a

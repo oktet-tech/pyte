@@ -22,3 +22,18 @@ def test_requires_at_least_one_target():
         Opts(timeout=5)
     with pytest.raises(ValueError, match="cpu/io/vm"):
         Opts()
+
+
+def test_wait_returns_job_status():
+    """BREAKING (P1.1 sweep): wait() returns the JobStatus, not a bool
+    -- the status says which signal killed the run, not just success."""
+    from pyte.job import JobStatus, StatusKind
+    from pyte.tools.stress import Stress
+
+    class FakeJob:
+        def wait(self, timeout=None):
+            return JobStatus(StatusKind.SIGNALED, 9)
+
+    st = Stress(FakeJob()).wait()
+    assert isinstance(st, JobStatus)
+    assert not st.ok and st.value == 9

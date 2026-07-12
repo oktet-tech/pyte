@@ -23,6 +23,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.errors import Mke2fsError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -72,36 +75,42 @@ class Opts:
         return argv
 
 
-class Mke2fs:
-    """Lifecycle manager for an mke2fs job."""
+class Mke2fs(_tool.ToolHandle):
+    """Lifecycle manager for an mke2fs job.
+
+    There is no report object: wait() raises on a bad exit and stashes
+    stdout for a later :meth:`check_journal` (so it overrides the
+    base's report-producing wait wholesale).
+    """
+
+    tool = "mke2fs"
+    error_cls = Mke2fsError
+    default_timeout = 60.0
 
     def __init__(self, job, opts: Opts, stdout_filter):
-        self._job = job
+        super().__init__(job, stdout_filter)
         self._opts = opts
-        self._stdout_filter = stdout_filter
         self._stdout: str | None = None
-        self._closed = False
 
-    def wait(self, timeout: float = 60.0) -> None:
+    def wait(self, timeout: float | None = None) -> None:
         """Wait for mke2fs to finish; raise Mke2fsError on non-zero exit.
 
         Drains stdout so a later check_journal() can inspect it.
         """
-        from pyte.errors import Mke2fsError
+        if timeout is None:
+            timeout = self.default_timeout
         status = self._job.wait(timeout=timeout)
         self._stdout = self._stdout_filter.read_all(timeout=timeout)
         if not status.ok:
-            raise Mke2fsError(
-                f"mke2fs exited with {status}; stdout={self._stdout[:200]!r}")
+            self._fail_status(status, self._stdout)
 
     def check_journal(self) -> None:
         """Mirror tapi_mke2fs_check_journal.
 
         No-op when use_journal was not requested. Otherwise raise
-        Mke2fsError if the stdout has no "Creating journal ...: done" line.
-        Call after wait().
+        Mke2fsError if the stdout has no "Creating journal ...: done"
+        line.  Call after wait().
         """
-        from pyte.errors import Mke2fsError
         if not self._opts.use_journal:
             return
         if self._stdout is None:
@@ -110,18 +119,6 @@ class Mke2fs:
             raise Mke2fsError(
                 "filesystem was created without journal even though "
                 "it was requested")
-
-    def close(self) -> None:
-        """Stop mke2fs (errors tolerated) and destroy the job (idempotent)."""
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
 
 
 @contextmanager
@@ -137,20 +134,14 @@ def run(pco: "RpcServer", opts: Opts):
             m.wait(timeout=120.0)
             m.check_journal()
     """
-    job = pco.job("mke2fs", opts.to_argv())
-    try:
-        stdout_filter = job.stdout.attach_filter(
-            name="mke2fs_stdout", readable=True)
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="mke2fs_stdout", readable=True)
         job.stderr.log(level="ERROR")
-        job.start()
-    except Exception:
-        job.destroy()
-        raise
-    app = Mke2fs(job, opts, stdout_filter)
-    try:
+        return flt
+
+    job, flt = _tool.launch(pco, "mke2fs", opts.to_argv(), setup=_setup)
+    with _tool.running(Mke2fs(job, opts, flt)) as app:
         yield app
-    finally:
-        app.close()
 
 
 @contextmanager

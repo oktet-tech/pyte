@@ -26,6 +26,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from pyte.errors import MemtierError
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -150,82 +153,51 @@ def parse_report(rows: list, cmd: str) -> Report:
     return rep
 
 
-class Memtier:
-    """A running memtier_benchmark client job (from run())."""
+class Memtier(_tool.ToolHandle):
+    """A running memtier_benchmark client job (from run()).
+
+    wait() is status-first (a failed run prints no stats tables); the
+    output is the stats regex filter's per-line messages -- read_all()
+    would join rows without separators and corrupt the values.
+    """
+
+    tool = "memtier"
+    error_cls = MemtierError
+    default_timeout = 600.0
+    wait_policy = "status-first"
 
     def __init__(self, job, stats_flt, cmd: str):
-        self._job = job
+        super().__init__(job)
         self._stats_flt = stats_flt
         self._cmd = cmd
-        self._report: "Report | None" = None
-        self._closed = False
 
-    def wait(self, timeout: float = 600.0) -> Report:
-        from pyte.errors import MemtierError
-        if self._report is not None:
-            return self._report
-        status = self._job.wait(timeout=timeout)
-        if not status.ok:
-            raise MemtierError(f"memtier exited with {status}")
-        # Collect per-message filter results (one per matching line).
-        # Using messages() rather than read_all() avoids corrupting values
-        # when multiple tables are emitted (same pattern as memaslap.py).
-        rows = [m.data for m in self._stats_flt.messages(timeout=10.0)]
-        self._report = parse_report([r for r in rows if r], self._cmd)
-        return self._report
+    def _read_output(self, timeout: float) -> list:
+        return [m.data for m in self._stats_flt.messages(timeout=10.0)]
 
-    def wait_silent(self, timeout: float = 600.0) -> None:
-        """Wait for completion without parsing a report (pre-runs).
+    def _parse(self, rows: list) -> "Report":
+        return parse_report([r for r in rows if r], self._cmd)
 
-        The stats filter is left undrained; pre-runs use a separate
-        run() context and discard the object on exit.
-        """
-        from pyte.errors import MemtierError
-        status = self._job.wait(timeout=timeout)
-        if not status.ok:
-            raise MemtierError(f"memtier exited with {status}")
+    def _mi(self, logger, rep: "Report") -> None:
+        from pyte.mi import Aggr, Meas, Mult
+        for name, st in (("Sets", rep.sets),
+                         ("Gets", rep.gets),
+                         ("Totals", rep.totals)):
+            if st.parsed:
+                logger.add(Meas.RPS, f"{name}.TPS", Aggr.SINGLE,
+                           st.tps, Mult.PLAIN)
+                logger.add(Meas.THROUGHPUT, f"{name}.Net_rate",
+                           Aggr.SINGLE, st.net_rate, Mult.MEBI)
+        logger.comment("command", rep.cmd)
 
     def mi_report(self, tool: str = "memtier_benchmark") -> None:
-        if self._report is None:
-            raise RuntimeError("call wait() before mi_report()")
-        from pyte.mi import Aggr, Logger, Meas, Mult
-        with Logger(tool) as logger:
-            for name, st in (("Sets", self._report.sets),
-                             ("Gets", self._report.gets),
-                             ("Totals", self._report.totals)):
-                if st.parsed:
-                    logger.add(Meas.RPS, f"{name}.TPS", Aggr.SINGLE,
-                               st.tps, Mult.PLAIN)
-                    logger.add(Meas.THROUGHPUT, f"{name}.Net_rate",
-                               Aggr.SINGLE, st.net_rate, Mult.MEBI)
-            logger.comment("command", self._report.cmd)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        from pyte.errors import TeError
-        try:
-            self._job.stop()
-        except TeError:
-            pass
-        self._job.destroy()
+        super().mi_report(tool)
 
 
 @contextmanager
 def run(pco: "RpcServer", opts: Opts):
-    """Create+start a memtier_benchmark client; yields Memtier; close() on exit.
-
-    Failure-path job destroy is in the finally block (hardened pattern from
-    memaslap.py): if Memtier is not yet constructed when an exception occurs,
-    the job is destroyed directly.
-    """
-    job = None
-    m = None
-    try:
-        argv = opts.argv()
-        cmd = " ".join([opts.memtier_path, *argv])
-        job = pco.job(opts.memtier_path, argv)
+    """Create+start a memtier_benchmark client; yields Memtier;
+    close() on exit."""
+    def _setup(job):
         stats_flt = job.filter(
             stdout=True,
             regex=r"^[a-zA-Z]+\s+([0-9.-]+\s+){2,}[0-9.-]+\s*$",
@@ -236,12 +208,11 @@ def run(pco: "RpcServer", opts: Opts):
                    name="memtier_benchmark stdout")
         job.filter(stderr=True, readable=True, log_level="WARN",
                    name="memtier_benchmark stderr")
-        job.start()
-        m = Memtier(job, stats_flt, cmd)
+        return stats_flt
+
+    argv = opts.argv()
+    cmd = " ".join([opts.memtier_path, *argv])
+    job, stats_flt = _tool.launch(pco, opts.memtier_path, argv,
+                                  setup=_setup)
+    with _tool.running(Memtier(job, stats_flt, cmd)) as m:
         yield m
-    finally:
-        if m is not None:
-            m.close()
-        else:
-            if job is not None:
-                job.destroy()

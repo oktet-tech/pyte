@@ -36,6 +36,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte.tools import _tool
+
 if TYPE_CHECKING:
     from pyte.job import JobStatus
     from pyte.rpc import RpcServer
@@ -324,13 +326,14 @@ def run(pco: "RpcServer", opts: Opts, timeout: float = 10.0) -> Report:
                                              cmd=ethtool.Cmd.STATS))
         print(rep.get_stat("rx_packets"))
     """
-    job = pco.job("ethtool", opts.to_argv())
+    def _setup(job):
+        out = job.stdout.attach_filter(name="ethtool_out", readable=True)
+        err = job.stderr.attach_filter(name="ethtool_err", readable=True)
+        return out, err
+
+    job, (out_filter, err_filter) = _tool.launch(
+        pco, "ethtool", opts.to_argv(), setup=_setup)
     try:
-        out_filter = job.stdout.attach_filter(name="ethtool_out",
-                                              readable=True)
-        err_filter = job.stderr.attach_filter(name="ethtool_err",
-                                              readable=True)
-        job.start()
         status = job.wait(timeout=timeout)
         out = out_filter.read_all(timeout=timeout)
         err = err_filter.read_all(timeout=timeout)

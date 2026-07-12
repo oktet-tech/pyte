@@ -193,7 +193,6 @@ class _FakePco:
 
 
 def test_run_destroys_job_when_filter_attach_fails():
-    from pyte.tools import ethtool
     job = _FakeJob()
     with pytest.raises(RuntimeError, match="attach failed"):
         ethtool.run(_FakePco(job), Opts(if_name="eth0"))
