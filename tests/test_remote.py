@@ -167,7 +167,7 @@ class _StubFilter:
     def __init__(self, chunks):
         self._chunks = list(chunks)
 
-    def next(self, timeout):
+    def receive(self, timeout):
         data = self._chunks.pop(0)
         if data is None:
             return SimpleNamespace(data="", eos=True, dropped=0,
@@ -277,7 +277,7 @@ class _FirehoseFilter:
         self.calls = 0
         self.limit = limit
 
-    def next(self, timeout):
+    def receive(self, timeout):
         self.calls += 1
         assert self.calls <= self.limit, \
             "_recv looped past its deadline without raising"
@@ -295,7 +295,7 @@ def test_recv_enforces_deadline_when_data_flows():
 
 
 class _NeverFilter:
-    def next(self, timeout):
+    def receive(self, timeout):
         raise TimeoutError("no data")
 
 

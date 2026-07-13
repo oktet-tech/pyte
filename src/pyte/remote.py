@@ -207,7 +207,7 @@ class RemotePython:
                     f"session broken: {self._broken}")
             self._set_silent(True)
             try:
-                msg = self._flt.next(timeout=remaining)
+                msg = self._flt.receive(timeout=remaining)
             except TimeoutError:
                 # builtins.TimeoutError catches pyte.errors.TimeoutError
                 # too; the sent request's reply is still in flight.

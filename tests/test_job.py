@@ -327,7 +327,7 @@ def test_message_exposes_raw_bytes(monkeypatch):
     flt = _fake_filter(lib)
     lib.recv_queue = [(b"caf\xc3", False)]
 
-    msg = flt.next()
+    msg = flt.receive()
 
     assert msg.raw == b"caf\xc3"
     assert msg.data == "caf�"
@@ -397,7 +397,7 @@ def test_destroy_invalidates_held_channels_and_filters(monkeypatch):
     with pytest.raises(RuntimeError, match="destroyed"):
         out.attach_filter(name="g")
     with pytest.raises(RuntimeError, match="destroyed"):
-        flt.next()
+        flt.receive()
     with pytest.raises(RuntimeError, match="destroyed"):
         flt.read_many(0)
     with pytest.raises(RuntimeError, match="destroyed"):
@@ -426,7 +426,7 @@ def test_filter_detached_from_all_channels_is_dead(monkeypatch):
     lib.calls.clear()
 
     with pytest.raises(RuntimeError, match="detached|destroyed"):
-        flt.next()
+        flt.receive()
     assert lib.calls == []
 
 
@@ -532,6 +532,32 @@ def test_drain_defaults_to_no_wait(monkeypatch):
     flt.drain()
     recv = [c for c in lib.calls if c[0] == "receive_many"]
     assert recv == [("receive_many", ["flt-h"], 1, 0, 0)]
+
+
+def test_filter_receive_reads_next_message(monkeypatch):
+    """receive() pops the next queued message (renamed from next():
+    the old name faked the Python-2 iterator spelling without
+    implementing the protocol — next(flt) failed while flt.next()
+    worked)."""
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_queue = [(b"hello\n", False)]
+
+    msg = flt.receive(timeout=2.0)
+
+    assert msg.data == "hello\n"
+    assert not msg.eos
+    assert not hasattr(flt, "next"), \
+        "next() must be gone: it shadowed the iterator protocol"
+
+
+def test_filter_is_iterable(monkeypatch):
+    """for msg in flt: iterates messages until end-of-stream."""
+    lib = _fake_shim(monkeypatch)
+    flt = _fake_filter(lib)
+    lib.recv_queue = [(b"a", False), (b"b", False), (b"", True)]
+
+    assert [m.data for m in flt] == ["a", "b"]
 
 
 def test_wait_accepts_none(monkeypatch):

@@ -235,7 +235,7 @@ class Filter:
         if self._n_channels == 0:
             self._h = None      # freed by the TAPI: refuse further use
 
-    def next(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobMessage:
+    def receive(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobMessage:
         """Read the next message (raises TimeoutError if none)."""
         return receive_any([self], timeout=timeout)
 
@@ -253,17 +253,22 @@ class Filter:
         ``self._n_channels`` eos messages have been consumed.  Eos
         messages themselves are not yielded.
 
-        ``timeout`` is forwarded to each :meth:`next` call;
+        ``timeout`` is forwarded to each :meth:`receive` call;
         :exc:`pyte.errors.TimeoutError` propagates immediately if a
         receive times out (already-yielded messages are not replayed).
         """
         eos_seen = 0
         while eos_seen < self._n_channels:
-            msg = self.next(timeout=timeout)
+            msg = self.receive(timeout=timeout)
             if msg.eos:
                 eos_seen += 1
             else:
                 yield msg
+
+    def __iter__(self) -> Iterator[JobMessage]:
+        """Iterate messages until end-of-stream (``messages()`` with
+        the default per-receive timeout)."""
+        return self.messages()
 
     def drain(self, timeout: float | None = 0) -> list[JobMessage]:
         """Read ALL queued messages in one tapi_job_receive_many() call.
