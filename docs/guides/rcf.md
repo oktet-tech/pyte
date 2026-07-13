@@ -28,7 +28,8 @@ file the same way `put_bytes`/`get_bytes` move an in-memory buffer
 remote agent added with `rebootable=True`.  From the showcase test
 `ts/rcf/agent_restart.py` (`host` is a remote TA hostname, e.g. from
 `TE_IUT`; the test itself skips outright when no remote host is
-configured):
+configured; the probe path is made unique with stdlib `os.getpid()`,
+imported at the top of the test):
 
 ```{literalinclude} /_snippets/rcf-restart.py
 :language: python
