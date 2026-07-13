@@ -46,6 +46,13 @@ myst_enable_extensions = ["colon_fence", "deflist"]
 
 exclude_patterns = ["_build", "superpowers/**", "Thumbs.db", ".DS_Store"]
 
+# Autodoc turns type annotations into cross-references; names like `bytes`
+# or facade re-exports resolve to more than one target, which -W would make
+# fatal. Only this ambiguity class is suppressed: without nitpicky mode
+# Sphinx emits no other ref.python warnings, and docstring markup warnings
+# stay fatal.
+suppress_warnings = ["ref.python"]
+
 html_theme = "furo"
 
 intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
