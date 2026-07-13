@@ -7,27 +7,39 @@ sysctl access via `tapi_cfg_sys`) it goes through small shim wrappers
 read/write (status, MTU, MAC, address/route/neighbor listings, single
 address delete) is pure Python over the `/agent` tree.  IPv4 only.
 
+## Read-only queries
+
+`agt` below is `net.agent(t.agent)`, the wrapper over the current
+test's agent (from the showcase test `ts/net/net_info.py`; `cfg` is
+`pyte.cfg`, used here only to cross-check the parsed route count
+against the raw tree):
+
+```{literalinclude} /_snippets/net-info.py
+:language: python
+```
+
+## Mutations — require a root agent
+
+Adding/removing addresses and routes, changing MTU, and flipping
+sysctls need a root agent; on a non-root rig they raise `CfgError`
+(EPERM from the agent).  `agt`/`lo` continue from the same
+`net.agent(t.agent)` / `agt.iface("lo")` pair (from the showcase test
+`ts/net/net_setup.py`, `<req id="ROOT"/>`):
+
+```{literalinclude} /_snippets/net-setup.py
+:language: python
+```
+
+Neighbor mutation and interface grab/release round out the API but
+are not shown as showcase snippets here: static neighbors cannot be
+added on `lo` (see the caveats below), and `Iface.grab()`/`release()`/
+`net.borrowed_iface()` are exercised in the dynamic-agent showcase
+(`ts/dynamic/managed_agent.py`), outside this guide's scope:
+
 ```python
-from pyte import net
-
-agt = net.agent(t.agent)
-for i in agt.ifaces:                 # grabbed interfaces only
-    print(i.name, i.status, i.mtu, i.mac, i.addresses)
-
-lo = agt.iface("lo")
-lo.addr_add("192.0.2.1", prefix=32)  # shim; root needed
-lo.addr_del("192.0.2.1")             # pure cfg.delete()
-
-agt.routes()                          # [Route(dst, prefix, gw, dev, metric)]
-agt.route_add("198.51.100.0/24", gw="192.0.2.254", metric=10)
-agt.route_del("198.51.100.0/24", gw="192.0.2.254", metric=10)
-
 agt.neighbors("lo")                   # [Neigh(ip, mac, iface, static)]
 agt.neigh_add("192.0.2.9", "02:00:00:00:00:09", iface="lo")
 agt.neigh_del("192.0.2.9", "lo")
-
-agt.sysctl("net.ipv4.ip_forward")     # dotted or slashed paths
-old = agt.sysctl_set("net.ipv4.ip_forward", 1)   # returns previous value
 
 lo.grab(); lo.release()               # /agent:X/rsrc: sugar over pyte.cfg
 with net.borrowed_iface("Agt_A", "Agt_MGD", "lo") as lo:

@@ -56,7 +56,9 @@ calls (unlike direct `rpc_*` wrappers).
 
 The showcase test `ts/rpc/msg_io.py` sends multiple buffers as one
 datagram, then enables `IP_PKTINFO` to receive ancillary (control)
-data alongside it:
+data alongside it.  `IPPROTO_IP`/`IP_PKTINFO` below are the native
+Linux values `0` and `8`, defined as module-level constants at the
+top of the test:
 
 ```{literalinclude} /_snippets/rpc-msg-io.py
 :language: python

@@ -15,17 +15,6 @@ like:
 Tester passes the value via the `env` parameter; `pyte._params` resolves
 the `VAR.*` reference.
 
-```python
-from pyte import test
-
-with test.start() as t:
-    iut = t.env.pco("pco_iut")          # non-owning RpcServer
-    iut_if = t.env.iface("iut_if")      # EnvIface: .name / .index / .agent
-    a = t.env.addr("lo_addr", port=iut) # Addr: .ip / .family / .port / .pair
-    ta = t.env.host("iut_host")         # TA name string
-    net = t.env.net()                   # EnvNet: .ip4_subnet / .ip6_subnet
-```
-
 `t.env` is a lazy property on the running test: it binds the `env`
 parameter on first access and is freed automatically at test end.  For
 ad-hoc use: `pyte.env.Env.bind(cfg_str)` returns an `Env` that works
@@ -60,7 +49,31 @@ Infrastructure:
 - `/local:/ip4_alien:` in `cs.conf` provides the alien address; without
   it tapi_env silently binds 0.0.0.0.
 
-See `ts/env/` in a consuming suite (e.g. python-ts) for end-to-end
-examples: `basic.py` (pco/iface/alias/miss),
-`addrs.py` (loopback/fake/alien + port allocation), `peer2peer.py`
-(TCP and UDP exchange between two agents; ROOT-gated).
+## PCO, interface and alias lookups
+
+From the showcase test `ts/env/basic.py`:
+
+```{literalinclude} /_snippets/env-basic.py
+:language: python
+```
+
+## Address kinds and port allocation
+
+From the showcase test `ts/env/addrs.py` (`pco` is used only as the
+`port=` argument for allocating a fresh port per `t.env.addr()` call):
+
+```{literalinclude} /_snippets/env-addrs.py
+:language: python
+```
+
+## Two-agent environments
+
+`ts/env/peer2peer.py` binds `pco_iut`/`pco_tst` and exchanges data
+over a real socket between the two agents (`RpcSocket`/`SockType` come
+from `pyte.rpc`; see that guide for socket operations); `sock_type`
+comes from the test's `sock_type` parameter (`"stream"` or `"dgram"`)
+and the test is `<req id="ROOT"/>`-gated:
+
+```{literalinclude} /_snippets/env-peer2peer.py
+:language: python
+```

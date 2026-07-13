@@ -11,27 +11,13 @@ The fio JSON report arrives on the job's **stdout** via a readable
 filter.  Diagnostic warnings that fio may print to stdout before the
 JSON object (e.g. iodepth-capped notices) are stripped automatically.
 
-```python
-from pyte.tools import fio
+From the showcase test `ts/fio/randrw.py` (`t.rpc_server(...)` gives
+`pco`; `DATAFILE` is a `/dev/shm/...` tmpfs path so the workload needs
+neither root nor real disk wear; `rwtype` comes from the test's
+`rwtype` parameter, one of `fio.RwType`'s lowercase names):
 
-opts = fio.Opts(
-    filename="/tmp/pyte_fio.dat",
-    size="16m",
-    blocksize=4096,
-    rwtype="rand",              # string name (case-insensitive); fio.RwType.RAND also works
-    rwmixread=50,
-    iodepth=4,
-    runtime=5,
-    ioengine=fio.IoEngine.PSYNC,  # enum member; the string "psync" also works
-    direct=False,
-)
-
-with fio.run(pco, opts) as f:
-    rep = f.wait(timeout=60.0)          # → Report
-    print(rep.read.iops.mean)           # IoStats.iops.mean
-    print(rep.write.bandwidth.mean)     # IoStats.bandwidth.mean (KiB/s)
-    print(rep.read.clatency.percentiles.p99_00)  # ns
-    f.mi_report()                       # emit via pyte.mi
+```{literalinclude} /_snippets/fio-run.py
+:language: python
 ```
 
 `rwtype` accepts a `fio.RwType` enum member (e.g. `fio.RwType.RAND`) or
@@ -55,6 +41,3 @@ percentile (µs, percentile aggr).
 
 Argv mapping mirrors `tapi_fio`'s `fio_binds` order; the docstring in
 `src/pyte/tools/fio.py` is the authoritative reference.
-
-See `ts/fio/randrw.py` in a consuming suite (e.g. python-ts) for the
-showcase test.

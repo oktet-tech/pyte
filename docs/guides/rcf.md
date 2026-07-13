@@ -4,32 +4,60 @@
 inventory, engine<->agent file transfer, TA restart, log flush and
 dynamic agent add/remove.
 
+## Agent inventory and file transfer
+
+`agt.type` (e.g. `"linux"`) and `agt.info` (`AgentInfo(type, rcflib,
+confstr, flags)`) are simple metadata reads.  The showcase test
+`ts/rcf/file_transfer.py` exercises the file-transfer and log-flush
+surface (`t.agent` is the current test's agent name; `pco` is a
+`t.rpc_server(...)` handle used only to verify the transferred size
+from the agent side; `RcfError` is `pyte.errors.RcfError`, raised by
+a second `del_file()` on an already-deleted remote path):
+
+```{literalinclude} /_snippets/rcf-file-transfer.py
+:language: python
+```
+
+`put_file(local, remote)` / `get_file(remote, local)` move an on-disk
+file the same way `put_bytes`/`get_bytes` move an in-memory buffer
+(via a temporary file).
+
+## Restarting a remote agent
+
+`restart()` (`rcf_ta_reboot(RCF_REBOOT_TYPE_AGENT)`) only works on a
+remote agent added with `rebootable=True`.  From the showcase test
+`ts/rcf/agent_restart.py` (`host` is a remote TA hostname, e.g. from
+`TE_IUT`; the test itself skips outright when no remote host is
+configured):
+
+```{literalinclude} /_snippets/rcf-restart.py
+:language: python
+```
+
+## Dynamic agents (raw)
+
+`rcf.add_agent(name)` adds an extra agent straight into RCF —
+Configurator-invisible, good for RCF-level testing only.  From the
+showcase test `ts/rcf/dynamic_agent.py` (`cfg` is `pyte.cfg`, used
+here just to observe that the Configurator does not know about the
+agent):
+
+```{literalinclude} /_snippets/rcf-dynamic-agent.py
+:language: python
+```
+
+## Managed dynamic agents
+
+`managed=True` makes a dynamic agent cfg-visible instead — no
+in-scope showcase test exercises this path (it is demonstrated in
+`ts/dynamic/managed_agent.py`), so the example stays hand-written:
+
 ```python
-from pyte import rcf
-
-rcf.agents()                          # ["Agt_A", ...] running agents
-agt = rcf.agent("Agt_A")
-agt.type                              # "linux"
-agt.info                              # AgentInfo(type, rcflib, confstr, flags)
-
-agt.put_file("/local/path", "/remote/path")   # engine -> agent
-agt.get_file("/remote/path", "/local/path")   # agent -> engine
-agt.del_file("/remote/path")
-agt.put_bytes(b"payload", "/remote/path")     # tempfile sugar
-agt.get_bytes("/remote/path")
-
-agt.flush_logs()                      # Logger pumps out the TA log now
-agt.restart()                         # rcf_ta_reboot(RCF_REBOOT_TYPE_AGENT)
-
-with rcf.add_agent("Agt_DYN") as dyn:          # extra agent at runtime
-    dyn.put_bytes(b"x", "/tmp/probe")
-# remove() ran on context exit
-
 with rcf.add_agent("Agt_MGD", managed=True) as dyn:   # cfg-visible agent
     ...   # /agent:Agt_MGD exists; RPC servers, jobs and pyte.net work
 ```
 
-Managed vs raw dynamic agents:
+Details:
 
 - `managed=True` registers the agent in the Configurator's `/rcf`
   subtree (`tapi_cfg_rcf_add_ta`): the Configurator itself starts the
