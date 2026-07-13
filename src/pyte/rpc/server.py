@@ -254,10 +254,14 @@ class RpcServer:
         return IoMux.create(self, kind)
 
     def job(self, program: str, args: list[str] | None = None,
-            env: dict[str, str] | None = None):
-        """Create a tapi_job running `program` on this RPC server."""
+            env: dict[str, str] | None = None, stdin: bool = False):
+        """Create a tapi_job running `program` on this RPC server.
+
+        stdin=True allocates the input channel at creation (it must
+        exist before start(); see Job.stdin).
+        """
         from pyte.job import Job
-        return Job.create(self, program, args or [], env)
+        return Job.create(self, program, args or [], env, stdin=stdin)
 
     def open(self, path: str, mode: str = "r"):
         from pyte.rpc.files import open_file

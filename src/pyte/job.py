@@ -449,6 +449,7 @@ class Job:
         self._factory = factory
         self._h = handle
         self.program = program
+        self._started = False
         self._stdout: Channel | None = None
         self._stderr: Channel | None = None
         self._stdin: InputChannel | None = None
@@ -467,12 +468,17 @@ class Job:
 
     @classmethod
     def create(cls, server: "RpcServer", program: str, args: list[str],
-               env: dict[str, str] | None = None) -> "Job":
+               env: dict[str, str] | None = None,
+               stdin: bool = False) -> "Job":
         """Create (but do not start) a job running program on server.
 
         args are the program arguments (argv[0] = program is added
         here, per the exec convention tapi_job_create() expects).
         env replaces the whole environment when given (None inherits).
+        stdin=True allocates the input channel right away — an input
+        channel only binds to the process when allocated before
+        start(), so requesting it at creation removes the ordering
+        footgun.
 
         The argv/env cffi arrays are built before the factory is
         created so that a Python-side exception (e.g. encoding error)
@@ -495,7 +501,10 @@ class Job:
         if rc != 0:
             lib.pyte_job_factory_destroy(fac[0])
             check(rc, f"job_create({program})")
-        return cls(fac[0], out[0], program)
+        job = cls(fac[0], out[0], program)
+        if stdin:
+            _ = job.stdin
+        return job
 
     # -- channels ------------------------------------------------------
     def _alloc_out(self) -> None:
@@ -527,10 +536,20 @@ class Job:
     def stdin(self) -> InputChannel:
         """The job's stdin channel (allocated lazily).
 
-        Touch this property before start(): a channel allocated after
-        the process is spawned is not bound to it (TE_EBADFD on send).
+        Must be allocated before start(): a channel allocated after
+        the process is spawned is not bound to it, and TE only reports
+        that later as TE_EBADFD from send().  Accessing it for the
+        first time on a started job raises immediately instead; pass
+        ``stdin=True`` to :meth:`create` (or ``RpcServer.job``) to
+        allocate it at creation.
         """
         if self._stdin is None:
+            if self._started:
+                raise RuntimeError(
+                    f"stdin of job {self.program!r} must be allocated "
+                    "before start(): a channel allocated later is not "
+                    "bound to the process (create the job with "
+                    "stdin=True or touch job.stdin before starting)")
             h = self._handle()
             ffi, lib = _shim()
             i = ffi.new("tapi_job_channel_t **")
@@ -566,6 +585,7 @@ class Job:
         h = self._handle()
         lib = _shim_lib()
         check(lib.pyte_job_start(h), f"job.start({self.program})")
+        self._started = True
 
     def wait(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobStatus:
         """Wait for completion; raises TimeoutError if still running.

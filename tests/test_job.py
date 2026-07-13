@@ -113,6 +113,20 @@ class FakeLib:
         self.calls.append(("send", chan_h, bytes(raw), length))
         return 0
 
+    def pyte_job_factory_rpc(self, srv_h, fac):
+        self.calls.append(("factory_rpc", srv_h))
+        fac[0] = "fac-h"
+        return 0
+
+    def pyte_job_create(self, fac_h, program, argv, envp, out):
+        self.calls.append(("create", fac_h, bytes(program)))
+        out[0] = "job-h"
+        return 0
+
+    def pyte_job_factory_destroy(self, fac_h):
+        self.calls.append(("factory_destroy", fac_h))
+        return 0
+
     def pyte_job_start(self, job_h):
         self.calls.append(("start", job_h))
         return 0
@@ -151,7 +165,8 @@ class FakeFfi:
             return bytes(init)
         if spec == "const char *[]":
             return list(init)
-        if spec == "tapi_job_wrapper_t **":
+        if spec in ("tapi_job_wrapper_t **", "tapi_job_factory_t **",
+                    "tapi_job_t **"):
             return [None]
         if spec == "tapi_job_channel_t *[]":
             return list(init)
@@ -532,6 +547,48 @@ def test_drain_defaults_to_no_wait(monkeypatch):
     flt.drain()
     recv = [c for c in lib.calls if c[0] == "receive_many"]
     assert recv == [("receive_many", ["flt-h"], 1, 0, 0)]
+
+
+# ---------------------------------------------------------------------------
+# stdin allocate-before-start: a stdin channel allocated after the
+# process was spawned is not bound to it; TE only reports that later,
+# as a cryptic TE_EBADFD from send().  Fail fast at allocation instead.
+# ---------------------------------------------------------------------------
+
+def test_stdin_after_start_raises(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    job.start()
+    lib.calls.clear()
+
+    with pytest.raises(RuntimeError, match="before start"):
+        job.stdin
+    assert lib.calls == [], "no channel must be allocated for a live process"
+
+
+def test_stdin_allocated_before_start_stays_usable(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    stdin = job.stdin
+    job.start()
+
+    assert job.stdin is stdin       # property still returns the channel
+    stdin.send("ok\n")
+    assert ("send", "in-h", b"ok\n", 3) in lib.calls
+
+
+def test_create_with_stdin_kwarg_allocates_upfront(monkeypatch):
+    """Job.create(..., stdin=True) allocates the input channel at
+    creation, before any chance to start() — no ordering footgun."""
+    lib = _fake_shim(monkeypatch)
+    server = types.SimpleNamespace(_h="srv-h", name="pco")
+
+    job = Job.create(server, "cat", [], stdin=True)
+
+    assert ("in_channel", "job-h") in lib.calls
+    job.start()
+    job.stdin.send("x")             # allocated: no RuntimeError
+    assert ("send", "in-h", b"x", 1) in lib.calls
 
 
 def test_filter_receive_reads_next_message(monkeypatch):

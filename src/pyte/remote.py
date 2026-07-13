@@ -338,8 +338,8 @@ def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
     log.step_push(f"start remote python interpreter on {pco.ta}")
     popped = False
     try:
-        with pco.job(interpreter, ["-u", "-c", _runner_source()]) as job:
-            _ = job.stdin                 # MUST allocate before start()
+        with pco.job(interpreter, ["-u", "-c", _runner_source()],
+                     stdin=True) as job:
             flt = job.stdout.attach_filter(name="pyte-remote")
             job.stderr.log()
             job.start()
