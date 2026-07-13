@@ -26,3 +26,8 @@ tasks:
     cmds:
       - echo "Serving docs at http://{{.BIND}}:{{.PORT}}/ (Ctrl-C to stop)"
       - python3 -m http.server {{.PORT}} --bind {{.BIND}} --directory {{.HTML_DIR}}
+
+  test:
+    desc: Run unit tests and docstring doctests (no TE needed)
+    cmds:
+      - uv run pytest tests --doctest-modules src/pyte/tools/_units.py

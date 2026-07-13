@@ -50,13 +50,17 @@ def parse_unit(token: str, scale_map: dict[str, float]) -> float:
     Percent tokens (e.g. ``"89.00%"``) strip the trailing ``%`` and
     return the plain float (scale_map is ignored for these).
 
-    Examples::
-
-        parse_unit("456.78us", TIME_US)  -> 456.78
-        parse_unit("2.50ms",   TIME_US)  -> 2500.0
-        parse_unit("12.34k",   METRIC)   -> 12340.0
-        parse_unit("3.50M",    BINARY)   -> 3670016.0
-        parse_unit("89.00%",   TIME_US)  -> 89.0
+    Examples:
+        >>> parse_unit("456.78us", TIME_US)
+        456.78
+        >>> parse_unit("2.50ms", TIME_US)
+        2500.0
+        >>> parse_unit("12.34k", METRIC)
+        12340.0
+        >>> parse_unit("3.50M", BINARY)
+        3670016.0
+        >>> parse_unit("89.00%", TIME_US)
+        89.0
     """
     if token.endswith("%"):
         return float(token[:-1])
