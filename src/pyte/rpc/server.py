@@ -263,6 +263,19 @@ class RpcServer:
         from pyte.job import Job
         return Job.create(self, program, args or [], env, stdin=stdin)
 
+    def run(self, program: str, args: list[str] | None = None,
+            env: dict[str, str] | None = None,
+            timeout: float | None = 10.0):
+        """Run program to completion and capture its output.
+
+        The subprocess.run() of tapi_job; returns a
+        :class:`pyte.job.CompletedJob` (status + stdout + stderr, both
+        streams also logged).  The default timeout is
+        pyte.job.DEFAULT_TIMEOUT.
+        """
+        from pyte.job import run
+        return run(self, program, args, env, timeout=timeout)
+
     def open(self, path: str, mode: str = "r"):
         from pyte.rpc.files import open_file
         return open_file(self, path, mode)

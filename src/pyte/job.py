@@ -411,6 +411,40 @@ def poll(items: list[Channel | InputChannel | Filter],
     check(lib.pyte_job_poll(arr, len(items), _ms(timeout)), "job.poll")
 
 
+@dataclass(frozen=True)
+class CompletedJob:
+    """Result of :func:`run`: completion status plus captured output."""
+    status: JobStatus
+    stdout: str
+    stderr: str
+
+    @property
+    def ok(self) -> bool:
+        """True iff the job exited normally with code 0."""
+        return self.status.ok
+
+
+def run(server: "RpcServer", program: str, args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        timeout: float | None = DEFAULT_TIMEOUT) -> CompletedJob:
+    """Run *program* to completion and capture its output.
+
+    The ``subprocess.run()`` of tapi_job: create the job, capture
+    stdout/stderr (also logged at RING level), start, wait, read the
+    streams and destroy the job.  A non-zero exit is a result, not an
+    exception — check ``.status`` / ``.ok`` — but a job still running
+    when ``timeout`` expires raises :exc:`pyte.errors.TimeoutError`.
+    """
+    with Job.create(server, program, args or [], env) as job:
+        out = job.stdout.attach_filter(name="stdout", log_level="RING")
+        err = job.stderr.attach_filter(name="stderr", log_level="RING")
+        job.start()
+        status = job.wait(timeout=timeout)
+        return CompletedJob(status=status,
+                            stdout=out.read_all(timeout=timeout),
+                            stderr=err.read_all(timeout=timeout))
+
+
 class Wrapper:
     """A tapi_job wrapper (command-line prefix) attached to a Job.
 
@@ -586,6 +620,15 @@ class Job:
         lib = _shim_lib()
         check(lib.pyte_job_start(h), f"job.start({self.program})")
         self._started = True
+
+    def run(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobStatus:
+        """start() and wait() in one call.
+
+        For a fully one-shot create/run/capture/destroy see the
+        module-level :func:`run` (``RpcServer.run``).
+        """
+        self.start()
+        return self.wait(timeout=timeout)
 
     def wait(self, timeout: float | None = DEFAULT_TIMEOUT) -> JobStatus:
         """Wait for completion; raises TimeoutError if still running.

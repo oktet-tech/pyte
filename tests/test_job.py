@@ -139,6 +139,18 @@ class FakeLib:
         self.calls.append(("kill", job_h, signo))
         return 0
 
+    PYTE_JOB_EXITED = 1
+    PYTE_JOB_SIGNALED = 2
+    PYTE_EINPROGRESS = 114
+    TE_LL_RING = 4
+    #: (otype, oval) reported by pyte_job_wait
+    wait_result = (PYTE_JOB_EXITED, 0)
+
+    def pyte_job_wait(self, job_h, timeout_ms, otype, oval):
+        self.calls.append(("wait", job_h, timeout_ms))
+        otype[0], oval[0] = self.wait_result
+        return 0
+
     # TeError construction helpers (required by pyte.errors.check())
     PYTE_ETIMEDOUT = 110
 
@@ -547,6 +559,57 @@ def test_drain_defaults_to_no_wait(monkeypatch):
     flt.drain()
     recv = [c for c in lib.calls if c[0] == "receive_many"]
     assert recv == [("receive_many", ["flt-h"], 1, 0, 0)]
+
+
+# ---------------------------------------------------------------------------
+# One-shot run: Job.run() = start + wait; module-level run() is the
+# subprocess.run() of tapi_job (create, capture, start, wait, destroy).
+# ---------------------------------------------------------------------------
+
+def test_job_run_starts_and_waits(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+
+    status = job.run(timeout=2.0)
+
+    assert status.ok
+    assert lib.calls == [("start", "job-h"), ("wait", "job-h", 2000)]
+
+
+def test_run_one_shot_captures_output(monkeypatch):
+    """run() returns a CompletedJob with status and both streams; the
+    job (and its factory) are destroyed before it returns."""
+    from pyte.job import run
+    lib = _fake_shim(monkeypatch)
+    server = types.SimpleNamespace(_h="srv-h", name="pco")
+    # stdout read_all() drains first, then stderr
+    lib.recv_queue = [(b"out!", False), (b"", True),
+                      (b"err!", False), (b"", True)]
+
+    result = run(server, "prog", ["arg"], timeout=5.0)
+
+    assert result.ok and result.status.ok
+    assert result.stdout == "out!"
+    assert result.stderr == "err!"
+    names = [c[0] for c in lib.calls]
+    assert names.index("start") < names.index("wait")
+    assert "destroy" in names and "factory_destroy" in names
+
+
+def test_run_one_shot_reports_failure_status(monkeypatch):
+    """A non-zero exit is a result, not an exception (subprocess.run
+    parity without check=True)."""
+    from pyte.job import run, StatusKind
+    lib = _fake_shim(monkeypatch)
+    lib.wait_result = (FakeLib.PYTE_JOB_EXITED, 3)
+    server = types.SimpleNamespace(_h="srv-h", name="pco")
+    lib.recv_queue = [(b"", True), (b"", True)]
+
+    result = run(server, "prog")
+
+    assert not result.ok
+    assert result.status.kind is StatusKind.EXITED
+    assert result.status.value == 3
 
 
 # ---------------------------------------------------------------------------
