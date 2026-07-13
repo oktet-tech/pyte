@@ -146,13 +146,12 @@ class Channel:
         return self.attach_filter(name=name, readable=True, regex=regex,
                                   group=group)
 
-    def log(self, level: int | str | None = None) -> "Filter":
-        """Send everything on this channel to the TE log (RING level
-        by default); the output is not readable from the test.
+    def log(self, level: int | str = "RING") -> "Filter":
+        """Send everything on this channel to the TE log; the output
+        is not readable from the test.
         """
         return self.attach_filter(name=f"{self.name}-log", readable=False,
-                                  log_level=level if level is not None
-                                  else "RING")
+                                  log_level=level)
 
     def __repr__(self) -> str:
         return f"<Channel {self.name} of {self._job.program}>"

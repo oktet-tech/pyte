@@ -101,7 +101,7 @@ class FakeLib:
         return 0
 
     def pyte_job_attach_filter(self, arr, n, name, readable, level, out):
-        self.calls.append(("attach_filter", list(arr), n))
+        self.calls.append(("attach_filter", list(arr), n, readable, level))
         out[0] = "flt-h"
         return 0
 
@@ -143,6 +143,7 @@ class FakeLib:
     PYTE_JOB_SIGNALED = 2
     PYTE_EINPROGRESS = 114
     TE_LL_RING = 4
+    TE_LL_WARN = 3
     #: (otype, oval) reported by pyte_job_wait
     wait_result = (PYTE_JOB_EXITED, 0)
 
@@ -652,6 +653,19 @@ def test_create_with_stdin_kwarg_allocates_upfront(monkeypatch):
     job.start()
     job.stdin.send("x")             # allocated: no RuntimeError
     assert ("send", "in-h", b"x", 1) in lib.calls
+
+
+def test_channel_log_defaults_to_ring(monkeypatch):
+    """log() attaches an unreadable filter at RING level by default."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+
+    job.stdout.log()
+    job.stderr.log(level="WARN")
+
+    attaches = [c for c in lib.calls if c[0] == "attach_filter"]
+    assert [(c[3], c[4]) for c in attaches] == \
+        [(0, lib.TE_LL_RING), (0, lib.TE_LL_WARN)]
 
 
 def test_filter_receive_reads_next_message(monkeypatch):
