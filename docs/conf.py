@@ -8,6 +8,7 @@ shim, so the docs build needs neither a built TE nor a compiled pyte.
 import os
 import sys
 import tomllib
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "src")))
@@ -15,6 +16,12 @@ sys.path.insert(0, os.path.abspath(
 with open(os.path.join(os.path.dirname(__file__), "..", "pyproject.toml"),
           "rb") as _f:
     _version = tomllib.load(_f)["project"]["version"]
+
+_DOCS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_DOCS / "_ext"))
+import showcase_gen
+
+showcase_gen.generate(_DOCS)
 
 project = "pyte"
 author = "OKTET Labs"

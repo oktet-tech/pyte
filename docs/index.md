@@ -32,6 +32,13 @@ guides/caveats
 
 ````{toctree}
 :maxdepth: 1
+:caption: Showcase
+
+showcase/index
+````
+
+````{toctree}
+:maxdepth: 1
 :caption: Reference
 
 api/index

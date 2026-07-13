@@ -6,5 +6,5 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${root}"
 uv run --no-project --with-requirements docs/requirements.txt \
-    sphinx-build -b html docs docs/_build/html "$@"
+    sphinx-build -W --keep-going -b html docs docs/_build/html "$@"
 echo "Docs built: ${root}/docs/_build/html/index.html"

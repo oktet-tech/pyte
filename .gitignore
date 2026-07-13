@@ -8,3 +8,5 @@ build/
 uv.lock
 docs/_build/
 docs/api/generated/
+docs/showcase/
+docs/_snippets/

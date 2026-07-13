@@ -42,6 +42,11 @@ uv run --no-project --with-requirements docs/requirements.txt \
 
 Open `docs/_build/html/index.html`.
 
+Building the docs requires a `python-ts` checkout (the showcase suite the
+examples are generated from): either a sibling directory of this repo, or
+point `PYTE_SHOWCASE` at its root. The build fails without it — by design:
+every example in these docs is real, executed suite code.
+
 ## Unit tests
 
 Most of pyte's unit tests are pure-Python and need no TE engine. A subset
