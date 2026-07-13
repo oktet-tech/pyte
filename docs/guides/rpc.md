@@ -2,7 +2,9 @@
 
 `pyte.rpc.RpcServer` creates and owns remote socket file descriptors
 through `RpcSocket`.  A complete TCP echo between two RPC servers
-(from the showcase test `ts/rpc/socket_echo.py`):
+(from the showcase test `ts/rpc/socket_echo.py`; `pco_srv` and
+`pco_clt` are two `t.rpc_server(...)` handles on the agent, and
+`PAYLOAD` is a `bytes` constant):
 
 ```{literalinclude} /_snippets/rpc-socket-echo.py
 :language: python
@@ -30,17 +32,16 @@ through `RpcSocket`.  A complete TCP echo between two RPC servers
 `tapi_iomux`, and accepts any `Kind`: `Kind.SELECT`, `Kind.PSELECT`,
 `Kind.POLL`, `Kind.PPOLL`, `Kind.EPOLL`, `Kind.EPOLL_PWAIT`,
 `Kind.EPOLL_PWAIT2`.  The showcase test `ts/rpc/iomux.py` is
-parametrized over all of them, picking one at runtime via
-`Kind[mux_name.upper()]`:
+parametrized over all of them, picking one at runtime (shown below):
 
 ```{literalinclude} /_snippets/rpc-iomux.py
 :language: python
 ```
 
 `mux.add()` also accepts a bare int fd in place of a socket.  The
-`mux.wait(0.5) != []` check above is the timeout case shown live:
-`wait()` returns an empty list on timeout (n==0 from
-`tapi_iomux_call`) — not an error.  `IoMux` also has `mux.mod(sock,
+`mux.wait(0.5) != []` check above asserts that an idle multiplexer
+times out; an empty list IS the timeout return (n==0 from
+`tapi_iomux_call`), not an error.  `IoMux` also has `mux.mod(sock,
 Evt.OUT)` to change registered events and `mux.delete(sock)` to
 unregister.  Event flags: `Evt.IN`, `Evt.OUT`, `Evt.PRI`, `Evt.EXC`,
 `Evt.ERR`, `Evt.HUP`, `Evt.RDHUP`, `Evt.ET`, `Evt.ONESHOT`,
