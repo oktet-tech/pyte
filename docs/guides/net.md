@@ -21,8 +21,7 @@ against the raw tree):
 ## Mutations — require a root agent
 
 Adding/removing addresses and routes, changing MTU, and flipping
-sysctls need a root agent; on a non-root rig they raise `CfgError`
-(EPERM from the agent).  `agt`/`lo` continue from the same
+sysctls need a root agent.  `agt`/`lo` continue from the same
 `net.agent(t.agent)` / `agt.iface("lo")` pair (from the showcase test
 `ts/net/net_setup.py`, `<req id="ROOT"/>`):
 

@@ -37,7 +37,7 @@ and the auto-generated API reference are built with Sphinx and need no TE:
 ./scripts/build-docs.sh
 # equivalently:
 uv run --no-project --with-requirements docs/requirements.txt \
-  sphinx-build -b html docs docs/_build/html
+  sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
 Open `docs/_build/html/index.html`.

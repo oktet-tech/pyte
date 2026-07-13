@@ -61,7 +61,8 @@ From the showcase test `ts/env/basic.py`:
 
 From the showcase test `ts/env/addrs.py` (`pco` is used only as the
 `port=` argument for allocating a fresh port per `t.env.addr()` call;
-the snippet uses Python's stdlib `ipaddress` module, imported at the top of the test):
+the snippet uses Python's stdlib `ipaddress` module, imported at the
+top of the test):
 
 ```{literalinclude} /_snippets/env-addrs.py
 :language: python
