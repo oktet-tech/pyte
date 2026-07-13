@@ -138,6 +138,7 @@ class DeviceAerUncorrectableError(CfgObject):
     """A specific uncorrectable error happened. This is a list of values
     indexed by an error name.
     The following error names are defined as per PCIe spec:
+
     - unsupported_request
     - data_link_protocol_error
     - poisoned_tlp
@@ -157,6 +158,7 @@ class DeviceAerCorrectableError(CfgObject):
     """A specific correctable error happened.  This is a list of values
     indexed by an error name.
     The following error names are defined as per PCIe spec:
+
     - receiver_error
     - bad_tlp
     - bad_dllp
@@ -245,6 +247,7 @@ class Vendor(CfgObject):
     devices, it makes a resource with
     /agent/hardware/pci/vendor:VENDOR/device:DEVICE/instance:NTH as value.
     The agent then will do PCI scanning and:
+
     - create /agent/hardware/pci/vendor:VENDOR/device:DEVICE/instance:NTH
       having the real OID of the PCI device
     - create /agent/hardware/pci/device:ADDRESS node corresponding to

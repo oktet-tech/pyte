@@ -15,13 +15,15 @@ that byte-for-byte. The `-o` enum/enum-bool options and `-p` are always
 emitted (with their C defaults); plain string options are two tokens and
 omitted when None.
 
-Client bind order:
+Client bind order::
+
     -i <identity_file>   -l <login_name>
     -o StrictHostKeyChecking=<value>   -o UserKnownHostsFile=<file>
     -g   -N   -L <local_pf>   -R <remote_pf>   -p <port>
     <destination>   <command>
 
-Server bind order:
+Server bind order::
+
     -h <host_key_file>   -f <config_file>
     -o AuthorizedKeysFile=<file>   -o PermitRootLogin=<value>
     -o PidFile=<file>   -o PubkeyAuthentication=yes|no

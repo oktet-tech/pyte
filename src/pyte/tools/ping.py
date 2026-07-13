@@ -7,7 +7,7 @@ binary is resolved from the agent's PATH (the job program is "ping").
 Gate ping tests with <req id="PING"/> and the prologue probe.
 
 Pinned mappings (from te/lib/tapi_tool/tapi_ping.{h,c})
-======================================================
+========================================================
 
 argv (ping_binds order; each flag omitted when unset):
     -c <packet_count>   -s <packet_size>   -i <interval>

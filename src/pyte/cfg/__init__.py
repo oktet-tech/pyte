@@ -189,7 +189,7 @@ def delete(oid: str, children: bool = False) -> None:
 
 
 def find(pattern: str) -> list[CfgNode]:
-    """Find instances by wildcard pattern, e.g. "/agent:A/env:*"."""
+    """Find instances by wildcard pattern, e.g. ``/agent:A/env:*``."""
     ffi, lib = _shim()
     n = ffi.new("unsigned int *")
     handles = ffi.new("cfg_handle **")

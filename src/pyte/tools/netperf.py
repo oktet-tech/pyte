@@ -16,7 +16,7 @@ Server argv (netserver_binds, tapi_netperf.c:507-512):
 Client argv (netperf_binds, tapi_netperf.c:390-398):
 
     netperf -t <TEST> -H <host> [-4|-6] [-L <src>] [-p <port>] [-l <dur>]
-            [-- <test-spec>]
+    [-- <test-spec>]
     STREAM test-spec: [-m <send>] [-M <recv>] [-s <local_sock>] [-S <remote_sock>]
     RR     test-spec: [-r <req>[,<resp>]]
     (each test-spec flag omitted when its value is None; emit -- only if any

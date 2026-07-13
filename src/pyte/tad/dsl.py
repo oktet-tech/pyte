@@ -18,7 +18,7 @@ te/lib/ndn/ndn_ipstack.c, ndn_eth.c, ndn_socket.c):
 
 - CSAP spec:  ``{ layers { udp:{ local-port plain:7 }, ip4:{} } }``
 - Template:   ``{ pdus { udp:{ dst-port plain:5 }, ip4:{} },
-              payload bytes:'6869'H }``
+  payload bytes:'6869'H }``
 - Pattern:    ``{ { pdus { udp:{ src-port plain:5 }, ip4:{} } } }``
   (one Generic-Pattern-Unit; the extra braces are the unit sequence).
 

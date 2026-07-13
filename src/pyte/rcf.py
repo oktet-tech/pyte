@@ -2,7 +2,8 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """RCF direct API: agent inventory, file transfer, restart, dynamic TAs.
 
-Usage:
+Usage::
+
     from pyte import rcf
     rcf.agents()                      # ["Agt_A"]
     a = rcf.agent("Agt_A")

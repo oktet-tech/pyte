@@ -16,10 +16,11 @@ argv (BASIC_BINDS): [--include-statistics] [<cmd-flag>] <if_name>
   NONE emits no command flag (just `ethtool <if_name>`).
   EEPROM_DUMP appends:  [raw on|off] [offset N] [length N]
   DUMP_MODULE_EEPROM appends:
-      [raw on|off] [hex on|off] [offset N] [length N] [page N] [bank N] [i2c N]
+  [raw on|off] [hex on|off] [offset N] [length N] [page N] [bank N] [i2c N]
 
 Output parsing (only these 4 commands yield structured data; the other
 6 expose raw stdout only, mirroring the C "stdout parsing not supported"):
+
   NONE       -> IfProps(link, autoneg)        ("Link detected", "Auto-negotiation")
   STATS      -> dict[str, str] + get_stat()   ("name: value" lines, last colon splits)
   SHOW_PAUSE -> Pause(autoneg, rx, tx, rx/tx_pause_frames)

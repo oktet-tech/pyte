@@ -323,12 +323,35 @@ def _esc_doc(text: str) -> str:
     return text
 
 
+def _blank_before_lists(lines: list[str]) -> list[str]:
+    """Insert a blank line before a "- " bullet list that directly follows
+    prose (CM ``d:`` blocks routinely do this; reST requires the blank
+    line, or a wrapped bullet item breaks docutils' block-quote parsing).
+
+    Only fires on the prose -> list transition, not between a list item
+    and its own wrapped continuation (deeper-indented) or its next
+    sibling item (same indent, also starting with "- ").
+    """
+    def indent(s: str) -> int:
+        return len(s) - len(s.lstrip())
+
+    out: list[str] = []
+    for ln in lines:
+        prev = out[-1] if out else ""
+        if (ln.lstrip().startswith("- ") and prev.strip()
+                and not prev.lstrip().startswith("- ")
+                and indent(prev) <= indent(ln)):
+            out.append("")
+        out.append(ln)
+    return out
+
+
 def _docstring(node: Node, indent: str) -> list[str]:
     """Render a node's d: prose as a docstring, indented."""
     doc = _esc_doc(node.entry.doc) if node.entry else ""
     if not doc:
         return []
-    lines = doc.splitlines()
+    lines = _blank_before_lists(doc.splitlines())
     if len(lines) == 1:
         return [f'{indent}"""{lines[0]}"""']
     return [f'{indent}"""{lines[0]}',

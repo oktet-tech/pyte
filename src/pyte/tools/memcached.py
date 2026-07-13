@@ -6,35 +6,38 @@ Pure Python over pyte.job; zero shim imports.
 
 Pinned mapping (from te/lib/tapi_tool/tapi_memcached.{h,c})
 ===========================================================
-argv (memcached_binds, tapi_memcached.c:53-166), in binds order:
-  --unix-socket=S  --enable-shutdown  --unix-mask=OCT  --listen=ADDR
-  --user=S  --memory-limit=U  --conn-limit=U  --max-reqs-per-event=U
-  --lock-memory  --port=PORT  --udp-port=PORT  --disable-evictions
-  --enable-coredumps  --slab-growth-factor=F  --slab-min-size=U
-  --disable-cas  -v|-vv|-vvv  --threads=U  --napi-ids=U  -DCHAR
-  --enable-largepages  --listen-backlog=U  --protocol=auto|ascii|binary
-  --max-item-size=Uk  --enable-sasl  --disable-flush-all
-  --disable-dumping  --disable-watch  -omaxconns_fast  -ono_maxconns_fast
-  -ohashpower=U  -otail_repair_time=U  -ono_lru_crawler
-  -olru_crawler_sleep=U  -olru_crawler_tocrawl=U  -ono_lru_maintainer
-  -ohot_lru_pct=U  -owarm_lru_pct=U  -ohot_max_factor=F
-  -owarm_max_factor=F  -otemporary_ttl=U  -oidle_timeout=U
-  -owatcher_logbuf_size=U  -oworker_logbuf_size=U  -otrack_sizes
-  -ono_hashexpand  -oext_page_size=U  -oext_path=PATH:SIZEG
-  -oext_wbuf_size=U  -oext_threads=U  -oext_item_size=U  -oext_item_age=U
-  -oext_low_ttl=U  -oext_drop_unread  -oext_recache_rate=U
-  -oext_compact_under=U  -oext_drop_under=U  -oext_max_frag=F
-  -oslab_automove_freeratio=F
-Defaults: tcp_port/udp_port default to 0.0.0.0:0 => --port=0 --udp-port=0
-always emitted (tapi_memcached.c:30-34,179-180). DIVERGENCE from C: the C
-default opt emits --protocol=auto always (PROTO_AUTO enum, not UNDEF); we
-omit --protocol unless set. memcached treats absence as auto. Suites
-wanting byte-identical command lines pass protocol=Proto.AUTO.
-Filters (tapi_memcached.c:296-309): stdout logged at RING, stderr at WARN,
-both non-readable. Stop: SIGTERM, 10s (:21,380).
-Stats reader pinned to app-perf-ts mem-db/memcached.c:432-517:
-  mc-stats <port>; regexes "STAT <field> ([0-9]+)" for cmd_set cmd_get
-  get_hits get_misses curr_items bytes_read bytes_written.
+
+::
+
+    argv (memcached_binds, tapi_memcached.c:53-166), in binds order:
+      --unix-socket=S  --enable-shutdown  --unix-mask=OCT  --listen=ADDR
+      --user=S  --memory-limit=U  --conn-limit=U  --max-reqs-per-event=U
+      --lock-memory  --port=PORT  --udp-port=PORT  --disable-evictions
+      --enable-coredumps  --slab-growth-factor=F  --slab-min-size=U
+      --disable-cas  -v|-vv|-vvv  --threads=U  --napi-ids=U  -DCHAR
+      --enable-largepages  --listen-backlog=U  --protocol=auto|ascii|binary
+      --max-item-size=Uk  --enable-sasl  --disable-flush-all
+      --disable-dumping  --disable-watch  -omaxconns_fast  -ono_maxconns_fast
+      -ohashpower=U  -otail_repair_time=U  -ono_lru_crawler
+      -olru_crawler_sleep=U  -olru_crawler_tocrawl=U  -ono_lru_maintainer
+      -ohot_lru_pct=U  -owarm_lru_pct=U  -ohot_max_factor=F
+      -owarm_max_factor=F  -otemporary_ttl=U  -oidle_timeout=U
+      -owatcher_logbuf_size=U  -oworker_logbuf_size=U  -otrack_sizes
+      -ono_hashexpand  -oext_page_size=U  -oext_path=PATH:SIZEG
+      -oext_wbuf_size=U  -oext_threads=U  -oext_item_size=U  -oext_item_age=U
+      -oext_low_ttl=U  -oext_drop_unread  -oext_recache_rate=U
+      -oext_compact_under=U  -oext_drop_under=U  -oext_max_frag=F
+      -oslab_automove_freeratio=F
+    Defaults: tcp_port/udp_port default to 0.0.0.0:0 => --port=0 --udp-port=0
+    always emitted (tapi_memcached.c:30-34,179-180). DIVERGENCE from C: the C
+    default opt emits --protocol=auto always (PROTO_AUTO enum, not UNDEF); we
+    omit --protocol unless set. memcached treats absence as auto. Suites
+    wanting byte-identical command lines pass protocol=Proto.AUTO.
+    Filters (tapi_memcached.c:296-309): stdout logged at RING, stderr at WARN,
+    both non-readable. Stop: SIGTERM, 10s (:21,380).
+    Stats reader pinned to app-perf-ts mem-db/memcached.c:432-517:
+      mc-stats <port>; regexes "STAT <field> ([0-9]+)" for cmd_set cmd_get
+      get_hits get_misses curr_items bytes_read bytes_written.
 """
 from __future__ import annotations
 
@@ -68,7 +71,7 @@ def _addr_port(v) -> str:
 
 @dataclass(frozen=True)
 class Opts:
-    """memcached options; None omits the flag (mirrors *_UNDEF)."""
+    """memcached options; None omits the flag (mirrors ``*_UNDEF``)."""
     unix_socket: str | None = None
     enable_ascii_shutdown: bool = False
     unix_mask: int | None = None            # emitted octal

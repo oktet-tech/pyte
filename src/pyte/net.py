@@ -148,7 +148,8 @@ class Iface(_GenInterface):
 
     @property
     def addresses(self) -> list[tuple[str, int]]:
-        """[(ip, prefix)]: the net_addr entry's own value is the prefix."""
+        """The (address, prefix) pairs; the net_addr entry's own value is
+        the prefix."""
         return [(na.name, na.value) for na in self.net_addr]
 
     def addr_add(self, ip: str, prefix: int, broadcast: bool = True) -> None:

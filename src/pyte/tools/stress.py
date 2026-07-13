@@ -7,7 +7,7 @@ resolved from the agent's PATH (job program "stress"). Gate stress tests
 with <req id="STRESS"/> and the prologue probe.
 
 Pinned mappings (from te/lib/tapi_tool/tapi_stress.{h,c})
-========================================================
+===========================================================
 
 argv (stress_tool_binds; each omittable, omitted when unset):
     --cpu <N>   --io <N>   --vm <N>   --timeout <N>

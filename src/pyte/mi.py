@@ -3,7 +3,7 @@
 """pyte.mi — thin Python wrapper over TE's te_mi measurement logger.
 
 This module exposes a single context manager, ``Logger``, that wraps the
-three te_mi C functions:
+three te_mi C functions::
 
     te_mi_logger_meas_create(tool, **logger)   → pyte_mi_meas_create
     te_mi_logger_add_meas(logger, &retval, …)  → pyte_mi_add_meas

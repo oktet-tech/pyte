@@ -7,15 +7,15 @@ resolved from the agent's PATH (job program "iperf3"). Gate iperf3 tests
 with <req id="IPERF3"/> and the prologue probe.
 
 Pinned mappings (from te/lib/tapi_performance/iperf3.c, tapi_performance.*)
-=========================================================================
+===========================================================================
 
 server argv (build_server_args; bind order port, interval):
     iperf3 -s -J  [-p<port>] [-i<interval>]
 
 client argv (build_client_args; bind order below; each omitted when unset):
     iperf3 -c <host> -J [-B<src_host>] [-p<port>] [-4|-6] [-u]
-        [-b<bandwidth_bits>] [-l<length>] [-n<num_bytes>] [-t<duration>]
-        [-i<interval>] [-P<streams>] [-R] [--bidir]
+    [-b<bandwidth_bits>] [-l<length>] [-n<num_bytes>] [-t<duration>]
+    [-i<interval>] [-P<streams>] [-R] [--bidir]
     Flags glue the value on (-p5201); only --bidir is long-form. -u for UDP
     only (TCP default). -4/-6 select ip version (client).
 

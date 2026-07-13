@@ -9,7 +9,8 @@ Gate wrk tests with <req id="WRK"/> and the prologue probe.
 Pinned mappings (from te/lib/tapi_tool/tapi_wrk.{h,c})
 =======================================================
 
-argv (wrk opt-bind order; each flag omitted when unset/zero):
+argv (wrk opt-bind order; each flag omitted when unset/zero)::
+
     --connections <n>   --threads <n>   --duration <n>s   [--latency]
     <url>  (positional, required)
     [--header "<H>" ...]   [--script <path>]
@@ -26,7 +27,7 @@ the C parse_unit tables:
 - binary (bytes) → base, scale 1024: ""=1, K=1024, M=1024^2, G=1024^3, T, P
 - percent: strip trailing %
 
-Regexes + targets (tapi_wrk.c:227-292):
+Regexes + targets (tapi_wrk.c:227-292)::
 
     r"(\\d+) requests in"                       → req_count (int)
     r"Transfer/sec:\\s*(\\S+)B"        → bytes_per_sec (binary-unit float)

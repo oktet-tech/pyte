@@ -105,7 +105,7 @@ class RpcServer:
         ``errors.ECONNREFUSED``) the caught error's ``code`` must
         match, otherwise the error propagates.  Execution of the
         block STOPS at the failing call — unlike the old suppression
-        model, no ``None``s flow through the rest of the block.
+        model, no ``None`` values flow through the rest of the block.
         Raises TestFail if the block completes without an RpcError.
 
         Yields an :class:`ExpectedError` whose ``error`` attribute

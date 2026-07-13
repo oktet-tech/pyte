@@ -10,7 +10,7 @@ Pinned mappings (from te/lib/tapi_tool/tapi_nptcp.{h,c})
 =========================================================
 
 argv (tapi_nptcp.c:48-71; receiver omits -h, transmitter includes -h
-<host>; ints are TAPI_JOB_OPT_UINT_OMITTABLE = separate tokens):
+<host>; ints are TAPI_JOB_OPT_UINT_OMITTABLE = separate tokens)::
 
     -b <tcp_buffer_size>   [-h <host>]   [-I]   -l <starting_msg_size>
     -n <nrepeats>   -O <offsets>   -o <output_filename>   -p <perturbation_size>

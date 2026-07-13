@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class PktBuilder:
     """A packet: an engine-built Scapy packet plus optional VM instructions."""
 
-    #: A Scapy packet, e.g. Ether()/IP(dst="10.0.0.2")/UDP(dport=80)/("x"*18)
+    #: A Scapy packet, e.g. ``Ether()/IP(dst="10.0.0.2")/UDP(dport=80)/("x"*18)``
     pkt: "Packet"
     #: Optional STLVm* expression strings (TRex field engine, agent-side).
     #: With wire-bytes packets, VM packet offsets must be numeric.
