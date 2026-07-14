@@ -8,8 +8,19 @@ git submodule and built against your local TE.
 
 ## Prerequisites
 
+The tutorial assumes your new suite and its references sit side by side:
+`te/`, `python-ts/` and `my-ts/` in one parent directory.
+
 - A TE checkout next to your suite (the suite's `scripts/guess.sh`
   auto-detects a sibling `te/`), built at least once.
+- A [python-ts](https://github.com/oktet-tech/python-ts) checkout next to
+  your suite — steps 3–5 copy the run script, the rig, and the meson
+  boilerplate from it:
+
+  ```bash
+  git clone https://github.com/oktet-tech/python-ts.git
+  ```
+
 - [uv](https://docs.astral.sh/uv/) installed.
 
 ## 1. Create the suite repo and add pyte
@@ -48,8 +59,8 @@ dev = ["pytest>=8", "ruff>=0.4"]
 
 The run script must check out the submodule, build TE, build the pyte shim
 against that TE, and invoke the dispatcher. The reference implementation is
-intricate (TE detection, metadata, rig handling), so copy it from python-ts
-and adjust the suite name:
+intricate (TE detection, metadata, rig handling), so copy it from the
+python-ts checkout (see Prerequisites) and adjust the suite name:
 
 ```bash
 cp ../python-ts/scripts/run.sh  scripts/run.sh
@@ -122,7 +133,8 @@ Register it in `ts/sanity/package.xml` (Tester needs a non-empty
 ```
 
 Install it from `ts/sanity/meson.build` and list the package in
-`ts/meson.build` (copy the pattern from any python-ts package).
+`ts/meson.build` (copy the pattern from any python-ts package, e.g.
+`../python-ts/ts/rpc/meson.build` and `../python-ts/ts/meson.build`).
 
 ## 6. Run it
 
