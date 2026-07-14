@@ -22,6 +22,7 @@ guides/architecture
 guides/rpc
 guides/net
 guides/rcf
+guides/remote
 guides/env
 guides/tester
 guides/tools-fio
