@@ -89,3 +89,20 @@ def test_serve_destroys_on_start_failure():
         with serve(pco, "iperf3", ["-s"], host="h", port=1, ready_delay=0):
             pass
     assert "destroy" in job.events     # cleaned up despite start failure
+
+
+def test_serve_destroys_job_on_baseexception_during_start():
+    """A8: serve() must catch BaseException like _tool.launch() does,
+    so a Ctrl-C (KeyboardInterrupt) during start() still destroys the
+    job instead of leaking it."""
+    job = FakeJob()
+
+    def boom():
+        raise KeyboardInterrupt()
+    job.start = boom
+    pco = FakePco(job)
+
+    with pytest.raises(KeyboardInterrupt):
+        with serve(pco, "iperf3", ["-s"], host="h", port=1, ready_delay=0):
+            pass
+    assert "destroy" in job.events

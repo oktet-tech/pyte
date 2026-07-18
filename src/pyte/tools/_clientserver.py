@@ -46,7 +46,7 @@ def serve(pco: "RpcServer", program: str, argv: list[str], *,
     try:
         job.stderr.log(level="WARN")
         job.start()
-    except Exception:
+    except BaseException:
         job.destroy()
         raise
     if ready_delay:
