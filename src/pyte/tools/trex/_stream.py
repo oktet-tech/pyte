@@ -63,6 +63,14 @@ class TXCont:
     bps_l2: float | None = None
     percentage: float | None = None
 
+    def __post_init__(self) -> None:
+        set_fields = [name for name in ("pps", "bps_l2", "percentage")
+                      if getattr(self, name) is not None]
+        if len(set_fields) != 1:
+            raise ValueError(
+                "TXCont: set exactly one of pps, bps_l2, percentage "
+                f"(got {len(set_fields)} set: {set_fields!r})")
+
     def spec(self) -> dict:
         return {"type": "continuous",
                 "pps": None if self.pps is None else float(self.pps),

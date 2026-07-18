@@ -30,6 +30,33 @@ def test_txcont_spec():
         "bps_l2": None, "percentage": None}
 
 
+def test_txcont_rejects_zero_rate_fields():
+    with pytest.raises(ValueError, match="pps.*bps_l2.*percentage"):
+        TXCont()
+
+
+def test_txcont_rejects_two_rate_fields():
+    with pytest.raises(ValueError, match="pps.*bps_l2.*percentage"):
+        TXCont(pps=1000, bps_l2=1000.0)
+
+
+def test_txcont_rejects_three_rate_fields():
+    with pytest.raises(ValueError, match="pps.*bps_l2.*percentage"):
+        TXCont(pps=1000, bps_l2=1000.0, percentage=50.0)
+
+
+def test_txcont_accepts_pps_only():
+    assert TXCont(pps=1000).pps == 1000
+
+
+def test_txcont_accepts_bps_l2_only():
+    assert TXCont(bps_l2=1000.0).bps_l2 == 1000.0
+
+
+def test_txcont_accepts_percentage_only():
+    assert TXCont(percentage=50.0).percentage == 50.0
+
+
 def test_txsingleburst_spec():
     assert TXSingleBurst(total_pkts=100, pps=500).spec() == {
         "type": "single_burst", "total_pkts": 100, "pps": 500.0}
