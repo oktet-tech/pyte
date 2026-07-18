@@ -422,11 +422,9 @@ def test_cfgsubtree_delitem_deletes_child(monkeypatch):
         ("/agent:A/interface:eth0/net_addr:192.0.2.1", True)]
 
 
-def test_cfgsubtree_delitem_missing_propagates_engine_error(monkeypatch):
-    """CfgSubtree carries no access metadata (unlike BoundCollection,
-    whose owning Collection declares access=), so there is no read-only
-    guard and no not-found -> KeyError translation here: whatever error
-    the engine raises propagates as-is."""
+def test_cfgsubtree_delitem_missing_raises_keyerror(monkeypatch):
+    """CfgSubtree.__delitem__ translates CfgNotFoundError to KeyError,
+    matching BoundCollection's idiomatic contract for __delitem__."""
     from pyte.errors import CfgNotFoundError
 
     node = cfg.CfgNode("/agent:A/interface:eth0")
@@ -436,5 +434,5 @@ def test_cfgsubtree_delitem_missing_propagates_engine_error(monkeypatch):
         raise CfgNotFoundError(12, f"cfg delete {oid}")
 
     monkeypatch.setattr(cfg, "delete", missing)
-    with pytest.raises(CfgNotFoundError):
+    with pytest.raises(KeyError, match="192.0.2.1"):
         del sub["192.0.2.1"]

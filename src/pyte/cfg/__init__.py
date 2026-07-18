@@ -461,13 +461,14 @@ class CfgSubtree:
     def __delitem__(self, name: str) -> None:
         """Delete the child instance (and its children).
 
-        Unlike BoundCollection, a raw CfgSubtree carries no access
-        metadata (no owning Collection declares read_only/read_write),
-        so there is no read-only guard and no not-found -> KeyError
-        translation here: the delete is issued directly and any engine
-        error propagates as-is.
+        Raises KeyError if the child does not exist, following the
+        idiomatic Python contract for __delitem__.
         """
-        delete(self[name].oid, children=True)
+        from pyte.errors import CfgNotFoundError
+        try:
+            delete(self[name].oid, children=True)
+        except CfgNotFoundError:
+            raise KeyError(name) from None
 
     def __repr__(self) -> str:
         return f"CfgSubtree({self.parent.oid!r}, {self.sub!r})"
