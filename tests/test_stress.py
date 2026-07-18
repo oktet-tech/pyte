@@ -37,3 +37,40 @@ def test_wait_returns_job_status():
     st = Stress(FakeJob()).wait()
     assert isinstance(st, JobStatus)
     assert not st.ok and st.value == 9
+
+
+# -- wait() timeout convention (A2) ------------------------------------------
+
+def test_wait_omitted_uses_default_timeout():
+    from pyte.job import JobStatus, StatusKind
+    from pyte.tools.stress import Stress
+
+    class FakeJob:
+        def __init__(self):
+            self.wait_calls = []
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return JobStatus(StatusKind.EXITED, 0)
+
+    job = FakeJob()
+    Stress(job).wait()
+    assert job.wait_calls == [Stress.default_timeout]
+
+
+def test_wait_none_blocks_forever():
+    """A2: timeout=None must mean 'forever', not 'default'."""
+    from pyte.job import JobStatus, StatusKind
+    from pyte.tools.stress import Stress
+
+    class FakeJob:
+        def __init__(self):
+            self.wait_calls = []
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return JobStatus(StatusKind.EXITED, 0)
+
+    job = FakeJob()
+    Stress(job).wait(timeout=None)
+    assert job.wait_calls == [None]

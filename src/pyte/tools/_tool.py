@@ -239,6 +239,33 @@ class ToolHandle:
         raise NotImplementedError
 
     # -- shared lifecycle ------------------------------------------------
+    def _resolve_timeout(self, timeout):
+        """Resolve *timeout* honoring the ``_USE_DEFAULT`` sentinel.
+
+        ``_USE_DEFAULT`` (the omitted-argument case) becomes
+        ``self.default_timeout``; ``None`` passes through unchanged and
+        means "block forever" (P1.5); a float passes through unchanged.
+        Every wrapper's ``wait()``/``wait_silent()`` override must route
+        its *timeout* argument through this one place so the
+        package-wide timeout convention can't drift per-tool (A2).
+        """
+        if timeout is _USE_DEFAULT:
+            return self.default_timeout
+        return timeout
+
+    @staticmethod
+    def _remaining(timeout, start: float):
+        """Budget left for a second wait step after *start*.
+
+        Mirrors the arithmetic :meth:`wait` uses to share ONE deadline
+        between ``job.wait()`` and the output read (A3): the read gets
+        whatever the job wait left over (floored at 1 s), not the full
+        timeout again.  ``None`` (forever) stays ``None``.
+        """
+        if timeout is None:
+            return None
+        return max(timeout - (time.monotonic() - start), 1.0)
+
     def wait(self, timeout: float | _NoTimeout | None = _USE_DEFAULT):
         """Wait for completion, parse the output, return the report.
 
@@ -253,14 +280,10 @@ class ToolHandle:
         """
         if self._report is not None:
             return self._report
-        if timeout is _USE_DEFAULT:
-            timeout = self.default_timeout
+        timeout = self._resolve_timeout(timeout)
         start = time.monotonic()
         status = self._job.wait(timeout=timeout)
-        if timeout is None:
-            remaining = None
-        else:
-            remaining = max(timeout - (time.monotonic() - start), 1.0)
+        remaining = self._remaining(timeout, start)
         raw = self._read_output(remaining)
         if self.wait_policy == "status-first":
             if not status.ok:
@@ -284,8 +307,7 @@ class ToolHandle:
 
         Omit *timeout* for the tool's default; None blocks forever.
         """
-        if timeout is _USE_DEFAULT:
-            timeout = self.default_timeout
+        timeout = self._resolve_timeout(timeout)
         status = self._job.wait(timeout=timeout)
         if not status.ok:
             self._fail_status(status, None)

@@ -186,8 +186,8 @@ class Memaslap(_tool.ToolHandle):
         self._cfg_fn = cfg_fn
 
     def _read_output(self, timeout: float) -> tuple[list, list]:
-        return ([m.data for m in self._tps_flt.messages(timeout=10.0)],
-                [m.data for m in self._net_flt.messages(timeout=10.0)])
+        return ([m.data for m in self._tps_flt.messages(timeout=timeout)],
+                [m.data for m in self._net_flt.messages(timeout=timeout)])
 
     def _parse(self, raw: tuple[list, list]) -> Report:
         tps_vals, net_vals = raw

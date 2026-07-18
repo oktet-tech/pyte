@@ -165,10 +165,16 @@ class Ssh(_tool.ToolHandle):
         """Start the ssh/sshd process."""
         self._job.start()
 
-    def wait(self, timeout: float | None = None):
-        """Wait for the process to finish; returns the JobStatus."""
-        if timeout is None:
-            timeout = self.default_timeout
+    def wait(self,
+             timeout: float | _tool._NoTimeout | None = _tool._USE_DEFAULT,
+             ):
+        """Wait for the process to finish; returns the JobStatus.
+
+        Follows the package timeout convention (P1.5, A2): omit
+        *timeout* for the class's ``default_timeout`` (the C wait
+        time), pass ``None`` to block forever.
+        """
+        timeout = self._resolve_timeout(timeout)
         return self._job.wait(timeout=timeout)
 
     def kill(self, signal: "int | _signal.Signals" = _signal.SIGTERM) -> None:

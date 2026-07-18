@@ -19,6 +19,7 @@ stdout must contain a "Creating journal .*: done" line, else Mke2fsError
 from __future__ import annotations
 
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -92,15 +93,22 @@ class Mke2fs(_tool.ToolHandle):
         self._opts = opts
         self._stdout: str | None = None
 
-    def wait(self, timeout: float | None = None) -> None:
+    def wait(self,
+             timeout: float | _tool._NoTimeout | None = _tool._USE_DEFAULT,
+             ) -> None:
         """Wait for mke2fs to finish; raise Mke2fsError on non-zero exit.
 
-        Drains stdout so a later check_journal() can inspect it.
+        Drains stdout so a later check_journal() can inspect it.  Follows
+        the package timeout convention (P1.5, A2): omit *timeout* for
+        the class's ``default_timeout``, pass ``None`` to block forever.
+        *timeout* is ONE deadline shared between the job wait and the
+        stdout read (A3) -- mirrors ``ToolHandle.wait()``.
         """
-        if timeout is None:
-            timeout = self.default_timeout
+        timeout = self._resolve_timeout(timeout)
+        start = time.monotonic()
         status = self._job.wait(timeout=timeout)
-        self._stdout = self._stdout_filter.read_all(timeout=timeout)
+        remaining = self._remaining(timeout, start)
+        self._stdout = self._stdout_filter.read_all(timeout=remaining)
         if not status.ok:
             self._fail_status(status, self._stdout)
 

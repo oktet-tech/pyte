@@ -172,7 +172,7 @@ class Memtier(_tool.ToolHandle):
         self._cmd = cmd
 
     def _read_output(self, timeout: float) -> list:
-        return [m.data for m in self._stats_flt.messages(timeout=10.0)]
+        return [m.data for m in self._stats_flt.messages(timeout=timeout)]
 
     def _parse(self, rows: list) -> "Report":
         return parse_report([r for r in rows if r], self._cmd)

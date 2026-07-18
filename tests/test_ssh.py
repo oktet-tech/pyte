@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.ssh unit tests (offline: client/server argv build)."""
+from pyte.job import JobStatus, StatusKind
 from pyte.tools import ssh  # noqa: F401  (import-smoke check)
 from pyte.tools.ssh import (
-    ClientOpts, PermitRootLogin, ServerOpts, StrictHostKeyChecking,
+    ClientOpts, PermitRootLogin, ServerOpts, StrictHostKeyChecking, Ssh,
 )
+
+OK = JobStatus(StatusKind.EXITED, 0)
 
 
 # -- client argv ------------------------------------------------------------
@@ -92,3 +95,28 @@ def test_server_permit_root_login_values():
         "-o PermitRootLogin=forced-commands-only"
     assert prl(PermitRootLogin.PROHIBIT_PASSWORD) == \
         "-o PermitRootLogin=prohibit-password"
+
+
+# -- wait() timeout convention (A2) ------------------------------------------
+
+class FakeJob:
+    def __init__(self, status=OK):
+        self.status = status
+        self.wait_calls = []
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        return self.status
+
+
+def test_wait_omitted_uses_default_timeout():
+    job = FakeJob()
+    Ssh(job).wait()
+    assert job.wait_calls == [Ssh.default_timeout]
+
+
+def test_wait_none_blocks_forever():
+    """A2: timeout=None must mean 'forever', not 'default'."""
+    job = FakeJob()
+    Ssh(job).wait(timeout=None)
+    assert job.wait_calls == [None]

@@ -85,3 +85,23 @@ def test_argv_stub_server_extra_flags():
     assert "--debug" in argv
     # order: server flags come first, --random-data before --debug
     assert argv.index("--random-data") < argv.index("--debug")
+
+
+# -- _read_output timeout plumbing (A3) --------------------------------------
+
+class _FakeFilter:
+    def __init__(self):
+        self.calls = []
+
+    def messages(self, timeout=None):
+        self.calls.append(timeout)
+        return []
+
+
+def test_read_output_forwards_passed_timeout_not_hardcoded():
+    """A3: the base passes the remaining wait() budget; memtier must
+    not hardcode messages(timeout=10.0), ignoring it."""
+    stats_flt = _FakeFilter()
+    h = memtier.Memtier(job=None, stats_flt=stats_flt, cmd="x")
+    h._read_output(2.5)
+    assert stats_flt.calls == [2.5]

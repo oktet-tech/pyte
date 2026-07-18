@@ -82,3 +82,25 @@ def test_make_report_malformed_net_rate():
     from pyte.errors import MemaslapError
     with pytest.raises(MemaslapError, match="Net_rate"):
         memaslap._make_report("17891", "bad", "cmd")
+
+
+# -- _read_output timeout plumbing (A3) --------------------------------------
+
+class _FakeFilter:
+    def __init__(self):
+        self.calls = []
+
+    def messages(self, timeout=None):
+        self.calls.append(timeout)
+        return []
+
+
+def test_read_output_forwards_passed_timeout_not_hardcoded():
+    """A3: the base passes the remaining wait() budget; memaslap must
+    not hardcode messages(timeout=10.0), ignoring it."""
+    tps_flt, net_flt = _FakeFilter(), _FakeFilter()
+    h = memaslap.Memaslap(job=None, tps_flt=tps_flt, net_flt=net_flt,
+                          cmd="x", pco=None, cfg_fn=None)
+    h._read_output(2.5)
+    assert tps_flt.calls == [2.5]
+    assert net_flt.calls == [2.5]

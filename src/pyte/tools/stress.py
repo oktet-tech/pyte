@@ -82,14 +82,18 @@ class Stress(_tool.ToolHandle):
     def __init__(self, job):
         super().__init__(job)
 
-    def wait(self, timeout: float | None = None):
+    def wait(self,
+             timeout: float | _tool._NoTimeout | None = _tool._USE_DEFAULT,
+             ):
         """Wait for stress to finish; return the JobStatus.
 
         BREAKING (was ``-> bool``): the status carries which signal
         killed the run, not just success -- check ``status.ok``.
+        Follows the package timeout convention (P1.5, A2): omit
+        *timeout* for the class's ``default_timeout``, pass ``None``
+        to block forever.
         """
-        if timeout is None:
-            timeout = self.default_timeout
+        timeout = self._resolve_timeout(timeout)
         return self._job.wait(timeout=timeout)
 
 
