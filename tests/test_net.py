@@ -86,30 +86,34 @@ def test_iface_phy_is_curated_phy():
     assert isinstance(net.Iface("A", "eth0").phy, net.Phy)
 
 
-def test_curated_phy_speed_reads_oper_sets_admin(monkeypatch):
+def test_curated_phy_speed_round_trips_admin(monkeypatch):
+    """speed reads back the value it just set, even if oper disagrees."""
     from pyte import cfg, net
     from pyte.cfg import _engine
-    sets = []
-    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: 10000)
-    monkeypatch.setattr(cfg, "set",
-                        lambda oid, value, cvt=None: sets.append((oid, value)))
+    values = {"/agent:A/interface:eth0/phy:/speed_admin:": 10000,
+              "/agent:A/interface:eth0/phy:/speed_oper:": 1000}
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: values[oid])
+    monkeypatch.setattr(
+        cfg, "set", lambda oid, value, cvt=None: values.__setitem__(oid, value))
     monkeypatch.setattr(_engine, "_cvt_int", lambda name: 6)
     phy = net.Iface("A", "eth0").phy
-    assert phy.speed == 10000   # get -> speed_oper
-    phy.speed = 25000           # set -> speed_admin
-    assert sets[-1] == ("/agent:A/interface:eth0/phy:/speed_admin:", 25000)
+    phy.speed = 25000            # set -> speed_admin
+    assert phy.speed == 25000    # get -> speed_admin (round-trips)
+    assert phy.negotiated_speed == 1000   # get -> speed_oper (unaffected)
 
 
-def test_curated_phy_duplex_reads_oper_sets_admin(monkeypatch):
+def test_curated_phy_duplex_round_trips_admin(monkeypatch):
+    """duplex reads back the value it just set, even if oper disagrees."""
     from pyte import cfg, net
-    sets = []
-    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: "full")
-    monkeypatch.setattr(cfg, "set",
-                        lambda oid, value, cvt=None: sets.append((oid, value)))
+    values = {"/agent:A/interface:eth0/phy:/duplex_admin:": "full",
+              "/agent:A/interface:eth0/phy:/duplex_oper:": "unknown"}
+    monkeypatch.setattr(cfg, "get", lambda oid, sync=False: values[oid])
+    monkeypatch.setattr(
+        cfg, "set", lambda oid, value, cvt=None: values.__setitem__(oid, value))
     phy = net.Iface("A", "eth0").phy
-    assert phy.duplex == "full"  # get -> duplex_oper
-    phy.duplex = "half"          # set -> duplex_admin
-    assert sets[-1] == ("/agent:A/interface:eth0/phy:/duplex_admin:", "half")
+    phy.duplex = "half"                       # set -> duplex_admin
+    assert phy.duplex == "half"               # get -> duplex_admin (round-trips)
+    assert phy.negotiated_duplex == "unknown"  # get -> duplex_oper (unaffected)
 
 
 # -- AgentNet.base (generated agent scalars) --------------------------

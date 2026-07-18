@@ -96,26 +96,39 @@ class Neigh:
 class Phy(_GenPhy):
     """Ergonomic PHY view.
 
-    speed/duplex read the OPERATIONAL value and set the ADMINISTRATIVE
-    one (the common test mental model); the raw speed_admin/speed_oper/
-    duplex_admin/duplex_oper knobs remain available.
+    speed/duplex read and write the ADMINISTRATIVE value, so they
+    round-trip (``p.speed = 1000; p.speed`` always returns 1000): what
+    a test sets is what it reads back, whether or not the link has
+    renegotiated to match. negotiated_speed/negotiated_duplex are
+    read-only views onto the OPERATIONAL value actually in effect on
+    the wire, which may lag or differ from what was requested. The raw
+    speed_admin/speed_oper/duplex_admin/duplex_oper knobs remain
+    available for direct access.
     """
 
     @property
     def speed(self) -> int:
-        return self.speed_oper
+        return self.speed_admin
 
     @speed.setter
     def speed(self, value: int) -> None:
         self.speed_admin = value
 
     @property
+    def negotiated_speed(self) -> int:
+        return self.speed_oper
+
+    @property
     def duplex(self) -> str:
-        return self.duplex_oper
+        return self.duplex_admin
 
     @duplex.setter
     def duplex(self, value: str) -> None:
         self.duplex_admin = value
+
+    @property
+    def negotiated_duplex(self) -> str:
+        return self.duplex_oper
 
 
 class Iface(_GenInterface):
