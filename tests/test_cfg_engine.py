@@ -509,6 +509,29 @@ def test_bound_collection_contains_and_get(monkeypatch):
     assert coll.get("77", "dflt") == "dflt"
 
 
+def test_collection_rejects_invalid_access():
+    """A typo'd access= (e.g. "raed_only") must not silently produce a
+    writable collection -- BoundCollection._writable only string-matches
+    the literal "read_only", so anything else was accepted as writable."""
+    from pyte.cfg._engine import Collection
+
+    class Elem(CfgObject):
+        pass
+
+    with pytest.raises(ValueError, match="invalid access"):
+        Collection("irq", Elem, access="raed_only")
+
+
+def test_collection_accepts_valid_access_strings():
+    from pyte.cfg._engine import Collection
+
+    class Elem(CfgObject):
+        pass
+
+    for access in ("read_write", "read_only", "read_create"):
+        Collection("irq", Elem, access=access)  # must not raise
+
+
 def test_bound_collection_del_missing_is_keyerror(monkeypatch):
     """Deleting a missing entry is a normal Python KeyError, not an
     opaque CfgError with a hex rc."""

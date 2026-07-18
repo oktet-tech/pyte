@@ -36,6 +36,19 @@ def _cvt_int(name: str) -> int:
     return getattr(lib, f"PYTE_CVT_{name}")
 
 
+def _check_access(access: str) -> str:
+    """Validate a knob/collection access string; return it unchanged.
+
+    Shared by _Knob and Collection so a typo (e.g. "raed_only") raises
+    ValueError up front instead of silently behaving as read_write --
+    Collection._writable/BoundCollection._writable only string-match
+    the literal "read_only".
+    """
+    if access not in ("read_write", "read_only", "read_create"):
+        raise ValueError(f"invalid access {access!r}")
+    return access
+
+
 class CfgObject:
     """A typed view of a Configurator subtree at a fixed base OID."""
 
@@ -82,10 +95,8 @@ class _Knob:
 
     def __init__(self, subid: str, *, cvt_name: str | None = None,
                  access: str = "read_write", sync: bool = False):
-        if access not in ("read_write", "read_only", "read_create"):
-            raise ValueError(f"invalid access {access!r}")
         self.subid = subid
-        self.access = access
+        self.access = _check_access(access)
         self.sync = sync  # volatile knobs re-read from the agent on get
         if cvt_name is not None:
             self.cvt_name = cvt_name  # overrides the subclass class default
@@ -239,7 +250,7 @@ class Collection:
                  access: str = "read_write"):
         self.subid = subid
         self.cls = cls
-        self.access = access
+        self.access = _check_access(access)
 
     def __set__(self, obj, value):
         raise AttributeError(
