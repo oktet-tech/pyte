@@ -363,3 +363,78 @@ def test_exists_via_find(monkeypatch):
                         if pattern == "/agent:A/rsrc:x" else [])
     assert cfg.exists("/agent:A/rsrc:x") is True
     assert cfg.exists("/agent:A/rsrc:y") is False
+
+
+# -- CfgSubtree: container protocol (A1) --------------------------------
+#
+# Regression: "x" in subtree used to iterate-and-compare CfgNode objects
+# (no __eq__), so membership was silently always False even for an
+# existing entry.  __contains__ must instead do a real exact-OID probe.
+
+def _subtree(monkeypatch, present: set[str]):
+    """A net_addr subtree of /agent:A/interface:eth0, backed by a fake
+    cfg.find that reports only the OIDs in `present` as existing."""
+    node = cfg.CfgNode("/agent:A/interface:eth0")
+    monkeypatch.setattr(
+        cfg, "find",
+        lambda pattern: [object()] if pattern in present else [])
+    return node["net_addr"]
+
+
+def test_cfgsubtree_contains_true_for_existing_child(monkeypatch):
+    sub = _subtree(monkeypatch,
+                   {"/agent:A/interface:eth0/net_addr:192.0.2.1"})
+    assert "192.0.2.1" in sub
+
+
+def test_cfgsubtree_contains_false_for_missing_child(monkeypatch):
+    sub = _subtree(monkeypatch, set())
+    assert "192.0.2.1" not in sub
+
+
+def test_cfgsubtree_get_hit_returns_cfgnode(monkeypatch):
+    sub = _subtree(monkeypatch,
+                   {"/agent:A/interface:eth0/net_addr:192.0.2.1"})
+    got = sub.get("192.0.2.1")
+    assert isinstance(got, cfg.CfgNode)
+    assert got.oid == "/agent:A/interface:eth0/net_addr:192.0.2.1"
+
+
+def test_cfgsubtree_get_miss_returns_none_by_default(monkeypatch):
+    sub = _subtree(monkeypatch, set())
+    assert sub.get("192.0.2.1") is None
+
+
+def test_cfgsubtree_get_miss_returns_given_default(monkeypatch):
+    sub = _subtree(monkeypatch, set())
+    assert sub.get("192.0.2.1", "dflt") == "dflt"
+
+
+def test_cfgsubtree_delitem_deletes_child(monkeypatch):
+    node = cfg.CfgNode("/agent:A/interface:eth0")
+    sub = node["net_addr"]
+    deleted = []
+    monkeypatch.setattr(
+        cfg, "delete",
+        lambda oid, children=False: deleted.append((oid, children)))
+    del sub["192.0.2.1"]
+    assert deleted == [
+        ("/agent:A/interface:eth0/net_addr:192.0.2.1", True)]
+
+
+def test_cfgsubtree_delitem_missing_propagates_engine_error(monkeypatch):
+    """CfgSubtree carries no access metadata (unlike BoundCollection,
+    whose owning Collection declares access=), so there is no read-only
+    guard and no not-found -> KeyError translation here: whatever error
+    the engine raises propagates as-is."""
+    from pyte.errors import CfgNotFoundError
+
+    node = cfg.CfgNode("/agent:A/interface:eth0")
+    sub = node["net_addr"]
+
+    def missing(oid, children=False):
+        raise CfgNotFoundError(12, f"cfg delete {oid}")
+
+    monkeypatch.setattr(cfg, "delete", missing)
+    with pytest.raises(CfgNotFoundError):
+        del sub["192.0.2.1"]

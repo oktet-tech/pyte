@@ -444,6 +444,31 @@ class CfgSubtree:
     def __getitem__(self, name: str) -> CfgNode:
         return self.parent.child(self.sub, name)
 
+    def __contains__(self, name: str) -> bool:
+        """True iff a child named *name* currently exists.
+
+        A real exact-OID existence probe -- NOT "iterate and compare",
+        which would always be False here since CfgNode has no __eq__.
+        """
+        return bool(find(self[name].oid))
+
+    def get(self, name: str, default=None):
+        """The child's CfgNode when it exists, else *default*."""
+        if name in self:
+            return self[name]
+        return default
+
+    def __delitem__(self, name: str) -> None:
+        """Delete the child instance (and its children).
+
+        Unlike BoundCollection, a raw CfgSubtree carries no access
+        metadata (no owning Collection declares read_only/read_write),
+        so there is no read-only guard and no not-found -> KeyError
+        translation here: the delete is issued directly and any engine
+        error propagates as-is.
+        """
+        delete(self[name].oid, children=True)
+
     def __repr__(self) -> str:
         return f"CfgSubtree({self.parent.oid!r}, {self.sub!r})"
 
