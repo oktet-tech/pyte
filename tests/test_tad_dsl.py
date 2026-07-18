@@ -189,3 +189,24 @@ def test_stack_div_stack_one_payload_ok():
     s_right2 = Stack((IP4(),), payload=b"data2")
     s_left2 = Stack((UDP(),))
     assert (s_left2 / s_right2).payload == b"data2"
+
+
+def test_stack_div_bytes_raises_if_payload_already_set():
+    """A second bytes payload must raise, not silently clobber the first
+    (the Stack+Stack branch one line above already raises for the
+    analogous conflict)."""
+    with pytest.raises(ValueError, match="already carries a payload"):
+        UDP() / b"first" / b"second"
+
+
+def test_stack_div_bytearray_raises_if_payload_already_set():
+    with pytest.raises(ValueError, match="already carries a payload"):
+        UDP() / b"first" / bytearray(b"second")
+
+
+def test_layer_div_bytes_then_bytes_is_fine_via_fresh_stack():
+    """Layer.__truediv__ always builds a *fresh* Stack (payload=None)
+    before delegating, so ``Layer() / bytes`` itself can never hit the
+    dual-payload hole -- only chaining onto an existing Stack can."""
+    s = UDP() / b"only"
+    assert s.payload == b"only"

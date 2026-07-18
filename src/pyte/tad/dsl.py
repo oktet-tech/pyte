@@ -273,6 +273,9 @@ class Stack:
                 else self.payload
             return Stack(self.layers + other.layers, payload)
         if isinstance(other, (bytes, bytearray)):
+            if self.payload is not None:
+                raise ValueError(
+                    "this stack already carries a payload")
             return Stack(self.layers, bytes(other))
         return NotImplemented
 
