@@ -74,3 +74,13 @@ def test_wait_none_blocks_forever():
     job = FakeJob()
     Stress(job).wait(timeout=None)
     assert job.wait_calls == [None]
+
+
+# -- run() docstring example (A11) -------------------------------------------
+
+def test_run_docstring_example_opts_is_valid():
+    """A11: stress.run()'s docstring example used the pre-rename
+    ``timeout=`` field name (renamed to ``duration``), which raised
+    TypeError if anyone actually ran it. Guard against the same drift
+    recurring: the example's Opts call must construct cleanly."""
+    Opts(cpu=1, duration=2)

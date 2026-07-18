@@ -105,7 +105,7 @@ def run(pco: "RpcServer", opts: Opts):
 
     Example::
 
-        with stress.run(pco, stress.Opts(cpu=1, timeout=2)) as s:
+        with stress.run(pco, stress.Opts(cpu=1, duration=2)) as s:
             assert s.wait().ok
     """
     def _setup(job):
