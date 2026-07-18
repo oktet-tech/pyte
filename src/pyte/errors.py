@@ -138,13 +138,29 @@ class RcfError(TeError):
 
 
 class RpcError(TeError):
-    """RPC call failed; carries the remote errno."""
+    """RPC call failed; carries the remote errno.
 
-    def __init__(self, rc: int, where: str = "", err_msg: str = ""):
+    ``output``, when given, is the decoded stdout of the command whose
+    failure raised this error (cf.
+    ``subprocess.CalledProcessError.stdout``) -- e.g.
+    :meth:`~pyte.rpc.server.RpcServer.sh` attaches its captured output
+    here on a non-zero exit instead of losing it.  ``None`` (the
+    default) for RPC failures with no associated command output.
+    """
+
+    _OUTPUT_EXCERPT = 200
+
+    def __init__(self, rc: int, where: str = "", err_msg: str = "",
+                 output: str | None = None):
         super().__init__(rc, where)
         self.err_msg = err_msg
+        self.output = output
         if err_msg:
             self.args = (f"{self.args[0]}: {err_msg}",)
+        if output:
+            excerpt = output if len(output) <= self._OUTPUT_EXCERPT \
+                else "..." + output[-self._OUTPUT_EXCERPT:]
+            self.args = (f"{self.args[0]} (output: {excerpt!r})",)
 
 
 class RemotePythonError(TeError):

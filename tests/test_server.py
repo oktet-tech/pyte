@@ -150,6 +150,99 @@ def test_expect_error_stops_the_block_at_the_failure(_no_shim_calls):
     assert ran_past == []
 
 
+# -- sh(): output capture on non-zero exit ------------------------------
+
+class _ShLib:
+    """Fake shim lib for RpcServer.sh(): scripted exit status/output."""
+
+    PYTE_ETIMEDOUT = 110
+
+    def __init__(self, output: bytes | None, flag: int, value: int):
+        self._output = output
+        self._flag = flag
+        self._value = value
+        self.freed = []
+
+    def pyte_rpc_shell_get_all(self, h, pbuf, cmd, flag, value):
+        pbuf[0] = self._output if self._output is not None else _ShFfi.NULL
+        flag[0] = self._flag
+        value[0] = self._value
+        return 0
+
+    def pyte_free_string(self, p):
+        self.freed.append(p)
+
+    def pyte_rpc_errno(self, h):
+        return 111
+
+    def pyte_rpc_err_msg(self, h):
+        return b"remote failed"
+
+    def pyte_rc_error(self, rc):
+        return rc
+
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def te_rc_mod2str(self, rc):
+        return b"RPC"
+
+    def te_rc_err2str(self, rc):
+        return b"E"
+
+
+class _ShFfi:
+    NULL = object()
+
+    def new(self, spec):
+        return [self.NULL if spec == "char **" else 0]
+
+    @staticmethod
+    def string(b):
+        return b
+
+
+def _fake_sh_shim(monkeypatch, output, flag=1, value=1):
+    lib = _ShLib(output, flag, value)
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=_ShFfi(), lib=lib))
+    return lib
+
+
+def test_sh_success_returns_decoded_output(monkeypatch):
+    _fake_sh_shim(monkeypatch, b"hello\n", flag=0, value=0)
+    srv = _bare_server()
+    assert srv.sh("echo hello") == "hello\n"
+
+
+def test_sh_failure_attaches_decoded_output(monkeypatch):
+    from pyte.errors import RpcError
+    lib = _fake_sh_shim(monkeypatch, b"boom output\n", flag=0, value=1)
+    srv = _bare_server()
+    with pytest.raises(RpcError) as ei:
+        srv.sh("false")
+    assert ei.value.output == "boom output\n"
+    # buffer is still freed on the failure path -- no leak
+    assert lib.freed == [b"boom output\n"]
+
+
+def test_sh_failure_message_includes_output_excerpt(monkeypatch):
+    from pyte.errors import RpcError
+    _fake_sh_shim(monkeypatch, b"boom output\n", flag=0, value=1)
+    srv = _bare_server()
+    with pytest.raises(RpcError, match="boom output"):
+        srv.sh("false")
+
+
+def test_sh_failure_with_no_output_has_output_none_or_empty(monkeypatch):
+    from pyte.errors import RpcError
+    _fake_sh_shim(monkeypatch, None, flag=0, value=1)
+    srv = _bare_server()
+    with pytest.raises(RpcError) as ei:
+        srv.sh("false")
+    assert ei.value.output == ""
+
+
 def test_check_call_always_raises_on_failure(_no_shim_calls, monkeypatch):
     """No suppression state: a failed predicate raises, full stop."""
     import sys

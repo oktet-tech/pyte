@@ -79,12 +79,15 @@ class RpcServer:
         return f"<RpcServer {self.ta}/{self.name}>"
 
     # -- error plumbing used by all facades ---------------------------
-    def _check_call(self, guard_rc: int, retval, ok, where: str):
+    def _check_call(self, guard_rc: int, retval, ok, where: str,
+                    output: str | None = None):
         """guard_rc: trampoline status; ok(retval): success predicate.
 
         A failed call always raises RpcError carrying the remote
         errno; there is no suppression state (expect_error() catches
-        the exception instead).
+        the exception instead).  ``output``, when given, is attached
+        to the raised RpcError (see :attr:`RpcError.output`) -- used
+        by :meth:`sh` to carry the command's captured stdout.
         """
         ffi, lib = _shim()
         check(guard_rc, where, RpcError)
@@ -94,7 +97,8 @@ class RpcServer:
         raise RpcError(
             rpc_errno, f"{where} -> {retval!r}",
             ffi.string(lib.pyte_rpc_err_msg(self._h)).decode(
-                errors="replace"))
+                errors="replace"),
+            output=output)
 
     @contextmanager
     def expect_error(self, expected_errno: int | None = None):
@@ -142,7 +146,14 @@ class RpcServer:
         return ffi.string(buf).decode(errors="replace")
 
     def sh(self, cmd: str) -> str:
-        """Run a shell command on the agent, return its stdout."""
+        """Run a shell command on the agent, return its stdout.
+
+        On a non-zero exit, the captured output is decoded (before the
+        C buffer is freed) and attached to the raised
+        :class:`~pyte.errors.RpcError` as ``.output`` -- diagnostics a
+        failing command printed are not lost (cf.
+        ``subprocess.CalledProcessError.stdout``).
+        """
         ffi, lib = _shim()
         pbuf = ffi.new("char **")
         flag = ffi.new("int *")
@@ -152,12 +163,12 @@ class RpcServer:
         rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
                                         value)
         try:
+            output = "" if pbuf[0] == ffi.NULL \
+                else ffi.string(pbuf[0]).decode(errors="replace")
             self._check_call(rc, (flag[0], value[0]),
                              lambda fv: fv == (0, 0),
-                             f"sh({cmd!r})")
-            if pbuf[0] == ffi.NULL:
-                return ""
-            return ffi.string(pbuf[0]).decode(errors="replace")
+                             f"sh({cmd!r})", output=output)
+            return output
         finally:
             if pbuf[0] != ffi.NULL:
                 lib.pyte_free_string(pbuf[0])
