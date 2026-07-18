@@ -56,6 +56,22 @@ class Test:
     def skip(self, text: str = "") -> None:
         raise TestSkip(text)
 
+    def expect(self, actual, expected, label: str | None = None) -> None:
+        """Fail unless ``actual == expected``.
+
+        The failure verdict is ``"{label}: expected {expected!r}, got
+        {actual!r}"`` (``"value"`` when *label* is omitted). This format
+        is stable: TRC expectations may match against it.
+        """
+        if actual != expected:
+            self.fail(f"{label or 'value'}: expected {expected!r}, "
+                      f"got {actual!r}")
+
+    def check(self, cond: bool, msg: str) -> None:
+        """Fail with *msg* unless *cond* holds."""
+        if not cond:
+            self.fail(msg)
+
     def cleanup(self, fn: Callable, *args, **kwargs) -> None:
         """Register fn to run at test end (LIFO), pass or fail."""
         self._cleanups.append((fn, args, kwargs))

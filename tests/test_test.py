@@ -17,6 +17,8 @@ import types
 import pytest
 
 from pyte import log, test
+from pyte._params import Params
+from pyte.errors import TestFail
 
 
 class FakeLib:
@@ -94,3 +96,48 @@ def test_start_bad_seed_fails_via_normal_exit_path(lib, monkeypatch):
     assert test._current is None
     err_logs = [txt for lvl, txt in lib.logs if lvl == FakeLib.TE_LL_ERROR]
     assert any(b"notanint" in txt for txt in err_logs)
+
+
+# -- expect() / check() -----------------------------------------------
+#
+# Pure Python, no shim involved: fail() just raises TestFail, so a bare
+# Test(Params({})) is enough to exercise these.
+
+
+@pytest.fixture()
+def t():
+    return test.Test(Params({}))
+
+
+def test_expect_passes_silently_on_equal(t):
+    t.expect(1, 1)
+
+
+def test_expect_fails_on_unequal_default_label(t):
+    with pytest.raises(TestFail) as ei:
+        t.expect(1, 2)
+    assert str(ei.value) == "value: expected 2, got 1"
+
+
+def test_expect_fails_with_label(t):
+    with pytest.raises(TestFail) as ei:
+        t.expect(1, 2, "count")
+    assert str(ei.value) == "count: expected 2, got 1"
+
+
+def test_expect_message_uses_repr_not_str(t):
+    """expected/got must show !r so type mismatches stay visible: a
+    passing str "1" vs an int 1 must not read as if they matched."""
+    with pytest.raises(TestFail) as ei:
+        t.expect("1", 1)
+    assert str(ei.value) == "value: expected 1, got '1'"
+
+
+def test_check_passes_silently_on_true(t):
+    t.check(True, "should not raise")
+
+
+def test_check_fails_with_given_message(t):
+    with pytest.raises(TestFail) as ei:
+        t.check(False, "port must be open")
+    assert str(ei.value) == "port must be open"
