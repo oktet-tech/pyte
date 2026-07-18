@@ -44,8 +44,15 @@ if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
 
-class Cmd:
-    """ethtool command codes (mirror tapi_ethtool_cmd)."""
+class Cmd(enum.Enum):
+    """ethtool command codes (mirror tapi_ethtool_cmd).
+
+    A real Enum (A5): ``Opts(cmd="stat")`` (a typo for ``"stats"``) used
+    to fall through ``_CMD_FLAG.get()`` silently and run bare ``ethtool
+    eth0``. Construction now routes through ``_tool.coerce_enum``, so a
+    typo raises ValueError up front instead of producing an unstructured
+    report with no error.
+    """
     NONE = "none"
     STATS = "stats"
     SHOW_PAUSE = "show_pause"
@@ -59,7 +66,7 @@ class Cmd:
 
 
 #: command -> ethtool flag (NONE has no flag)
-_CMD_FLAG: dict[str, str] = {
+_CMD_FLAG: dict[Cmd, str] = {
     Cmd.STATS: "--statistics",
     Cmd.SHOW_PAUSE: "--show-pause",
     Cmd.SHOW_RING: "--show-ring",
@@ -95,7 +102,9 @@ class Opts:
     if_name:
         Interface name (mandatory; positional, after the command flag).
     cmd:
-        One of the :class:`Cmd` constants (default :data:`Cmd.NONE`).
+        A :class:`Cmd` member, or its (case-insensitive) name/value as a
+        string, e.g. ``"stats"`` (default :data:`Cmd.NONE`). An unknown
+        string raises ValueError at construction (A5).
     stats:
         ``--include-statistics`` flag.
     raw, hex, offset, length, page, bank, i2c:
@@ -104,7 +113,7 @@ class Opts:
         Each is omitted from argv when None.
     """
     if_name: str
-    cmd: str = Cmd.NONE
+    cmd: "Cmd | str" = Cmd.NONE
     stats: bool = False
     raw: bool | None = None
     hex: bool | None = None
@@ -117,6 +126,8 @@ class Opts:
     def __post_init__(self) -> None:
         if not self.if_name:
             raise ValueError("Opts.if_name is required")
+        object.__setattr__(
+            self, "cmd", _tool.coerce_enum(Cmd, "cmd", self.cmd))
 
     def to_argv(self) -> list[str]:
         """Build the ethtool argument list (without argv[0])."""
@@ -191,7 +202,7 @@ class Report:
     Exactly one of if_props/stats/pause/ring is set, depending on cmd
     (and only when err_code is OK). The other commands expose raw `out`.
     """
-    cmd: str
+    cmd: Cmd
     out: str
     err: str
     err_code: ErrCode
@@ -287,7 +298,7 @@ def _err_code(err: str, status: "JobStatus | None") -> ErrCode:
     return ErrCode.OK
 
 
-def _build_report(cmd: str, out: str, err: str,
+def _build_report(cmd: Cmd, out: str, err: str,
                   status: "JobStatus | None" = None) -> Report:
     """Assemble a Report from raw stdout/stderr (offline-testable)."""
     err_code = _err_code(err, status)

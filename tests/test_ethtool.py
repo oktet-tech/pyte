@@ -66,6 +66,34 @@ def test_if_name_required():
         Opts(if_name="")
 
 
+# -- Cmd validation (A5) ------------------------------------------------------
+
+def test_cmd_is_a_real_enum():
+    import enum
+    assert issubclass(Cmd, enum.Enum)
+    assert Cmd.STATS.value == "stats"
+    assert Cmd.NONE.value == "none"
+    assert Cmd.DUMP_MODULE_EEPROM.value == "dump_module_eeprom"
+
+
+def test_cmd_typo_raises_valueerror_at_construction():
+    with pytest.raises(ValueError, match="cmd"):
+        Opts(if_name="eth0", cmd="stat")    # typo for "stats"
+
+
+def test_cmd_accepts_string_matching_enum_value():
+    assert Opts(if_name="eth0", cmd="stats").cmd is Cmd.STATS
+    assert Opts(if_name="eth0", cmd="show_pause").cmd is Cmd.SHOW_PAUSE
+
+
+def test_cmd_accepts_enum_member_directly():
+    assert Opts(if_name="eth0", cmd=Cmd.SHOW_RING).cmd is Cmd.SHOW_RING
+
+
+def test_cmd_default_is_none_enum_member():
+    assert Opts(if_name="eth0").cmd is Cmd.NONE
+
+
 # -- output parsing ---------------------------------------------------------
 
 def test_parse_if_props_lo():
