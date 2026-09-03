@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""pyte.tools.trex.batch — option model for batch (ASTF) TRex runs.
+"""pyte.tools.trex.batch - option model for batch (ASTF) TRex runs.
 
 Port of te/lib/tapi_tool/tapi_trex.{h,c} option model, pinned at
 ngfw-ts 41f9731 era (tapi_trex identical to tsf/main).
@@ -24,6 +24,9 @@ Pinned mappings (from tapi_trex.c:337-360, tapi_trex.h:290-324)
   one broken argv element (``"--mlx4-so --mlx5-so"``); pyte instead
   takes a tuple of ``So`` and emits each flag as its own argv element
   (put both ``So.MLX4`` and ``So.MLX5`` in the tuple for that case).
+- DIVERGENCE: C's ``tapi_trex_opt`` does not validate ``astf_template``
+  at all; :class:`Opts` requires ``astf_json`` non-empty in
+  ``__post_init__`` (see the check there for the same note).
 
 argv (bind order, tapi_trex.c:362-390 ``trex_args_binds``)::
 
@@ -150,6 +153,8 @@ class Opts:
     stderr_log_level: str = "WARN"
 
     def __post_init__(self) -> None:
+        # DIVERGENCE: C tapi_trex does not validate astf_template; we
+        # require it non-empty.
         if not self.astf_json:
             raise ValueError("Opts.astf_json is required")
         if not self.clients and not self.servers:
