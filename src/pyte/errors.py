@@ -93,6 +93,10 @@ class TrexError(ToolError):
     """TRex (STL) failed or its output cannot be parsed."""
 
 
+class TrexBatchError(ToolError):
+    """TRex batch (ASTF) run failed or its output cannot be parsed."""
+
+
 class WrkError(ToolError):
     """wrk failed or its output cannot be parsed."""
 
