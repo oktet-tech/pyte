@@ -14,8 +14,8 @@ happens at launch, in :func:`build_argv`).
 run but does NOT start it (mirrors
 ``tapi_trex_create``/``tapi_trex_start`` being separate C calls):
 writes the ASTF json and rendered platform yaml to the agent, binds
-each :class:`PciBdf` endpoint when ``opts.driver`` is set, launches
-TRex, and attaches every stdout filter table from
+each :class:`PciBdf` endpoint when ``opts.driver`` is set, creates the
+TRex job, and attaches every stdout filter table from
 :mod:`pyte.tools.trex._batch_filters` before returning -- port/global
 stat filters only when ``opts.iom is Iom.NORMAL``.
 ``opts.stdout_log_level``/``stderr_log_level`` of ``None`` or ``0``
