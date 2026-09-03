@@ -1,15 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""pyte.tools.trex.batch - option model for batch (ASTF) TRex runs.
+"""pyte.tools.trex.batch - drive a batch (ASTF) TRex run.
 
-Port of te/lib/tapi_tool/tapi_trex.{h,c} option model, pinned at
-ngfw-ts 41f9731 era (tapi_trex identical to tsf/main).
+Port of te/lib/tapi_tool/tapi_trex.{h,c}, pinned at ngfw-ts 41f9731 era
+(tapi_trex identical to tsf/main). Covers the option model, platform
+YAML rendering, the stdout filter tables
+(:mod:`pyte.tools.trex._batch_filters`), the report/series math
+(:mod:`pyte.tools.trex._batch_report`) and the job lifecycle below --
+:meth:`Opts.to_argv` deliberately does NOT append ``--cfg`` (that
+happens at launch, in :func:`build_argv`).
 
-This module owns the argv-building surface (:class:`Opts` and the
-endpoint/enum types it is built from) plus platform YAML config-file
-rendering (:func:`render_cfg_yaml`). Job launch and output parsing
-belong to later tasks; :meth:`Opts.to_argv` deliberately does NOT
-append ``--cfg`` (appended at launch time).
+:func:`create` (see its docstring for a runnable example) builds the
+run but does NOT start it (mirrors
+``tapi_trex_create``/``tapi_trex_start`` being separate C calls):
+writes the ASTF json and rendered platform yaml to the agent, binds
+each :class:`PciBdf` endpoint when ``opts.driver`` is set, launches
+TRex, and attaches every stdout filter table from
+:mod:`pyte.tools.trex._batch_filters` before returning -- port/global
+stat filters only when ``opts.iom is Iom.NORMAL``.
+``opts.stdout_log_level``/``stderr_log_level`` of ``None`` or ``0``
+skip that stream's log filter entirely (pythonic spelling of "silence
+this stream").
+
+Interface resolution: this port only understands :class:`LinuxIface`
+(used verbatim, never bound) and :class:`PciBdf` (used verbatim, bound
+to ``opts.driver`` when set). C's PCI-by-kernel-iface and vendor/
+device/instance OID resolution forms are not ported -- a suite that
+needs those resolves the BDF itself (e.g. nap-ts's ``dpdk.py``) before
+building an :class:`Endpoint`.
 
 Pinned mappings (from tapi_trex.c:337-360, tapi_trex.h:290-324)
 ================================================================
@@ -557,6 +575,26 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
     the job (via a ``/bin/sh -c 'cd <workdir> && exec ...'`` wrapper);
     attach every stdout filter table. :meth:`Trex.close` runs on every
     exit path, started or not.
+
+    Example::
+
+        opts = batch.Opts(
+            trex_exec="/opt/trex/v3.05/_t-rex-64-o",
+            astf_json=astf_profile_json,   # an already-rendered ASTF profile
+            clients=(batch.Endpoint(iface=batch.PciBdf("0000:01:00.0"),
+                                    ip="1.1.1.1", gw="1.1.1.2"),),
+            servers=(batch.Endpoint(iface=batch.PciBdf("0000:01:00.1"),
+                                    ip="2.2.2.1", gw="2.2.2.2"),),
+            duration=30.0, iom=batch.Iom.NORMAL, driver="vfio-pci")
+
+        with batch.create(pco, opts) as trex:
+            trex.start()
+            trex.wait()                    # None (default) blocks forever
+            rep = trex.report()
+            print(rep.avg_tx, rep.avg_rx, rep.opt_cl["tcps_connects"])
+        # close() (stop-tolerant destroy + remove the /tmp yaml and astf
+        # json) has already run here, on every exit path -- success,
+        # exception, or a block that never called start() at all.
     """
     yaml_path = yaml_cfg_path()
     astf_path = astf_json_path(opts.instance_prefix)
