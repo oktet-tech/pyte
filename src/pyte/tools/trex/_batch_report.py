@@ -260,6 +260,11 @@ class Report:
             warnings.warn(msg, WindowClamped)
             i_end = n - 1
 
+        # DIVERGENCE: C asserts n_meds < n_vals here (tapi_trex.c:2533),
+        # which would abort on a full-range window (i_start == 0 and
+        # i_end == n - 1, so n_meds == n_vals) - a debug-only sanity
+        # check, not a real invariant, deliberately not reproduced.
+        # Without it a full-range window is simply a safe superset.
         rates = self.series_by_time(param, port)
         vals = sorted(rates[i_start:i_end + 1], reverse=True)
         n_vals = len(vals)
