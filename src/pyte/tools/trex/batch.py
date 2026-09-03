@@ -56,10 +56,25 @@ kept explicit rather than silently renamed:
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import enum
+import os
+import random
+import shlex
+import string
+from typing import TYPE_CHECKING, Iterator
 
+from pyte import log
+from pyte.errors import RpcError, TeError
+from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools import _tool
+from pyte.tools.trex import _batch_filters as _flt
+from pyte.tools.trex import _batch_report as _rpt
+
+if TYPE_CHECKING:
+    from pyte.job import Filter, Job, JobStatus
+    from pyte.rpc.server import RpcServer
 
 
 class Iom(enum.Enum):
@@ -150,8 +165,11 @@ class Opts:
     instance_prefix: str | None = None
     cfg_extra: str | None = None   # YAML appended after port_info
     driver: str | None = None      # PCI bind driver, None = no bind
-    stdout_log_level: str = "RING"
-    stderr_log_level: str = "WARN"
+    # A level of None (or 0) disables the corresponding log filter
+    # entirely -- pythonic spelling of "the suite silences this
+    # stream" (C would still attach a filter at te_log_level 0).
+    stdout_log_level: str | int | None = "RING"
+    stderr_log_level: str | int | None = "WARN"
 
     def __post_init__(self) -> None:
         # DIVERGENCE: C tapi_trex does not validate astf_template; we
@@ -280,3 +298,283 @@ def render_cfg_yaml(opts: Opts) -> str:
     if opts.cfg_extra:
         yaml_text += opts.cfg_extra
     return yaml_text
+
+
+# ---------------------------------------------------------------------
+# Lifecycle / session (tapi_trex_create/start/wait/stop/kill/destroy,
+# tapi_trex.c:628-676, 1179-1224, 1455-1795)
+# ---------------------------------------------------------------------
+
+#: First/rest character sets of a C identifier (te_make_spec_buf's
+#: TE_FILL_SPEC_C_ID, as used by tapi_trex_setup_yaml_config_path_setup
+#: -- RCF_RPC_NAME_LEN / 2 == 32 characters, tapi_trex.c:1230-1232).
+_C_IDENT_FIRST = string.ascii_letters + "_"
+_C_IDENT_REST = string.ascii_letters + string.digits + "_"
+_C_IDENT_LEN = 32
+
+
+def _random_c_ident(n: int = _C_IDENT_LEN) -> str:
+    """A random n-char string shaped like a C identifier."""
+    return (random.choice(_C_IDENT_FIRST)
+            + "".join(random.choices(_C_IDENT_REST, k=n - 1)))
+
+
+def yaml_cfg_path() -> str:
+    """A fresh random platform-YAML path (TAPI_TREX_CFG_YAML_FMT).
+
+    Mirrors ``tapi_trex_setup_yaml_config_path_setup`` (tapi_trex.c:
+    1230-1247): ``/tmp/<32-char C identifier>.yaml``, first character
+    ``[A-Za-z_]``, the rest ``[A-Za-z0-9_]``.
+    """
+    return f"/tmp/{_random_c_ident()}.yaml"
+
+
+def astf_json_path(instance_prefix: str | None) -> str:
+    """The ASTF json path (TAPI_TREX_ASTF_CONF_FMT, tapi_trex.c:541-559).
+
+    ``/tmp/astf.json`` when *instance_prefix* is None or empty (C's
+    ``te_str_is_null_or_empty``), else ``/tmp/astf-<instance_prefix>.json``.
+    """
+    if not instance_prefix:
+        return "/tmp/astf.json"
+    return f"/tmp/astf-{instance_prefix}.json"
+
+
+def n_ports(opts: Opts) -> int:
+    """The number of non-dummy ports (tapi_trex_ports_count, tapi_trex.c:
+    1251-1268): clients and servers whose ``iface`` is not None.
+    """
+    return sum(1 for ep in (*opts.clients, *opts.servers)
+              if ep.iface is not None)
+
+
+def build_argv(opts: Opts, cfg_path: str) -> list[str]:
+    """The full launch argv: :meth:`Opts.to_argv` plus ``--cfg <path>``.
+
+    Mirrors ``tapi_trex_setup_yaml_config_path_setup`` (tapi_trex.c:
+    1238-1246), which appends ``--cfg <path>`` after every other bound
+    option.
+    """
+    return [*opts.to_argv(), "--cfg", cfg_path]
+
+
+def _shell_cmd(trex_exec: str, argv: list[str]) -> str:
+    """``cd <workdir> && exec <argv...>``, every token shell-quoted.
+
+    TRex must run from its install directory (tapi_job_set_workdir in
+    C, tapi_trex.c:1670-1678); pyte has no workdir binding in the
+    shim, so the working directory is set the same way
+    :func:`pyte.tools.trex.stl.session` does it -- via a ``/bin/sh -c``
+    wrapper (see ``ServerOpts.shell_command``).
+    """
+    workdir = os.path.dirname(trex_exec)
+    return (f"cd {shlex.quote(workdir)} && exec "
+            + " ".join(shlex.quote(a) for a in argv))
+
+
+def _bind_pci(pco: "RpcServer", opts: Opts) -> None:
+    """Bind every :class:`PciBdf` endpoint's device to ``opts.driver``.
+
+    Mirrors ``tapi_trex_bind_pci_addr`` (tapi_trex.c:628-676): find
+    ``/agent:<ta>/hardware:/pci:/device:<bdf>`` and set its driver.
+    :class:`LinuxIface` endpoints are never bound.
+    """
+    from pyte.cfg.gen.pci import Pci
+    pci = Pci(pco.ta)
+    for ep in (*opts.clients, *opts.servers):
+        if isinstance(ep.iface, PciBdf):
+            pci.device[ep.iface.bdf].driver = opts.driver
+
+
+def _remove_tmp_files(pco: "RpcServer", *paths: str) -> None:
+    """Best-effort ``pco.unlink()`` of each path; ENOENT is not an error."""
+    from pyte import errors
+    for path in paths:
+        try:
+            pco.unlink(path)
+        except RpcError as e:
+            if e.code != errors.ENOENT:
+                raise
+
+
+class Trex:
+    """A created TRex batch (ASTF) run (tapi_trex_app).
+
+    Returned by :func:`create`, which builds and attaches everything
+    but does not start the process -- call :meth:`start` explicitly
+    (mirrors ``tapi_trex_create``/``tapi_trex_start`` being separate
+    C calls). Not meant to be constructed directly.
+
+    :ivar job: the underlying :class:`pyte.job.Job`.
+    :ivar cmd: the full TRex argv (including ``--cfg``), for the
+        suite's own logging (e.g. ``ring_app_cmd``); the job itself
+        actually runs under a ``/bin/sh -c`` wrapper (see
+        :func:`_shell_cmd`), so ``job.program`` is ``"/bin/sh"``.
+    """
+
+    def __init__(self, pco: "RpcServer", job: "Job", cmd: list[str],
+                 yaml_path: str, astf_path: str):
+        self.job = job
+        self.cmd = cmd
+        self._pco = pco
+        self._yaml_path = yaml_path
+        self._astf_path = astf_path
+        self._closed = False
+        self._summary: dict[str, "Filter"] = {}
+        self._m_traff_dur: tuple["Filter", "Filter"] | None = None
+        self._opt: dict[str, tuple["Filter", "Filter"]] = {}
+        self._port_stat: dict[str, list["Filter"]] = {}
+        self._port_time: dict[str, "Filter"] = {}
+        self._global: dict[str, "Filter"] = {}
+
+    def _attach_filters(self, opts: Opts) -> None:
+        """Attach every stdout filter table BEFORE start() (tapi_trex.c:
+        1515-1600 summary+log filters at job-create time, 1272-1339
+        optional counters, 1341-1474 port/global stats gated on
+        ``iom == NORMAL``).
+        """
+        job = self.job
+        self._summary = {
+            name: job.filter(stdout=True, regex=regex, group=group,
+                             name=name)
+            for name, (regex, group) in _flt.SUMMARY.items()}
+        self._m_traff_dur = (
+            job.filter(stdout=True, regex=_flt.M_TRAFF_DUR, group=1,
+                      name="m_traff_dur_cl"),
+            job.filter(stdout=True, regex=_flt.M_TRAFF_DUR, group=2,
+                      name="m_traff_dur_srv"))
+        for name in _flt.OPT_COUNTERS:
+            regex = _flt.OPT_COUNTER_RE(name, name in _flt.OPT_COUNTERS_ERR)
+            self._opt[name] = (
+                job.filter(stdout=True, regex=regex, group=1,
+                          name=f"{name}_cl_flt"),
+                job.filter(stdout=True, regex=regex, group=2,
+                          name=f"{name}_srv_flt"))
+
+        if opts.iom is Iom.NORMAL:
+            ports = n_ports(opts)
+            for row in _flt.PORT_STAT_ROWS:
+                regex = _flt.port_stat_re(row, ports)
+                self._port_stat[row] = [
+                    job.filter(stdout=True, regex=regex, group=j + 1,
+                              name=f"port {j} {row}")
+                    for j in range(ports)]
+            for row in _flt.PORT_TIME_ROWS:
+                self._port_time[row] = job.filter(
+                    stdout=True, regex=_flt.port_time_re(row), group=1,
+                    name=row)
+            for name, regex in _flt.GLOBAL_STATS.items():
+                self._global[name] = job.filter(
+                    stdout=True, regex=name + regex, group=1, name=name)
+
+        if opts.stdout_log_level:
+            job.stdout.log(level=opts.stdout_log_level)
+        if opts.stderr_log_level:
+            job.stderr.log(level=opts.stderr_log_level)
+
+    def start(self) -> None:
+        """Start the TRex process (tapi_trex_start)."""
+        self.job.start()
+
+    def wait(self, timeout: float | None = None) -> "JobStatus":
+        """Wait for completion; None (the default) blocks forever.
+
+        Mirrors ``tapi_trex_wait`` (tapi_trex.c:1685-1699): a still-
+        running job (TE_EINPROGRESS, surfaced by pyte as
+        :class:`pyte.errors.TimeoutError`) is logged at RING before
+        the exception is re-raised.
+        """
+        try:
+            return self.job.wait(timeout=timeout)
+        except TeTimeoutError:
+            log.ring(f"TRex batch ({self.cmd[0]}): job was still in "
+                     "process at the end of the wait")
+            raise
+
+    def stop(self) -> None:
+        """Terminate gracefully: SIGTERM, 10 s (tapi_trex_stop)."""
+        self.job.stop()
+
+    def kill(self, signum) -> None:
+        """Send a signal to the job (tapi_trex_kill)."""
+        self.job.kill(signum)
+
+    def report(self) -> _rpt.Report:
+        """Drain every attached filter and build the :class:`Report`.
+
+        Mirrors reading each ``tapi_job`` filter and feeding
+        ``tapi_trex_get_report`` (tapi_trex.c:2250-2309); the parsing
+        itself is :func:`pyte.tools.trex._batch_report.build_report`.
+        """
+        filters = _rpt.BatchFilters()
+        for name, f in self._summary.items():
+            filters.summary[name] = [m.data for m in f.drain()]
+        if self._m_traff_dur is not None:
+            cl_f, srv_f = self._m_traff_dur
+            cl_vals = [m.data for m in cl_f.drain()]
+            srv_vals = [m.data for m in srv_f.drain()]
+            filters.m_traff_dur = list(zip(cl_vals, srv_vals))
+        for name, (cl_f, srv_f) in self._opt.items():
+            cl_vals = [m.data for m in cl_f.drain()]
+            srv_vals = [m.data for m in srv_f.drain()]
+            filters.opt_counters[name] = list(zip(cl_vals, srv_vals))
+        for name, port_filters in self._port_stat.items():
+            per_port = [[m.data for m in pf.drain()] for pf in port_filters]
+            filters.port_stat[name] = list(zip(*per_port))
+        for name, f in self._port_time.items():
+            filters.port_time[name] = [m.data for m in f.drain()]
+        for name, f in self._global.items():
+            filters.global_stats[name] = [m.data for m in f.drain()]
+        return _rpt.build_report(filters)
+
+    def close(self) -> None:
+        """Idempotent teardown: stop-tolerant destroy, then remove the
+        ``/tmp`` yaml and astf json files from the agent.
+
+        DIVERGENCE: C's ``tapi_trex_destroy`` never removes either
+        file -- a deliberate leak this port does not reproduce.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.job.stop()
+        except TeError:
+            pass
+        self.job.destroy()
+        _remove_tmp_files(self._pco, self._yaml_path, self._astf_path)
+
+
+@contextlib.contextmanager
+def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
+    """Build a :class:`Trex` batch run; NOT started (call :meth:`Trex.start`).
+
+    Order (mirrors ``tapi_trex_create``, tapi_trex.c:1477-1672, modulo
+    the workdir divergence in :func:`_shell_cmd`): build the argv,
+    generate the random yaml config path and append ``--cfg``; write
+    the ASTF json and the rendered platform yaml to the agent; bind
+    each :class:`PciBdf` endpoint when ``opts.driver`` is set; create
+    the job (via a ``/bin/sh -c 'cd <workdir> && exec ...'`` wrapper);
+    attach every stdout filter table. :meth:`Trex.close` runs on every
+    exit path, started or not.
+    """
+    yaml_path = yaml_cfg_path()
+    astf_path = astf_json_path(opts.instance_prefix)
+    argv = build_argv(opts, yaml_path)
+
+    try:
+        pco.file_put(astf_path, opts.astf_json.encode("utf-8"))
+        pco.file_put(yaml_path, render_cfg_yaml(opts).encode("utf-8"))
+        if opts.driver is not None:
+            _bind_pci(pco, opts)
+        job = pco.job("/bin/sh", ["-c", _shell_cmd(opts.trex_exec, argv)])
+    except BaseException:
+        _remove_tmp_files(pco, yaml_path, astf_path)
+        raise
+
+    trex = Trex(pco, job, argv, yaml_path, astf_path)
+    try:
+        trex._attach_filters(opts)
+        yield trex
+    finally:
+        trex.close()
