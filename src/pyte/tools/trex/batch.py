@@ -5,10 +5,11 @@
 Port of te/lib/tapi_tool/tapi_trex.{h,c} option model, pinned at
 ngfw-ts 41f9731 era (tapi_trex identical to tsf/main).
 
-This module owns only the argv-building surface: :class:`Opts` and the
-endpoint/enum types it is built from. Config-file (YAML) generation,
-job launch, and output parsing belong to later tasks; :meth:`Opts.to_argv`
-deliberately does NOT append ``--cfg`` (appended at launch time).
+This module owns the argv-building surface (:class:`Opts` and the
+endpoint/enum types it is built from) plus platform YAML config-file
+rendering (:func:`render_cfg_yaml`). Job launch and output parsing
+belong to later tasks; :meth:`Opts.to_argv` deliberately does NOT
+append ``--cfg`` (appended at launch time).
 
 Pinned mappings (from tapi_trex.c:337-360, tapi_trex.h:290-324)
 ================================================================
@@ -103,8 +104,8 @@ class Endpoint:
     """One client or server port description.
 
     Not consumed by :meth:`Opts.to_argv` (there is no per-endpoint
-    CLI flag); it feeds the YAML config-file generation a later task
-    owns. ``iface`` is None for TRex's "dummy" port.
+    CLI flag); it feeds :func:`render_cfg_yaml`. ``iface`` is None for
+    TRex's "dummy" port.
     """
     iface: LinuxIface | PciBdf | None = None
     ip: str | None = None
@@ -196,3 +197,86 @@ class Opts:
         argv += _tool.opt("-w", self.init_wait_sec)
         argv += _tool.opt("--prefix", self.instance_prefix)
         return argv
+
+
+def _iface_literal(iface: LinuxIface | PciBdf | None) -> str:
+    """Render one interface as it appears in the ``interfaces:`` list.
+
+    Mirrors ``tapi_trex_setup_port``'s ``IFACES`` push (tapi_trex.c:1066):
+    the name is always single-quoted (TRex/Cisco scripts misparse some
+    PCI BDFs without quotes); a missing interface renders as ``'dummy'``
+    (``TAPI_TREX_DUMMY``).
+    """
+    if iface is None:
+        name = "dummy"
+    elif isinstance(iface, LinuxIface):
+        name = iface.name
+    else:
+        name = iface.bdf
+    return f"'{name}'"
+
+
+def render_cfg_yaml(opts: Opts) -> str:
+    """Render the TRex platform YAML config (default_trex_cfg template).
+
+    Mirrors ``tapi_trex_gen_yaml_config``/``tapi_trex_setup_port``
+    (tapi_trex.c:989-1168) expanding the default template
+    (tapi_trex.c:326-334): ports are paired ``client[0], server[0],
+    client[1], server[1], ...`` (a missing entry at an index becomes a
+    default :class:`Endpoint` -- iface ``None``, ip/gw ``"0.0.0.0"``),
+    ``port_limit`` counts every port including dummies, and
+    ``port_info:`` lists all IP-form ports before all MAC-form ports.
+
+    DIVERGENCE: in C, a port whose ``ip``/``gw`` sockaddr pair mixes an
+    IP address with a MAC (e.g. an IP source address with a MAC
+    gateway) silently splits across ``PORTINFO_IP``/``PORTINFO_DST_MAC``,
+    misaligning the two ``port_info:`` groups so a later ``ip:`` entry
+    ends up paired with the wrong ``default_gw:``/``dest_mac:`` line.
+    This function instead requires exactly one address form per port
+    (both ``ip``-shaped or both ``mac``-shaped) and raises
+    :class:`ValueError` otherwise.
+    """
+    n = max(len(opts.clients), len(opts.servers))
+    ports: list[Endpoint] = []
+    for i in range(n):
+        client = opts.clients[i] if i < len(opts.clients) else Endpoint()
+        server = opts.servers[i] if i < len(opts.servers) else Endpoint()
+        ports.append(client)
+        ports.append(server)
+
+    ip_ports: list[tuple[str, str]] = []
+    mac_ports: list[tuple[str, str]] = []
+    for ep in ports:
+        addr_is_mac = ep.src_mac is not None
+        gw_is_mac = ep.dst_mac is not None
+        if addr_is_mac != gw_is_mac:
+            raise ValueError(
+                "Endpoint must use exactly one address form: either "
+                "ip/gw or src_mac/dst_mac, not a mix (DIVERGENCE: C "
+                "would silently misalign the port_info YAML lists "
+                f"here); got ip={ep.ip!r} gw={ep.gw!r} "
+                f"src_mac={ep.src_mac!r} dst_mac={ep.dst_mac!r}")
+        if addr_is_mac:
+            mac_ports.append((ep.dst_mac, ep.src_mac))
+        else:
+            ip_ports.append((ep.ip if ep.ip is not None else "0.0.0.0",
+                             ep.gw if ep.gw is not None else "0.0.0.0"))
+
+    lines = [
+        f"- port_limit      : {len(ports)}",
+        "  version         : 2",
+        "  interfaces: [" +
+        ", ".join(_iface_literal(ep.iface) for ep in ports) + "]",
+        "  port_info:",
+    ]
+    for ip, gw in ip_ports:
+        lines.append(f"    - ip: {ip}")
+        lines.append(f"      default_gw: {gw}")
+    for dst_mac, src_mac in mac_ports:
+        lines.append(f"    - dest_mac: {dst_mac}")
+        lines.append(f"      src_mac: {src_mac}")
+
+    yaml_text = "\n".join(lines) + "\n"
+    if opts.cfg_extra:
+        yaml_text += opts.cfg_extra
+    return yaml_text
