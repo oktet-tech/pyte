@@ -202,6 +202,60 @@ def test_add_heuristic_int_and_str_unchanged(monkeypatch):
     ]
 
 
+# -- add(): object-OID derivation for the declared-type lookup ---------
+#
+# cfg_find_str() resolves an *object* identifier (plain slashes, no
+# colons at all -- root object id "/") purely from registration, but
+# only resolves an *instance* identifier (colons, possibly empty names
+# -- root instance id "/:") when some instance already exists under
+# that object. add()'s type lookup must derive the former, not the
+# latter with names merely blanked out, or a scalar leaf that has
+# never had an instance (e.g. a freshly probed MAC) can never have its
+# declared type found -- see pyte trexb b1e6334.
+
+def test_add_looks_up_declared_type_by_object_oid(monkeypatch):
+    from pyte.errors import CfgError
+
+    _install_fake_add(monkeypatch)
+    calls = []
+
+    def spy(oid):
+        calls.append(oid)
+        raise CfgError(12)
+
+    monkeypatch.setattr(cfg, "_get_type", spy)
+
+    cfg.add("/agent:Agt_A/env:VAR", "x")
+
+    assert calls == ["/agent/env"]
+
+
+@pytest.mark.parametrize("instance_oid,object_oid", [
+    ("/agent:Agt_A/env:VAR", "/agent/env"),
+    ("/local:/dut:/mac1:", "/local/dut/mac1"),
+    ("/agent:Agt_A/rpcserver:pco_a/thread:1", "/agent/rpcserver/thread"),
+    # The root instance id is "/:" per cfg_find_str()'s own doc
+    # comment; the corresponding object id is bare "/".
+    ("/:", "/"),
+])
+def test_add_object_oid_derivation_table(monkeypatch, instance_oid,
+                                         object_oid):
+    from pyte.errors import CfgError
+
+    _install_fake_add(monkeypatch)
+    calls = []
+
+    def spy(oid):
+        calls.append(oid)
+        raise CfgError(12)
+
+    monkeypatch.setattr(cfg, "_get_type", spy)
+
+    cfg.add(instance_oid, "x")
+
+    assert calls == [object_oid]
+
+
 # -- grab_rsrc(): re-entrant after release_rsrc ------------------------
 
 def test_grab_rsrc_repoints_existing_instance(monkeypatch):

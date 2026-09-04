@@ -625,6 +625,18 @@ pyte_parse_bool(const char *value, bool *out)
  * back, conf_types.c addr_to_str); parse the "xx:xx:xx:xx:xx:xx" form
  * that reading direction produces (and that the C suite's own
  * TE_PRINTF_MAC_FMT/test_blackbox_probe_ip() writes).
+ *
+ * This deliberately mirrors TE's own str_to_addr() (conf_types.c,
+ * the MAC branch): six "%2x"-width sscanf() fields plus a full-string
+ * consumption check (str_to_addr does the equivalent with a trailing
+ * "%c" catch-all that must NOT match). No test seam exposes this
+ * static function directly (the repo's cfg tests fake the shim below
+ * pyte_cfg_add_str, and there is no live-rig test convention here);
+ * its behavior is pinned by that upstream parity instead, and was
+ * validated live against a real Configurator on the <iut-host>/<tester-host>
+ * blackbox rig on 2026-09-04 (nap-ts Task 21 phase B: the ip-layer
+ * DUT-MAC probe round-trips through cfg.add() -> here -> Configurator
+ * -> cfg.get() correctly).
  */
 static bool
 pyte_parse_mac(const char *value, struct sockaddr *sa)
@@ -633,6 +645,7 @@ pyte_parse_mac(const char *value, struct sockaddr *sa)
     unsigned int mac[6];
     int          n;
     int          consumed = -1;
+    int          i;
 
     n = sscanf(value, "%2x:%2x:%2x:%2x:%2x:%2x%n",
               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5],
@@ -642,7 +655,7 @@ pyte_parse_mac(const char *value, struct sockaddr *sa)
 
     memset(sa, 0, sizeof(*sa));
     sa->sa_family = AF_LOCAL;
-    for (int i = 0; i < 6; i++)
+    for (i = 0; i < 6; i++)
         sa->sa_data[i] = (char)mac[i];
     return true;
 }
