@@ -619,6 +619,34 @@ pyte_parse_bool(const char *value, bool *out)
     return 0;
 }
 
+/*
+ * A MAC is stored as AF_LOCAL with the six raw bytes in sa_data (the
+ * same convention pyte_cfg_get_str's CVT_ADDRESS case already reads
+ * back, conf_types.c addr_to_str); parse the "xx:xx:xx:xx:xx:xx" form
+ * that reading direction produces (and that the C suite's own
+ * TE_PRINTF_MAC_FMT/test_blackbox_probe_ip() writes).
+ */
+static bool
+pyte_parse_mac(const char *value, struct sockaddr *sa)
+{
+    /* 6 bytes, avoiding a new #include for ETHER_ADDR_LEN. */
+    unsigned int mac[6];
+    int          n;
+    int          consumed = -1;
+
+    n = sscanf(value, "%2x:%2x:%2x:%2x:%2x:%2x%n",
+              &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5],
+              &consumed);
+    if (n != 6 || consumed < 0 || value[consumed] != '\0')
+        return false;
+
+    memset(sa, 0, sizeof(*sa));
+    sa->sa_family = AF_LOCAL;
+    for (int i = 0; i < 6; i++)
+        sa->sa_data[i] = (char)mac[i];
+    return true;
+}
+
 static te_errno
 pyte_parse_sockaddr(const char *value, struct sockaddr_storage *ss)
 {
@@ -638,6 +666,8 @@ pyte_parse_sockaddr(const char *value, struct sockaddr_storage *ss)
         sin6->sin6_family = AF_INET6;
         return 0;
     }
+    if (pyte_parse_mac(value, (struct sockaddr *)ss))
+        return 0;
     return TE_RC(TE_TAPI, TE_EINVAL);
 }
 

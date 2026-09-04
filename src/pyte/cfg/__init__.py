@@ -143,10 +143,15 @@ def add(oid: str, value=None) -> CfgNode:
     """Add an instance; value type is derived from the Python type."""
     ffi, lib = _shim()
 
-    # Try to look up the declared CVT from the object descriptor.  The
-    # object OID has no instance names: strip every ":name" suffix so
-    # "/agent:Agt_A/env:VAR" becomes "/agent:/env:".
-    obj_oid = re.sub(r":[^/]*", ":", oid)
+    # Try to look up the declared CVT from the object descriptor.  Use
+    # the object identifier form (plain slashes, no colons at all --
+    # root object id is "/", vs. "/:" for the root *instance* id, per
+    # cfg_find_str()'s doc comment) rather than an instance id with
+    # empty names: an object that has never had any instance added
+    # (e.g. a scalar leaf probed and cfg.add()-ed for the first time)
+    # has no instance node to find, even a same-named empty one, so
+    # "/agent:Agt_A/env:VAR" becomes "/agent/env", not "/agent:/env:".
+    obj_oid = re.sub(r":[^/]*", "", oid)
     t = None
     try:
         t = _get_type(obj_oid)
