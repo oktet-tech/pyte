@@ -183,7 +183,24 @@ class _FakeJob:
             self.quiet_calls.append("exit")
 
 
+class _FakeRcfAgent:
+    """Stand-in for pyte.rcf.RcfAgent: put_bytes() records into the
+    owning _FakePco's files_put, same shape as the old pco.file_put()
+    fake it replaces."""
+
+    def __init__(self, pco: "_FakePco"):
+        self._pco = pco
+
+    def put_bytes(self, data: bytes, remote: str) -> None:
+        self._pco.files_put[remote] = data
+
+
 class _FakePco:
+    #: ta name -> the live _FakePco, so the _fake_rcf_agent fixture's
+    #: patched rcf.agent(ta) can hand batch.create() a _FakeRcfAgent
+    #: wired back to the right fake (rcf.agent() only takes a ta name).
+    registry: dict[str, "_FakePco"] = {}
+
     def __init__(self, ta: str = "agentA"):
         self.ta = ta
         self.files_put: dict[str, bytes] = {}
@@ -192,9 +209,7 @@ class _FakePco:
         self._job = _FakeJob()
         self.silent_pass_calls: list[str] = []
         self._job_exc: BaseException | None = None
-
-    def file_put(self, path: str, data: bytes) -> None:
-        self.files_put[path] = data
+        _FakePco.registry[ta] = self
 
     def job(self, program: str, args=None, env=None, stdin=False):
         self.job_calls.append((program, args))
@@ -215,6 +230,15 @@ class _FakePco:
             yield self
         finally:
             self.silent_pass_calls.append("exit")
+
+
+@pytest.fixture(autouse=True)
+def _fake_rcf_agent(monkeypatch):
+    """create() now ships files via rcf.agent(pco.ta).put_bytes()
+    instead of pco.file_put() -- patch batch.rcf.agent() to hand back
+    a _FakeRcfAgent wired to whichever _FakePco registered that ta."""
+    monkeypatch.setattr(batch.rcf, "agent",
+                        lambda ta: _FakeRcfAgent(_FakePco.registry[ta]))
 
 
 def _batch_opts(**kw):

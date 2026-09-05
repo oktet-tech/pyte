@@ -13,7 +13,9 @@ happens at launch, in :func:`build_argv`).
 :func:`create` (see its docstring for a runnable example) builds the
 run but does NOT start it (mirrors
 ``tapi_trex_create``/``tapi_trex_start`` being separate C calls):
-writes the ASTF json and rendered platform yaml to the agent, binds
+ships the ASTF json and rendered platform yaml to the agent over RCF
+(``rcf.agent(pco.ta).put_bytes``, the same transport as the C tapi's
+``rcf_ta_put_file`` -- not an RPC open/write/close loop), binds
 each :class:`PciBdf` endpoint when ``opts.driver`` is set, creates the
 TRex job, and attaches every stdout filter table from
 :mod:`pyte.tools.trex._batch_filters` before returning -- port/global
@@ -112,7 +114,7 @@ import shlex
 import string
 from typing import TYPE_CHECKING, Iterator
 
-from pyte import log
+from pyte import log, rcf
 from pyte.errors import RpcError, TeError
 from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools import _tool
@@ -434,7 +436,16 @@ def _bind_pci(pco: "RpcServer", opts: Opts) -> None:
 
 
 def _remove_tmp_files(pco: "RpcServer", *paths: str) -> None:
-    """Best-effort ``pco.unlink()`` of each path; ENOENT is not an error."""
+    """Best-effort ``pco.unlink()`` of each path; ENOENT is not an error.
+
+    Deliberately still the RPC ``unlink()`` here, not
+    :meth:`pyte.rcf.RcfAgent.del_file`: the ENOENT tolerance below
+    needs :class:`pyte.errors.RpcError`'s ``.code``, and switching the
+    delete side to RCF would trade a one-line noise saving (rmdir/close
+    of a job's own tmp files is not on the hot log path the way the
+    ship-side open/write/close loop was) for an error-handling rewrite
+    with no log-shape benefit.
+    """
     from pyte import errors
     for path in paths:
         try:
@@ -612,8 +623,10 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
 
     Order (mirrors ``tapi_trex_create``, tapi_trex.c:1477-1672, modulo
     the workdir divergence in :func:`_shell_cmd`): build the argv,
-    generate the random yaml config path and append ``--cfg``; write
-    the ASTF json and the rendered platform yaml to the agent; bind
+    generate the random yaml config path and append ``--cfg``; ship
+    the ASTF json and the rendered platform yaml to the agent over
+    RCF (:meth:`pyte.rcf.RcfAgent.put_bytes`, matching the C tapi's
+    ``rcf_ta_put_file`` transport); bind
     each :class:`PciBdf` endpoint when ``opts.driver`` is set; create
     the job (via a ``/bin/sh -c 'cd <workdir> && exec ...'`` wrapper);
     attach every stdout filter table. :meth:`Trex.close` runs on every
@@ -644,8 +657,13 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
     argv = build_argv(opts, yaml_path)
 
     try:
-        pco.file_put(astf_path, opts.astf_json.encode("utf-8"))
-        pco.file_put(yaml_path, render_cfg_yaml(opts).encode("utf-8"))
+        # Shipped via RCF's own file transport (rcf_ta_put_file), the
+        # same one the C tapi_trex uses -- NOT pco.file_put()'s RPC
+        # open/write/close loop, which used to fill the log with a
+        # dozen lines of RPC noise per file.
+        agent = rcf.agent(pco.ta)
+        agent.put_bytes(opts.astf_json.encode("utf-8"), astf_path)
+        agent.put_bytes(render_cfg_yaml(opts).encode("utf-8"), yaml_path)
         if opts.driver is not None:
             _bind_pci(pco, opts)
         # Mirrors nap-trex.c:272-274's proc->rpcs->silent_pass = true/
