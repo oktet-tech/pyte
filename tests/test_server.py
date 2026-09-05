@@ -106,6 +106,7 @@ def _rpc_error(code):
 def _bare_server():
     srv = RpcServer.__new__(RpcServer)
     srv._h = object()
+    srv._silent_pass_depth = 0
     return srv
 
 
@@ -281,3 +282,64 @@ def test_check_call_always_raises_on_failure(_no_shim_calls, monkeypatch):
     with pytest.raises(RpcError, match="boom"):
         srv._check_call(0, -1, lambda v: v >= 0, "call()")
     assert srv._check_call(0, 5, lambda v: v >= 0, "call()") == 5
+
+
+# -- silent_pass: rcf_rpc_server.silent_pass toggle CM -------------------
+
+class _SilentPassLib:
+    """Fake shim lib recording every pyte_rpc_set_silent_pass(h, on) call."""
+
+    def __init__(self):
+        self.calls: list[int] = []
+
+    def pyte_rpc_set_silent_pass(self, h, on):
+        self.calls.append(on)
+
+
+def _fake_silent_pass_shim(monkeypatch):
+    lib = _SilentPassLib()
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=object(), lib=lib))
+    return lib
+
+
+def test_silent_pass_sets_and_restores(monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with srv.silent_pass():
+        assert lib.calls == [1]
+    assert lib.calls == [1, 0]
+    assert srv._silent_pass_depth == 0
+
+
+def test_silent_pass_nests_without_toggling_in_between(monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with srv.silent_pass():
+        with srv.silent_pass():
+            assert lib.calls == [1]     # only the OUTER on() call
+        assert lib.calls == [1]         # inner exit did NOT turn it off
+    assert lib.calls == [1, 0]          # outer exit turns it off once
+    assert srv._silent_pass_depth == 0
+
+
+def test_silent_pass_restores_on_exception(monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with pytest.raises(ValueError, match="boom"):
+        with srv.silent_pass():
+            raise ValueError("boom")
+    assert lib.calls == [1, 0]
+    assert srv._silent_pass_depth == 0
+
+
+def test_silent_pass_nested_restores_on_exception_from_inner_block(
+        monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with pytest.raises(ValueError, match="boom"):
+        with srv.silent_pass():
+            with srv.silent_pass():
+                raise ValueError("boom")
+    assert lib.calls == [1, 0]
+    assert srv._silent_pass_depth == 0

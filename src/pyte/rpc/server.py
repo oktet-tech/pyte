@@ -43,6 +43,7 @@ class RpcServer:
         self.ta = ta
         self.name = name
         self._owned = owned
+        self._silent_pass_depth = 0
 
     @classmethod
     def create(cls, ta: str, name: str) -> "RpcServer":
@@ -128,6 +129,57 @@ class RpcServer:
             info.error = e
             return
         raise TestFail("expected an RPC error, but the block succeeded")
+
+    @contextmanager
+    def silent_pass(self):
+        """Suppress logging of job/filter RPCs *created* in this block.
+
+        Sets ``rcf_rpc_server.silent_pass`` -- the same field the C
+        TAPI's TRex driver flips around job creation
+        (``proc->rpcs->silent_pass = true; tapi_trex_create(...);
+        proc->rpcs->silent_pass = false;``, nap-trex.c:272-274). A
+        successful call is not logged at all; a failing one is still
+        logged at ERROR level -- that is what distinguishes
+        ``silent_pass`` from the lower-level ``silent`` flag used
+        internally by :class:`pyte.remote.RemoteObject` (which
+        swallows errors too and is unsuitable for job creation, where
+        a failure needs to be seen).
+
+        IMPORTANT -- this only silences *creation*, not use:
+        ``tapi_job_create()`` and ``tapi_job_attach_filter()`` bake the
+        ambient ``silent_pass`` into the new job/channel/filter object;
+        every later call that uses that object (:meth:`Filter.drain`,
+        a second regexp added to the same filter, ...) re-asserts the
+        object's CAPTURED flag for the duration of its own RPC and
+        ignores whatever ``silent_pass`` happens to be live at that
+        later point. So wrapping a later ``drain()``/``receive()``
+        call in this context manager by itself does nothing -- the
+        silence has to be baked in when the job/filter was created.
+        Wrap :meth:`RpcServer.job` and the filters it attaches in this
+        block and every future ``drain()`` on those filters is
+        silenced for free; ``job.start()``/``wait()``/``stop()``/
+        ``kill()``/``destroy()`` never consult any object's
+        ``silent_pass``, so they keep logging regardless of this.
+
+        Nests correctly (the previous state is restored, not forced
+        off) and restores on exception::
+
+            with pco.silent_pass():
+                job = pco.job(prog, args)
+                flt = job.filter(stdout=True, regex=r"...")
+            job.start()             # still logged
+            flt.drain()             # silenced (baked in at attach time)
+        """
+        lib = _shim_lib()
+        if self._silent_pass_depth == 0:
+            lib.pyte_rpc_set_silent_pass(self._h, 1)
+        self._silent_pass_depth += 1
+        try:
+            yield self
+        finally:
+            self._silent_pass_depth -= 1
+            if self._silent_pass_depth == 0:
+                lib.pyte_rpc_set_silent_pass(self._h, 0)
 
     # -- curated calls -------------------------------------------------
     def getpid(self) -> int:

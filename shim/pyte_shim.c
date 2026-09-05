@@ -113,6 +113,28 @@ pyte_rpc_set_silent(rcf_rpc_server *rpcs, int on)
     rpcs->silent = on ? true : false;
 }
 
+void
+pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on)
+{
+    /* Same TAPI_RPC_LOG hook as pyte_rpc_set_silent(), but a failed
+     * call still logs at ERROR (plain silent swallows errors too).
+     *
+     * The catch this one is FOR, not a workaround for: tapi_job_create()
+     * and tapi_job_attach_filter() bake the ambient rpcs->silent_pass
+     * into the new job/channel/filter object at creation time
+     * (tapi_job.c:tapi_job_create_named, tapi_job_attach_filter). Every
+     * later call that uses that object (job_receive*, job_filter_
+     * add_regexp on an existing filter, job_poll/send/clear...)
+     * re-asserts the CAPTURED value into rpcs->silent_pass for the
+     * duration of its own RPC, overwriting whatever the caller set --
+     * so toggling this around one of those later calls is a no-op.
+     * Set it only around job/filter creation to silence that creation
+     * call AND, as a side effect, every future receive on the filters
+     * created under it; job_start/wait/stop/kill/destroy never consult
+     * any object's silent_pass, so they stay logged regardless. */
+    rpcs->silent_pass = on ? true : false;
+}
+
 int
 pyte_rpc_errno(rcf_rpc_server *rpcs)
 {

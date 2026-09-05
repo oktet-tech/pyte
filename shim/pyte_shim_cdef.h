@@ -28,6 +28,7 @@ te_errno pyte_rpc_server_create(const char *ta, const char *name,
                                 rcf_rpc_server **out);
 te_errno pyte_rpc_server_destroy(rcf_rpc_server *rpcs);
 void pyte_rpc_set_silent(rcf_rpc_server *rpcs, int on);
+void pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on);
 int pyte_rpc_errno(rcf_rpc_server *rpcs);
 const char *pyte_rpc_err_msg(rcf_rpc_server *rpcs);
 void pyte_rpc_set_timeout(rcf_rpc_server *rpcs, uint32_t ms);
