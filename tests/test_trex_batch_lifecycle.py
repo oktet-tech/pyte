@@ -10,6 +10,7 @@ further down.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 
 import pytest
@@ -177,6 +178,7 @@ class _FakePco:
         self.unlinked: list[str] = []
         self.job_calls: list[tuple] = []
         self._job = _FakeJob()
+        self.silent_pass_calls: list[str] = []
 
     def file_put(self, path: str, data: bytes) -> None:
         self.files_put[path] = data
@@ -187,6 +189,17 @@ class _FakePco:
 
     def unlink(self, path: str) -> None:
         self.unlinked.append(path)
+
+    @contextlib.contextmanager
+    def silent_pass(self):
+        """No-op stand-in for RpcServer.silent_pass(): records the
+        window's enter/exit so tests can assert create() wraps job
+        creation and filter attachment in it."""
+        self.silent_pass_calls.append("enter")
+        try:
+            yield self
+        finally:
+            self.silent_pass_calls.append("exit")
 
 
 def _batch_opts(**kw):
@@ -236,6 +249,30 @@ def test_create_does_not_start_but_attaches_filters_and_writes_files():
     # files removed from the agent.
     assert pco._job.destroyed
     assert set(pco.unlinked) == set(pco.files_put.keys())
+
+
+def test_create_silences_job_creation_and_filter_attachment_only():
+    """DIVERGENCE #11 fix: create() wraps job creation and filter
+    attachment in RpcServer.silent_pass() (mirrors nap-trex.c's
+    proc->rpcs->silent_pass = true/false around tapi_trex_create()) --
+    exactly two enter/exit windows, both closed before start()/wait()/
+    stop()/kill()/destroy() run so those stay outside any window (the
+    C never silences them either)."""
+    pco = _FakePco()
+    opts = _batch_opts()
+
+    with batch.create(pco, opts) as trex:
+        # One window for job creation, one for filter attachment --
+        # both already closed by the time the block starts running.
+        assert pco.silent_pass_calls == ["enter", "exit", "enter", "exit"]
+
+        trex.start()
+        trex.wait()
+        trex.stop()
+        assert pco.silent_pass_calls == ["enter", "exit", "enter", "exit"]
+
+    # close() (stop-tolerant destroy) ran on context exit too.
+    assert pco.silent_pass_calls == ["enter", "exit", "enter", "exit"]
 
 
 def test_create_iom_normal_attaches_port_and_global_filters():

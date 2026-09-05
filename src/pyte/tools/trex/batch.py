@@ -22,6 +22,17 @@ stat filters only when ``opts.iom is Iom.NORMAL``.
 skip that stream's log filter entirely (pythonic spelling of "silence
 this stream").
 
+:func:`create` also mirrors nap-trex.c's ``proc->rpcs->silent_pass =
+true; tapi_trex_create(...); proc->rpcs->silent_pass = false;`` idiom
+via :meth:`pyte.rpc.server.RpcServer.silent_pass`: the job and its
+filters are created under that toggle, so the job_create/job_
+attach_filter/job_filter_add_regexp RPC calls are not logged, and --
+because tapi_job bakes silent_pass into each job/channel/filter object
+at creation and re-asserts it on every later use -- every subsequent
+:meth:`Filter.drain` in :meth:`Trex.report` stays unlogged too, for
+free. ``start``/``wait``/``stop``/``kill``/``destroy`` consult no such
+baked-in flag and are always logged, same as the C.
+
 Interface resolution: this port only understands :class:`LinuxIface`
 (used verbatim, never bound) and :class:`PciBdf` (used verbatim, bound
 to ``opts.driver`` when set). C's PCI-by-kernel-iface and vendor/
@@ -605,14 +616,32 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         pco.file_put(yaml_path, render_cfg_yaml(opts).encode("utf-8"))
         if opts.driver is not None:
             _bind_pci(pco, opts)
-        job = pco.job("/bin/sh", ["-c", _shell_cmd(opts.trex_exec, argv)])
+        # Mirrors nap-trex.c:272-274's proc->rpcs->silent_pass = true/
+        # false around tapi_trex_create(): the job created here bakes
+        # silent_pass=true into itself and its primary stdout/stderr
+        # channels (tapi_job.c:init_channel: a primary channel's flag
+        # comes from job->silent_pass, not the ambient at the time the
+        # channel happens to be allocated).
+        with pco.silent_pass():
+            job = pco.job("/bin/sh", ["-c", _shell_cmd(opts.trex_exec, argv)])
     except BaseException:
         _remove_tmp_files(pco, yaml_path, astf_path)
         raise
 
     trex = Trex(pco, job, argv, yaml_path, astf_path)
     try:
-        trex._attach_filters(opts)
+        # Every filter attached here inherits the JOB's baked-in
+        # silent_pass (channels[0]->silent_pass in
+        # tapi_job_attach_filter()) regardless of the ambient value at
+        # attach time -- wrapping it too just keeps this block visibly
+        # parallel to the C, which attaches filters inside the same
+        # tapi_trex_create() call the silent_pass toggle wraps.  The
+        # payoff: report()'s Filter.drain() calls below need no
+        # silencing of their own -- tapi_job_receive_many()
+        # unconditionally re-asserts each filter's OWN baked flag,
+        # ignoring rpcs->silent_pass at drain time.
+        with pco.silent_pass():
+            trex._attach_filters(opts)
         yield trex
     finally:
         trex.close()
