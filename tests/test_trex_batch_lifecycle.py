@@ -191,12 +191,15 @@ class _FakePco:
         self.job_calls: list[tuple] = []
         self._job = _FakeJob()
         self.silent_pass_calls: list[str] = []
+        self._job_exc: BaseException | None = None
 
     def file_put(self, path: str, data: bytes) -> None:
         self.files_put[path] = data
 
     def job(self, program: str, args=None, env=None, stdin=False):
         self.job_calls.append((program, args))
+        if self._job_exc is not None:
+            raise self._job_exc
         return self._job
 
     def unlink(self, path: str) -> None:
@@ -285,6 +288,30 @@ def test_create_silences_job_creation_and_filter_attachment_only():
 
     # close() (stop-tolerant destroy) ran on context exit too.
     assert pco.silent_pass_calls == ["enter", "exit", "enter", "exit"]
+
+
+def test_create_restores_silent_pass_and_cleans_up_tmp_files_on_error():
+    """A failure INSIDE the first silent_pass() window (job creation
+    itself, e.g. tapi_job_create_named() failing on the agent) must
+    still close that window -- the context manager's __exit__ runs on
+    the way out, same as any other exception -- and create() must
+    still remove the astf/yaml tmp files it already wrote, exactly
+    like the success path's cleanup."""
+    pco = _FakePco()
+    pco._job_exc = RuntimeError("job_create failed")
+    opts = _batch_opts()
+
+    with pytest.raises(RuntimeError, match="job_create failed"):
+        with batch.create(pco, opts):
+            pass  # pragma: no cover -- create() raises before yielding
+
+    # The one window that was opened (around the failing job() call)
+    # was also closed -- not left dangling open.
+    assert pco.silent_pass_calls == ["enter", "exit"]
+    # Both tmp files (astf json + platform yaml) were written before
+    # the failure and must still be cleaned up.
+    assert len(pco.files_put) == 2
+    assert set(pco.unlinked) == set(pco.files_put.keys())
 
 
 def test_create_iom_normal_attaches_port_and_global_filters():

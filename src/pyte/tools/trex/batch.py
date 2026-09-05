@@ -668,12 +668,15 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         # attach time -- wrapping it too just keeps this block visibly
         # parallel to the C, which attaches filters inside the same
         # tapi_trex_create() call the silent_pass toggle wraps.  This
-        # only silences job_attach_filter/job_filter_add_regexp
-        # themselves (and, incidentally, job_start/job_wait, which
-        # also read the job's own baked flag) -- it does NOT, on its
-        # own, silence Filter.drain() in report() down the line: this
-        # module's docstring explains why report() has to re-silence
-        # its own filters via Job.quiet() instead.
+        # window itself only silences the job_attach_filter/job_
+        # filter_add_regexp calls it makes (job_start/job_wait are
+        # ALSO silenced later, but that comes from job->silent_pass
+        # baked once in the FIRST window above, at job creation --
+        # tapi_job_create_named(), tapi_job.c:430 -- not from this
+        # one). It does NOT, on its own, silence Filter.drain() in
+        # report() down the line: this module's docstring explains
+        # why report() has to re-silence its own filters via
+        # Job.quiet() instead.
         with pco.silent_pass():
             trex._attach_filters(opts)
         yield trex
