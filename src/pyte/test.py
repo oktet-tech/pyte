@@ -96,6 +96,8 @@ class Test:
 
     def _run_cleanups(self) -> bool:
         ok = True
+        if self._cleanups:
+            self.step("Cleanup")
         for fn, args, kwargs in reversed(self._cleanups):
             try:
                 fn(*args, **kwargs)

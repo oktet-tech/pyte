@@ -83,6 +83,29 @@ def test_start_good_seed_is_logged(lib, monkeypatch):
     assert any(b"Pseudo-random seed is 42" in txt for _, txt in lib.logs)
 
 
+def test_start_cleanup_emits_step_frame_when_registered(lib, monkeypatch):
+    """When the test registers a cleanup, a "Cleanup" step must be
+    emitted before it runs, so the cleanup's own log lines land in a
+    truthful frame instead of the test's last t.step()."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.step("Do the thing")
+            t.cleanup(lambda: None)
+    assert ei.value.code == 0
+    assert lib.steps == [b"Test start", b"Do the thing", b"Cleanup"]
+
+
+def test_start_no_cleanup_emits_no_extra_step(lib, monkeypatch):
+    """No cleanups registered: no "Cleanup" step frame is emitted."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.step("Do the thing")
+    assert ei.value.code == 0
+    assert lib.steps == [b"Test start", b"Do the thing"]
+
+
 def test_start_bad_seed_fails_via_normal_exit_path(lib, monkeypatch):
     """A malformed te_rand_seed must not escape as a raw ValueError:
     the error is logged to TE and the process exits with result 1,
