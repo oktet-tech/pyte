@@ -22,16 +22,34 @@ stat filters only when ``opts.iom is Iom.NORMAL``.
 skip that stream's log filter entirely (pythonic spelling of "silence
 this stream").
 
-:func:`create` also mirrors nap-trex.c's ``proc->rpcs->silent_pass =
-true; tapi_trex_create(...); proc->rpcs->silent_pass = false;`` idiom
-via :meth:`pyte.rpc.server.RpcServer.silent_pass`: the job and its
-filters are created under that toggle, so the job_create/job_
-attach_filter/job_filter_add_regexp RPC calls are not logged, and --
-because tapi_job bakes silent_pass into each job/channel/filter object
-at creation and re-asserts it on every later use -- every subsequent
-:meth:`Filter.drain` in :meth:`Trex.report` stays unlogged too, for
-free. ``start``/``wait``/``stop``/``kill``/``destroy`` consult no such
-baked-in flag and are always logged, same as the C.
+Two separate C silencing idioms are mirrored, at two different levels,
+because they are NOT interchangeable:
+
+- :func:`create` mirrors nap-trex.c's ``proc->rpcs->silent_pass =
+  true; tapi_trex_create(...); proc->rpcs->silent_pass = false;``
+  idiom via :meth:`pyte.rpc.server.RpcServer.silent_pass`: the job and
+  its filters are created under that toggle, so the job_create/job_
+  attach_filter/job_filter_add_regexp RPC calls are not logged (tapi_job
+  bakes the RPC server's ambient silent_pass into each job/channel/
+  filter object at creation time).
+- :meth:`Trex.report` mirrors ``trex_result_extract()``'s
+  ``tapi_job_set_tracing(FALSE)`` / ``(TRUE)`` bracket around
+  ``tapi_trex_get_report()`` (nap-trex-stats.c:614-694) via
+  :meth:`pyte.job.Job.quiet`: unlike ``RpcServer.silent_pass``,
+  ``tapi_job_set_tracing()`` reaches into and REWRITES every one of
+  the job's already-created channel/filter objects' own ``silent_pass``
+  field, which is what makes it able to (re-)silence
+  :meth:`Filter.drain` on filters created long before -- the create-
+  time baking above does NOT persist that far on its own: nap-ts's
+  own stdout drain (``job.quiet()`` around the job's raw, unfiltered
+  stdout, mirroring ``trex_proc_drain_stdout()``, and always running
+  between :meth:`wait` and :meth:`report`) flips every filter back to
+  loud again the moment ITS OWN ``quiet()`` block exits, so
+  :meth:`report` has to re-silence its filters itself, exactly like
+  the C does.
+
+``start``/``wait``/``stop``/``kill``/``destroy`` are wrapped by neither
+idiom and are always logged, same as the C.
 
 Interface resolution: this port only understands :class:`LinuxIface`
 (used verbatim, never bound) and :class:`PciBdf` (used verbatim, bound
@@ -534,26 +552,40 @@ class Trex:
         Mirrors reading each ``tapi_job`` filter and feeding
         ``tapi_trex_get_report`` (tapi_trex.c:2250-2309); the parsing
         itself is :func:`pyte.tools.trex._batch_report.build_report`.
+
+        The whole drain runs under :meth:`~pyte.job.Job.quiet` (mirrors
+        ``trex_result_extract()``'s ``tapi_job_set_tracing(FALSE)`` /
+        ``(TRUE)`` bracket around ``tapi_trex_get_report()``,
+        nap-trex-stats.c:614-694) -- NOT redundant with
+        create()'s ``pco.silent_pass()`` window: ``tapi_job_set_tracing()``
+        writes every one of the job's channel/filter objects' own
+        ``silent_pass`` field (not just the RPC server's ambient one),
+        so it is also what RE-SILENCES these filters after
+        ``run()``'s own stdout-drain step (``job.quiet()`` around the
+        raw stdout filter, mirroring ``trex_proc_drain_stdout()``) has
+        already flipped them back to loud on its own exit.
         """
-        filters = _rpt.BatchFilters()
-        for name, f in self._summary.items():
-            filters.summary[name] = [m.data for m in f.drain()]
-        if self._m_traff_dur is not None:
-            cl_f, srv_f = self._m_traff_dur
-            cl_vals = [m.data for m in cl_f.drain()]
-            srv_vals = [m.data for m in srv_f.drain()]
-            filters.m_traff_dur = list(zip(cl_vals, srv_vals))
-        for name, (cl_f, srv_f) in self._opt.items():
-            cl_vals = [m.data for m in cl_f.drain()]
-            srv_vals = [m.data for m in srv_f.drain()]
-            filters.opt_counters[name] = list(zip(cl_vals, srv_vals))
-        for name, port_filters in self._port_stat.items():
-            per_port = [[m.data for m in pf.drain()] for pf in port_filters]
-            filters.port_stat[name] = list(zip(*per_port))
-        for name, f in self._port_time.items():
-            filters.port_time[name] = [m.data for m in f.drain()]
-        for name, f in self._global.items():
-            filters.global_stats[name] = [m.data for m in f.drain()]
+        with self.job.quiet():
+            filters = _rpt.BatchFilters()
+            for name, f in self._summary.items():
+                filters.summary[name] = [m.data for m in f.drain()]
+            if self._m_traff_dur is not None:
+                cl_f, srv_f = self._m_traff_dur
+                cl_vals = [m.data for m in cl_f.drain()]
+                srv_vals = [m.data for m in srv_f.drain()]
+                filters.m_traff_dur = list(zip(cl_vals, srv_vals))
+            for name, (cl_f, srv_f) in self._opt.items():
+                cl_vals = [m.data for m in cl_f.drain()]
+                srv_vals = [m.data for m in srv_f.drain()]
+                filters.opt_counters[name] = list(zip(cl_vals, srv_vals))
+            for name, port_filters in self._port_stat.items():
+                per_port = [[m.data for m in pf.drain()]
+                           for pf in port_filters]
+                filters.port_stat[name] = list(zip(*per_port))
+            for name, f in self._port_time.items():
+                filters.port_time[name] = [m.data for m in f.drain()]
+            for name, f in self._global.items():
+                filters.global_stats[name] = [m.data for m in f.drain()]
         return _rpt.build_report(filters)
 
     def close(self) -> None:
@@ -635,11 +667,13 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         # tapi_job_attach_filter()) regardless of the ambient value at
         # attach time -- wrapping it too just keeps this block visibly
         # parallel to the C, which attaches filters inside the same
-        # tapi_trex_create() call the silent_pass toggle wraps.  The
-        # payoff: report()'s Filter.drain() calls below need no
-        # silencing of their own -- tapi_job_receive_many()
-        # unconditionally re-asserts each filter's OWN baked flag,
-        # ignoring rpcs->silent_pass at drain time.
+        # tapi_trex_create() call the silent_pass toggle wraps.  This
+        # only silences job_attach_filter/job_filter_add_regexp
+        # themselves (and, incidentally, job_start/job_wait, which
+        # also read the job's own baked flag) -- it does NOT, on its
+        # own, silence Filter.drain() in report() down the line: this
+        # module's docstring explains why report() has to re-silence
+        # its own filters via Job.quiet() instead.
         with pco.silent_pass():
             trex._attach_filters(opts)
         yield trex
