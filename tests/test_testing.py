@@ -153,3 +153,10 @@ def test_fake_report_series_accessors():
                          series_vals={("TX", 0): [3.0, 4.0]})
     assert rep.time_series() == [0.0, 1.0]
     assert rep.series_by_time("TX", 0) == [3.0, 4.0]
+
+
+def test_mi_logger_fixture_resets_the_registry(mi_logger):
+    assert mi_logger.registry == []
+    with mi_logger("tool"):
+        pass
+    assert len(mi_logger.registry) == 1

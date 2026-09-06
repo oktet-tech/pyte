@@ -178,6 +178,22 @@ def fake_shim(monkeypatch):
 
 
 @pytest.fixture()
+def mi_logger():
+    """A clean :class:`RecordingMiLogger` registry around one test.
+
+    Yields the :class:`RecordingMiLogger` class with its registry
+    emptied, and empties it again on teardown, so instances never
+    leak between tests.  Monkeypatching the module under test
+    (``monkeypatch.setattr(mod.mi, "Logger", RecordingMiLogger)``)
+    stays the caller's job -- only the caller knows which module's
+    ``mi`` binding to replace.
+    """
+    RecordingMiLogger.reset()
+    yield RecordingMiLogger
+    RecordingMiLogger.reset()
+
+
+@pytest.fixture()
 def current_test(fake_shim):
     """A real :class:`pyte.test.Test` installed as the current test.
 
@@ -257,7 +273,7 @@ class RecordingMiLogger:
     @classmethod
     def reset(cls) -> None:
         """Drop every recorded instance."""
-        cls.registry = []
+        RecordingMiLogger.registry.clear()
 
     def add(self, type_, name, aggr, value, multiplier=None):
         self.adds.append((type_, name, aggr, value, multiplier))
