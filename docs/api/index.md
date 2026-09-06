@@ -8,8 +8,10 @@ Generated from the in-code docstrings.
    :recursive:
 
    pyte.cfg
+   pyte.dpdk
    pyte.env
    pyte.errors
+   pyte.expand
    pyte.job
    pyte.log
    pyte.mi
@@ -17,10 +19,13 @@ Generated from the in-code docstrings.
    pyte.rcf
    pyte.remote
    pyte.rpc
+   pyte.shenv
    pyte.tad
    pyte.test
    pyte.tester
+   pyte.testing
    pyte.tools
    pyte.trc
+   pyte.util
 ```
 
