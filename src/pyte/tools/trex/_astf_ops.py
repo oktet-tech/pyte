@@ -89,10 +89,10 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
         pass
 
     try:
-        import cgi
-        del cgi
-    except ImportError:
         try:
+            import cgi
+            del cgi
+        except ImportError:
             import html
             import types
             _cgi_shim = types.ModuleType("cgi")
@@ -111,8 +111,8 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
 
             _cgi_shim.parse_header = _parse_header
             sys.modules["cgi"] = _cgi_shim
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     if trex_lib_dir not in sys.path:
         sys.path.insert(0, trex_lib_dir)
@@ -130,8 +130,8 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
             last = exc
             if time.time() >= deadline:
                 raise RuntimeError(
-                    "could not connect to the TRex ASTF server: "
-                    "%s" % last)
+                    "could not connect to the TRex ASTF server "
+                    "within %ss: %r" % (timeout, last))
             time.sleep(0.5)
 
 

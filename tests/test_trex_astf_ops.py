@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex._astf_ops unit tests (stub client, no agent)."""
+import builtins
 import inspect
 import re
+import sys
+import types
 
 from pyte.tools.trex import _astf_ops as ops
 
@@ -73,6 +76,44 @@ def test_bootstrap_has_no_hardcoded_trex_version():
     assert "trex-v" not in src
     assert "scapy-2.4.3" not in src
     assert not re.search(r"scapy-\d", src)
+
+
+def test_bootstrap_cgi_shim_survives_non_import_error(monkeypatch):
+    """The cgi shim must be guarded by a bare except Exception, not
+    except ImportError only, like the other three shims: a broken
+    cgi import (anything other than a clean ModuleNotFoundError)
+    must not escape bootstrap and kill bring-up."""
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "cgi":
+            raise RuntimeError("simulated corrupted cgi import")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    # A fake trex.astf.api so bootstrap can run past the real import
+    # and the connect-retry loop without a TRex install on this host.
+    class _FakeASTFClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def set_verbose(self, level):
+            pass
+
+        def connect(self):
+            pass
+
+    api_mod = types.ModuleType("trex.astf.api")
+    api_mod.ASTFClient = _FakeASTFClient
+    monkeypatch.setitem(sys.modules, "trex", types.ModuleType("trex"))
+    monkeypatch.setitem(sys.modules, "trex.astf",
+                        types.ModuleType("trex.astf"))
+    monkeypatch.setitem(sys.modules, "trex.astf.api", api_mod)
+
+    cli = ops.bootstrap("/nonexistent/interactive", "127.0.0.1",
+                        4501, 4500, 1)
+    assert isinstance(cli, _FakeASTFClient)
 
 
 def test_reset_calls_through():
