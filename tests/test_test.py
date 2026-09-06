@@ -19,33 +19,12 @@ import pytest
 from pyte import log, test
 from pyte._params import Params
 from pyte.errors import TestFail
-
-
-class FakeLib:
-    TE_LL_ERROR = 1
-    TE_LL_WARN = 2
-    TE_LL_RING = 3
-    TE_LL_INFO = 4
-    TE_LL_VERB = 5
-    te_test_id = 0
-
-    def __init__(self):
-        self.logs = []
-        self.steps = []
-
-    def pyte_log_init(self, entity):
-        pass
-
-    def pyte_step(self, text):
-        self.steps.append(bytes(text))
-
-    def pyte_log(self, lvl, user, text):
-        self.logs.append((lvl, bytes(text)))
+from pyte.testing import FakeShimLib
 
 
 @pytest.fixture()
 def lib(monkeypatch):
-    lib = FakeLib()
+    lib = FakeShimLib()
     monkeypatch.setitem(sys.modules, "pyte._shim",
                         types.SimpleNamespace(ffi=None, lib=lib))
     # start() installs signal handlers and a root-logger handler and
@@ -70,7 +49,7 @@ def test_start_success_exits_zero(lib, monkeypatch):
             assert test.current() is t
     assert ei.value.code == 0
     assert test._current is None
-    assert lib.steps == [b"Test start"]
+    assert lib.steps == ["Test start"]
 
 
 def test_start_good_seed_is_logged(lib, monkeypatch):
@@ -80,7 +59,8 @@ def test_start_good_seed_is_logged(lib, monkeypatch):
         with test.start():
             pass
     assert ei.value.code == 0
-    assert any(b"Pseudo-random seed is 42" in txt for _, txt in lib.logs)
+    assert any("Pseudo-random seed is 42" in txt
+               for _, txt in lib.logs)
 
 
 def test_start_cleanup_emits_step_frame_when_registered(lib, monkeypatch):
@@ -93,7 +73,7 @@ def test_start_cleanup_emits_step_frame_when_registered(lib, monkeypatch):
             t.step("Do the thing")
             t.cleanup(lambda: None)
     assert ei.value.code == 0
-    assert lib.steps == [b"Test start", b"Do the thing", b"Cleanup"]
+    assert lib.steps == ["Test start", "Do the thing", "Cleanup"]
 
 
 def test_start_no_cleanup_emits_no_extra_step(lib, monkeypatch):
@@ -103,7 +83,7 @@ def test_start_no_cleanup_emits_no_extra_step(lib, monkeypatch):
         with test.start() as t:
             t.step("Do the thing")
     assert ei.value.code == 0
-    assert lib.steps == [b"Test start", b"Do the thing"]
+    assert lib.steps == ["Test start", "Do the thing"]
 
 
 def test_start_bad_seed_fails_via_normal_exit_path(lib, monkeypatch):
@@ -117,8 +97,9 @@ def test_start_bad_seed_fails_via_normal_exit_path(lib, monkeypatch):
             raise AssertionError("body must not run")
     assert ei.value.code == 1
     assert test._current is None
-    err_logs = [txt for lvl, txt in lib.logs if lvl == FakeLib.TE_LL_ERROR]
-    assert any(b"notanint" in txt for txt in err_logs)
+    err_logs = [txt for lvl, txt in lib.logs
+                if lvl == FakeShimLib.TE_LL_ERROR]
+    assert any("notanint" in txt for txt in err_logs)
 
 
 # -- expect() / check() -----------------------------------------------
