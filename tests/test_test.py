@@ -164,3 +164,72 @@ def test_check_fails_with_given_message(t):
     with pytest.raises(TestFail) as ei:
         t.check(False, "port must be open")
     assert str(ei.value) == "port must be open"
+
+
+# -- default_param() / default_uint() ----------------------------------
+#
+# Per-test defaults live in the Configurator, so these need nothing but
+# a monkeypatched pyte.cfg.get (test.py imports cfg lazily).
+
+
+@pytest.fixture()
+def cfg_get(monkeypatch):
+    """Record the OIDs asked for; answer from a settable value."""
+    from pyte import cfg
+
+    class Recorder:
+        def __init__(self):
+            self.oids = []
+            self.value = "42"
+
+        def __call__(self, oid, sync=False):
+            self.oids.append(oid)
+            if isinstance(self.value, Exception):
+                raise self.value
+            return self.value
+
+    rec = Recorder()
+    monkeypatch.setattr(cfg, "get", rec)
+    return rec
+
+
+def test_default_param_returns_the_value_as_string(t, cfg_get):
+    cfg_get.value = 65
+    assert t.default_param("duration", "trex/trex") == "65"
+
+
+def test_default_param_mangles_slashes_in_the_test_name(t, cfg_get):
+    t.default_param("duration", "trex/trex")
+    assert cfg_get.oids == [
+        "/local:/test:/testname:trex_trex/default:duration"]
+
+
+def test_default_param_propagates_the_configurator_error(t, cfg_get):
+    class Boom(Exception):
+        """Stands in for CfgError, which needs a live shim to build."""
+
+    cfg_get.value = Boom("no such instance")
+    with pytest.raises(Boom):
+        t.default_param("duration", "trex/trex")
+
+
+def test_default_uint_parses_decimal(t, cfg_get):
+    cfg_get.value = "65"
+    assert t.default_uint("duration", "trex/trex") == 65
+
+
+def test_default_uint_parses_base_zero_prefixes(t, cfg_get):
+    cfg_get.value = "0x10"
+    assert t.default_uint("duration", "trex/trex") == 16
+
+
+def test_default_uint_rejects_a_negative_value(t, cfg_get):
+    cfg_get.value = "-1"
+    with pytest.raises(ValueError, match="unsigned integer"):
+        t.default_uint("duration", "trex/trex")
+
+
+def test_default_uint_rejects_junk(t, cfg_get):
+    cfg_get.value = "soon"
+    with pytest.raises(ValueError, match="unsigned integer"):
+        t.default_uint("duration", "trex/trex")

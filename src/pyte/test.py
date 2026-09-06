@@ -88,6 +88,45 @@ class Test:
         from pyte import cfg
         return [n.name for n in cfg.find("/agent:*")]
 
+    # -- per-test defaults ---------------------------------------------
+    def default_param(self, name: str, test_name: str) -> str:
+        """A test parameter's default from the Configurator, as a string.
+
+        Reads ``/local:/test:/testname:<node>/default:<name>``, where
+        ``<node>`` is *test_name* with every "/" replaced by "_" (the
+        node naming the Configurator uses).  Such nodes are registered
+        by a suite's ``cs.conf``, typically with a value expanded from
+        the environment at Configurator load time.
+
+        Only that node is ever consulted: a test parameter of the same
+        name is NOT a fallback, so whatever cs.conf resolved stays the
+        single source of the value.  A missing node surfaces as
+        :class:`~pyte.errors.CfgNotFoundError`, any other Configurator
+        failure as :class:`~pyte.errors.CfgError`; both propagate.
+        """
+        from pyte import cfg
+        node = test_name.replace("/", "_")
+        value = cfg.get(f"/local:/test:/testname:{node}/default:{name}")
+        return str(value)
+
+    def default_uint(self, name: str, test_name: str) -> int:
+        """:meth:`default_param` parsed as a non-negative integer.
+
+        Base 0, so "0x10" and "0o20" are accepted alongside "16".
+
+        :raises ValueError: the default does not parse, or is negative.
+        """
+        value = self.default_param(name, test_name)
+        try:
+            result = int(value, 0)
+        except ValueError:
+            raise ValueError(f"default value of parameter {name!r} is not "
+                             f"an unsigned integer: {value!r}") from None
+        if result < 0:
+            raise ValueError(f"default value of parameter {name!r} is not "
+                             f"an unsigned integer: {value!r}")
+        return result
+
     def rpc_server(self, name: str):
         from pyte.rpc import RpcServer
         srv = RpcServer.create(self.agent, name)
