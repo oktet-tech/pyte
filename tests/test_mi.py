@@ -6,8 +6,10 @@ Uses the same fake-shim pattern as test_tester.py: inject a SimpleNamespace
 into sys.modules["pyte._shim"] so mi.py's lazy imports never touch the real
 compiled extension.
 """
+import re
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -390,3 +392,49 @@ def test_logger_dropped_without_close_warns(monkeypatch):
         del logger
         gc.collect()
     assert not got
+
+
+# ---------------------------------------------------------------------------
+# Shim-header consistency
+# ---------------------------------------------------------------------------
+#
+# Every test above resolves its constants through FakeLib, whose values
+# are hand-mirrored from the shim by whoever adds an enum member. That
+# makes both halves agree by construction: an enum member added to
+# mi.py and forgotten in the shim header passes here and raises
+# AttributeError on a rig, at the first logger.add(). The checks below
+# read the header text instead, so they need no compiled shim and
+# cannot be satisfied by the same oversight twice.
+
+_CDEF_H = Path(__file__).resolve().parents[1] / "shim" / "pyte_shim_cdef.h"
+_SHIM_H = Path(__file__).resolve().parents[1] / "shim" / "pyte_shim.h"
+
+
+def _declared(path):
+    """The PYTE_* names #define'd in one shim header."""
+    return set(re.findall(r"^#define\s+(PYTE_MI_\w+)", path.read_text(),
+                          re.M))
+
+
+@pytest.mark.parametrize("enum_cls", [Meas, Aggr, Mult],
+                         ids=["Meas", "Aggr", "Mult"])
+def test_every_enum_member_is_declared_in_the_cdef_header(enum_cls):
+    """cffi only exposes constants named in pyte_shim_cdef.h."""
+    declared = _declared(_CDEF_H)
+    missing = sorted(m.value for m in enum_cls
+                     if m.value not in declared)
+    assert not missing, (
+        f"{enum_cls.__name__} members name shim constants absent from "
+        f"{_CDEF_H.name}: {missing}")
+
+
+@pytest.mark.parametrize("enum_cls", [Meas, Aggr, Mult],
+                         ids=["Meas", "Aggr", "Mult"])
+def test_every_enum_member_is_defined_in_the_shim_header(enum_cls):
+    """...and the cdef declaration needs a real #define behind it."""
+    declared = _declared(_SHIM_H)
+    missing = sorted(m.value for m in enum_cls
+                     if m.value not in declared)
+    assert not missing, (
+        f"{enum_cls.__name__} members name shim constants absent from "
+        f"{_SHIM_H.name}: {missing}")
