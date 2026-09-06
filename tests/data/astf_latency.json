@@ -1,0 +1,70 @@
+{
+  "0": {
+    "hist": {
+      "cnt": 405,
+      "high_cnt": 405,
+      "histogram": [
+        {
+          "key": 800,
+          "val": 450
+        }
+      ],
+      "max_usec": 863,
+      "min_usec": 10,
+      "s_avg": 826.0,
+      "s_max": 827.952297
+    },
+    "stats": {
+      "ignore_bytes": 0,
+      "ipv6_n_solic": 0,
+      "m_jitter": 6,
+      "m_l3_cs_err": 0,
+      "m_l4_cs_err": 0,
+      "m_length_error": 0,
+      "m_no_id": 0,
+      "m_no_ipv4_option": 0,
+      "m_no_magic": 0,
+      "m_pkt_ok": 450,
+      "m_rx_check": 0,
+      "m_seq_error": 0,
+      "m_tx_pkt_err": 0,
+      "m_tx_pkt_ok": 451,
+      "m_unsup_prot": 0,
+      "tx_arp": 0
+    }
+  },
+  "1": {
+    "hist": {
+      "cnt": 406,
+      "high_cnt": 406,
+      "histogram": [
+        {
+          "key": 800,
+          "val": 451
+        }
+      ],
+      "max_usec": 864,
+      "min_usec": 10,
+      "s_avg": 827.0,
+      "s_max": 830.176467
+    },
+    "stats": {
+      "ignore_bytes": 0,
+      "ipv6_n_solic": 0,
+      "m_jitter": 6,
+      "m_l3_cs_err": 0,
+      "m_l4_cs_err": 0,
+      "m_length_error": 0,
+      "m_no_id": 0,
+      "m_no_ipv4_option": 0,
+      "m_no_magic": 0,
+      "m_pkt_ok": 451,
+      "m_rx_check": 0,
+      "m_seq_error": 0,
+      "m_tx_pkt_err": 0,
+      "m_tx_pkt_ok": 450,
+      "m_unsup_prot": 0,
+      "tx_arp": 0
+    }
+  }
+}
