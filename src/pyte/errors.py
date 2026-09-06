@@ -67,6 +67,14 @@ class EnvError(_RcOrMsg, TeError):
     """
 
 
+class DpdkError(_RcOrMsg, TeError):
+    """Preparing an agent for DPDK failed (pyte.dpdk).
+
+    Message-only: a PCI lookup miss, an unreadable hugepage size, a
+    kernel that cannot do what the mode needs.
+    """
+
+
 class ExpandError(_RcOrMsg, TeError):
     """Template expansion failed.
 
