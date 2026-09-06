@@ -10,11 +10,16 @@ TAPI's tapi_job_set_workdir(dirname) behaviour.
 
 Two modes:
   * DPDK (default): ``interfaces`` are PCI addresses; optional ``port_info``
-    carries per-port (ip, default_gw).
+    carries per-port (ip, default_gw). MAC-form ``port_macs`` is also
+    legal here -- TRex's config format accepts it in either mode.
   * Software/af_packet (``software=True``): ``interfaces`` are Linux
     interface names and the launch gets ``--software``; ``port_macs``
     supplies the per-port (src_mac, dest_mac) af_packet needs (for a
     veth loopback, each port's dest_mac is the peer port's src_mac).
+
+``cfg_extra``, when set, is appended to the rendered YAML verbatim (for
+example a ``platform:``/``memory:`` block a native DPDK run needs); this
+class does not interpret it, only the caller does.
 """
 from __future__ import annotations
 
@@ -46,6 +51,20 @@ class ServerOpts:
     software: bool = False
     #: Per-port (src_mac, dest_mac) for software mode; same order as ports.
     port_macs: list[tuple[str, str]] | None = None
+    #: Run TRex in ASTF service mode (adds ``--astf``).
+    astf: bool = False
+    #: Disable TCP segmentation offload (adds ``--tso-disable``).
+    tso_disable: bool = False
+    #: Disable large receive offload (adds ``--lro-disable``).
+    lro_disable: bool = False
+    #: Text appended verbatim to the platform YAML, for the
+    #: ``platform:``/``memory:`` block a native DPDK run needs. The
+    #: caller renders it; this class does not interpret it.
+    cfg_extra: str | None = None
+    #: Literal NIC shared-object argv flags, e.g. ``("--mlx5-so",)``.
+    #: Passed as strings rather than as the batch driver's ``So`` enum
+    #: so this module stays free of TE-touching imports.
+    so: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.trex_exec:
@@ -56,6 +75,9 @@ class ServerOpts:
             raise ValueError("port_info length must match ports length")
         if self.port_macs is not None and len(self.port_macs) != len(self.ports):
             raise ValueError("port_macs length must match ports length")
+        if self.port_info is not None and self.port_macs is not None:
+            raise ValueError(
+                "port_info and port_macs are mutually exclusive")
         if self.software and self.port_macs is None:
             raise ValueError("software mode requires port_macs")
 
@@ -74,7 +96,7 @@ class ServerOpts:
         ]
         # MACs/IPs are quoted like the interfaces: an unquoted
         # colon-separated MAC is a sexagesimal INTEGER under YAML 1.1.
-        if self.software and self.port_macs is not None:
+        if self.port_macs is not None:
             out.append("  port_info:")
             for src_mac, dest_mac in self.port_macs:
                 out.append(f"    - src_mac: '{src_mac}'")
@@ -84,7 +106,10 @@ class ServerOpts:
             for ip, gw in self.port_info:
                 out.append(f"    - ip: '{ip}'")
                 out.append(f"      default_gw: '{gw}'")
-        return "\n".join(out) + "\n"
+        text = "\n".join(out) + "\n"
+        if self.cfg_extra:
+            text += self.cfg_extra
+        return text
 
     def shell_command(self, cfg_path: str) -> str:
         """Inner command for ``sh -c`` that runs TRex from its workdir.
@@ -94,6 +119,11 @@ class ServerOpts:
         install path must not split the command.
         """
         software = " --software" if self.software else ""
+        astf = " --astf" if self.astf else ""
+        tso = " --tso-disable" if self.tso_disable else ""
+        lro = " --lro-disable" if self.lro_disable else ""
+        so = "".join(f" {flag}" for flag in self.so)
         return (f"cd {shlex.quote(self.workdir)} && "
                 f"exec {shlex.quote(self.trex_exec)} "
-                f"-i --cfg {shlex.quote(cfg_path)} -c {self.cores}{software}")
+                f"-i --cfg {shlex.quote(cfg_path)} "
+                f"-c {self.cores}{software}{astf}{tso}{lro}{so}")

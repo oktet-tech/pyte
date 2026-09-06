@@ -98,6 +98,57 @@ def test_shell_command_quotes_paths():
     assert "'/tmp/dir with space/x.yaml'" in cmd
 
 
+def test_astf_launch_line_has_astf_and_offload_flags():
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                   ports=["0000:03:00.0", "0000:03:00.1"],
+                   astf=True, tso_disable=True, lro_disable=True)
+    cmd = o.shell_command("/tmp/x.yaml")
+    assert " --astf" in cmd
+    assert " --tso-disable" in cmd
+    assert " --lro-disable" in cmd
+
+
+def test_non_astf_launch_line_unchanged():
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64", ports=["eth1"],
+                   software=True, port_macs=[("00:11:22:33:44:55",
+                                              "00:11:22:33:44:66")])
+    cmd = o.shell_command("/tmp/x.yaml")
+    assert "--astf" not in cmd
+    assert "--tso-disable" not in cmd
+
+
+def test_so_flags_are_emitted_in_order():
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64", ports=["x"],
+                   so=("--mlx5-so",))
+    assert " --mlx5-so" in o.shell_command("/tmp/x.yaml")
+
+
+def test_mac_form_port_info_is_legal_in_dpdk_mode():
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                   ports=["0000:03:00.0"],
+                   port_macs=[("00:11:22:33:44:55",
+                               "00:11:22:33:44:66")])
+    yaml = o.cfg_yaml()
+    assert "src_mac: '00:11:22:33:44:55'" in yaml
+    assert "dest_mac: '00:11:22:33:44:66'" in yaml
+    assert "--software" not in o.shell_command("/tmp/x.yaml")
+
+
+def test_cfg_extra_is_appended_verbatim():
+    extra = "\n  platform:\n      master_thread_id: 0\n"
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64", ports=["x"],
+                   cfg_extra=extra)
+    assert o.cfg_yaml().endswith(extra)
+
+
+def test_port_info_and_port_macs_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="port_info"):
+        ServerOpts(trex_exec="/usr/local/trex/t-rex-64", ports=["x"],
+                   port_info=[("10.0.0.1", "10.0.0.2")],
+                   port_macs=[("00:11:22:33:44:55",
+                               "00:11:22:33:44:66")])
+
+
 def test_cfg_yaml_macs_parse_as_strings():
     """Unquoted colon-separated MACs are sexagesimal integers under
     YAML 1.1 -- the rendered YAML must quote them."""
