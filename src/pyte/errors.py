@@ -75,6 +75,15 @@ class DpdkError(_RcOrMsg, TeError):
     """
 
 
+class NetError(_RcOrMsg, TeError):
+    """A pyte.net operation did not reach the expected state.
+
+    Message-only: the Configurator calls themselves succeeded, but
+    what they reported is not what the caller waited for (a link that
+    never came up, for instance).
+    """
+
+
 class ExpandError(_RcOrMsg, TeError):
     """Template expansion failed.
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -27,7 +28,7 @@ from pyte.cfg.gen.agent import Agent as _GenAgent
 from pyte.cfg.gen.interface import Interface as _GenInterface
 from pyte.cfg.gen.interface import Phy as _GenPhy
 from pyte.cfg.gen.sys import Sys as _GenSys
-from pyte.errors import CfgError, check
+from pyte.errors import CfgError, CfgNotFoundError, NetError, check
 from pyte._util import enc as _enc
 
 
@@ -63,6 +64,12 @@ def _sys_path(path: str) -> str:
 
 
 _MAC_RE = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+
+
+def _err_name(exc: CfgError) -> str:
+    """The te_errno error name behind a failed call ("EOPNOTSUPP")."""
+    ffi, lib = _shim()
+    return ffi.string(lib.te_rc_err2str(exc.rc)).decode()
 
 
 def _parse_mac(mac: str) -> bytes:
@@ -200,6 +207,79 @@ class AgentNet:
 
     def iface(self, name: str) -> Iface:
         return Iface(self.name, name)
+
+    # -- link state ----------------------------------------------------
+    def link_ready(self, ifname: str) -> bool:
+        """Operational and (when available) PHY link state are both up.
+
+        A zero ``oper_status:`` means not ready.  Otherwise the PHY
+        state decides, when the interface has one: ``phy:/state:``
+        equal to 1 (up) is ready.
+
+        An interface with no usable PHY state -- a bridge or a veth,
+        where the object does not exist, or a driver answering "not
+        supported" instead -- is judged by ``oper_status:`` alone.
+        Any other Configurator error propagates.
+        """
+        oid = f"/agent:{self.name}/interface:{ifname}"
+        oper_status = cfg.get(f"{oid}/oper_status:", sync=True)
+        if not oper_status:
+            return False
+        try:
+            # 1 is the "link up" PHY state.
+            phy_state = cfg.get(f"{oid}/phy:/state:", sync=True)
+        except CfgNotFoundError:
+            return True
+        except CfgError as e:
+            if _err_name(e) == "EOPNOTSUPP":
+                return True
+            raise
+        return phy_state == 1
+
+    def await_link_up(self, ifname: str, *, checks: int = 30,
+                      wait_s: float = 1.0, after_up_s: float = 1.0
+                      ) -> None:
+        """Poll ``ifname`` until its link is up, or raise.
+
+        Checks the link immediately, then sleeps ``wait_s`` before each
+        further attempt, giving up after ``checks`` extra rounds.
+        Whenever the link reads as up it is rechecked after an
+        ``after_up_s`` settle delay and only a second consecutive "up"
+        counts, so a link that flaps back down is not mistaken for a
+        stable one.  Pass ``after_up_s=0`` to skip the recheck.
+
+        :raises NetError: the link was still not up after the last
+            attempt.
+        """
+        i = 0
+        while True:
+            if i != 0:
+                time.sleep(wait_s)
+            ready = self.link_ready(ifname)
+            if ready and after_up_s:
+                time.sleep(after_up_s)
+                ready = self.link_ready(ifname)
+            if ready:
+                return
+            if i == checks:
+                raise NetError(f"{self.name}/{ifname}: timed out waiting "
+                               "for the link to come up")
+            i += 1
+
+    # -- CPUs ----------------------------------------------------------
+    def cpu_counts(self) -> tuple[int, int]:
+        """``(cores, threads)`` the agent reports for its host.
+
+        Counts the instances under
+        ``/agent:<ta>/hardware:/node:*/cpu:*/core:*`` and, one level
+        deeper, ``.../thread:*``, so both numbers span every NUMA node
+        and package.  Nothing is logged: what is worth a RING line is
+        the caller's decision.
+        """
+        base = f"/agent:{self.name}/hardware:/node:*/cpu:*/core:*"
+        cores = len(cfg.find(base))
+        threads = len(cfg.find(f"{base}/thread:*"))
+        return cores, threads
 
     # -- routes ----------------------------------------------------------
     def routes(self) -> list[Route]:
