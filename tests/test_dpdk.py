@@ -167,6 +167,13 @@ def test_hugepage_size_reads_meminfo_with_the_pinned_command():
         "| sed \"s/Hugepagesize://g\"'"]
 
 
+def test_hugepage_size_zero_or_negative_raises():
+    for out in ("       0 kB\n", "       -2048 kB\n"):
+        pco = FakePco(out=out)
+        with pytest.raises(DpdkError, match="nonsensical Hugepagesize"):
+            dpdk.hugepage_size_kb(pco)
+
+
 def test_hugepage_size_unparseable_raises():
     pco = FakePco(out="not a number kB")
     with pytest.raises(DpdkError, match="cannot parse Hugepagesize"):

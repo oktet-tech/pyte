@@ -125,7 +125,7 @@ def hugepage_size_kb(pco) -> int:
     so it must be confirmed rather than guessed.
 
     :param pco: an RPC server on the agent to ask.
-    :raises DpdkError: the size cannot be read as a kB value.
+    :raises DpdkError: the size cannot be read as a positive kB value.
     """
     out = pco.sh(_HUGEPAGE_SIZE_CMD)
     m = _HUGEPAGE_SIZE_RE.match(out)
@@ -134,7 +134,10 @@ def hugepage_size_kb(pco) -> int:
     if "kB" not in out[m.end():]:
         log.warn(f"The suffix 'kB' was not found in '{out}'")
         raise DpdkError(f"'kB' suffix missing in {out!r}")
-    return int(m.group(1))
+    size = int(m.group(1))
+    if size <= 0:
+        raise DpdkError(f"nonsensical Hugepagesize {size} kB in {out!r}")
+    return size
 
 
 def hugepages_set(pco, mem_mb: int, what: str | None = None) -> None:
@@ -199,14 +202,14 @@ def vfio_configure(ta: str) -> None:
         noiommu_oid = _VFIO_UNSAFE_NOIOMMU_OID_FMT.format(ta)
         try:
             param_val = cfg.get(noiommu_oid, sync=True)
-        except CfgNotFoundError:
+        except CfgNotFoundError as e:
             log.error(
                 f"iommu is disabled on {ta}, but the vfio module has no "
                 "enable_unsafe_noiommu_mode parameter (the kernel lacks "
                 "CONFIG_VFIO_NOIOMMU)")
             raise DpdkError(
                 f"{ta} has no enable_unsafe_noiommu_mode module "
-                "parameter") from None
+                "parameter") from e
 
         if param_val == "Y":
             log.ring("module parameter vfio/enable_unsafe_noiommu_mode "
