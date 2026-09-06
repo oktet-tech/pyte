@@ -89,8 +89,7 @@ class Client:
         log.step_push(f"start ASTF traffic: mult={mult} "
                       f"duration={duration} latency_pps={latency_pps}")
         self._call(_ops.start, mult, duration, nc, latency_pps)
-        log.ring(f"trex: ASTF traffic started (mult={mult} "
-                 f"duration={duration} latency_pps={latency_pps})")
+        log.ring("trex: ASTF traffic started")
         log.step_pop()
 
     def stop(self) -> None:
