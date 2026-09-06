@@ -67,6 +67,14 @@ class EnvError(_RcOrMsg, TeError):
     """
 
 
+class ExpandError(_RcOrMsg, TeError):
+    """Template expansion failed.
+
+    Message-only (rc 0): an unresolved reference or an unsupported
+    construct is found in the template text, not reported by TE.
+    """
+
+
 class ToolError(_RcOrMsg, TeError):
     """A pyte.tools wrapper failed: bad exit, unparseable output, ...
 
