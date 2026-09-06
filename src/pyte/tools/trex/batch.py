@@ -30,10 +30,10 @@ because they are NOT interchangeable:
 - :func:`create` mirrors nap-trex.c's ``proc->rpcs->silent_pass =
   true; tapi_trex_create(...); proc->rpcs->silent_pass = false;``
   idiom via :meth:`pyte.rpc.server.RpcServer.silent_pass`: the job and
-  its filters are created under that toggle, so the job_create/job_
-  attach_filter/job_filter_add_regexp RPC calls are not logged (tapi_job
-  bakes the RPC server's ambient silent_pass into each job/channel/
-  filter object at creation time).
+  its filters are created under that toggle, so the ``job_create`` /
+  ``job_attach_filter`` / ``job_filter_add_regexp`` RPC calls are not
+  logged (tapi_job bakes the RPC server's ambient silent_pass into
+  each job/channel/filter object at creation time).
 - :meth:`Trex.report` mirrors ``trex_result_extract()``'s
   ``tapi_job_set_tracing(FALSE)`` / ``(TRUE)`` bracket around
   ``tapi_trex_get_report()`` (nap-trex-stats.c:614-694) via

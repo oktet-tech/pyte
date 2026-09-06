@@ -39,7 +39,7 @@ extensions = [
 ]
 
 autosummary_generate = True
-autodoc_mock_imports = ["pyte._shim"]
+autodoc_mock_imports = ["pyte._shim", "pytest"]
 autodoc_default_options = {"members": True, "undoc-members": True}
 
 myst_enable_extensions = ["colon_fence", "deflist"]
