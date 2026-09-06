@@ -35,6 +35,7 @@ class FakeLib:
     PYTE_MI_MEAS_TIME       = 15
     # TRex meas types (mirror PYTE_MI_MEAS_* numeric values in shim)
     PYTE_MI_MEAS_CPS             = 6
+    PYTE_MI_MEAS_PPS             = 1
     PYTE_MI_MEAS_EPE             = 11
     PYTE_MI_MEAS_UNITLESS_VALUE  = 0
 
@@ -249,19 +250,21 @@ def test_perf_meas_types_resolve(monkeypatch):
 
 
 def test_meas_has_trex_types():
-    """Meas.CPS / EPE / UNITLESS map to their PYTE_MI_MEAS_* shim names."""
+    """Meas.CPS / PPS / EPE / UNITLESS map to PYTE_MI_MEAS_* names."""
     assert Meas.CPS.value == "PYTE_MI_MEAS_CPS"
+    assert Meas.PPS.value == "PYTE_MI_MEAS_PPS"
     assert Meas.EPE.value == "PYTE_MI_MEAS_EPE"
     assert Meas.UNITLESS.value == "PYTE_MI_MEAS_UNITLESS_VALUE"
 
 
 def test_trex_meas_types_resolve(monkeypatch):
-    """Meas.CPS / EPE / UNITLESS map to their shim int constants."""
+    """Meas.CPS / PPS / EPE / UNITLESS map to their shim int constants."""
     lib = FakeLib()
     _fake_shim(monkeypatch, lib)
 
     cases = [
         (Meas.CPS,      Aggr.SINGLE, lib.PYTE_MI_MEAS_CPS),
+        (Meas.PPS,      Aggr.MEAN,   lib.PYTE_MI_MEAS_PPS),
         (Meas.EPE,      Aggr.SINGLE, lib.PYTE_MI_MEAS_EPE),
         (Meas.UNITLESS, Aggr.SINGLE, lib.PYTE_MI_MEAS_UNITLESS_VALUE),
     ]
