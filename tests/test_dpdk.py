@@ -3,9 +3,9 @@
 """pyte.dpdk: agent preparation logic, no testbed.
 
 Everything here runs against a monkeypatched pyte.cfg (dpdk.cfg is the
-same module object the knob engine uses), a stub RPC server exposing
-just .ta/.sh(), and the shared fake shim so pyte.log records instead of
-emitting. vfio_configure()'s Module use is faked out too: what is
+same module object the knob engine uses) and the shared fake shim, so
+pyte.log records instead of emitting. Nothing needs a stub RPC server:
+pyte.dpdk reaches the agent only through the configuration tree. vfio_configure()'s Module use is faked out too: what is
 under test is the decision table, not the knob engine.
 """
 import pytest
@@ -17,11 +17,12 @@ from pyte.testing import FakeShimLib
 
 
 class FakeNode:
-    """What cfg.find() yields: an OID plus the instance value."""
+    """What cfg.find() yields: an OID, the instance name and its value."""
 
     def __init__(self, oid, value):
         self.oid = oid
         self.value = value
+        self.name = oid.rpartition(":")[2]
 
 
 class FakeCfg:
@@ -49,21 +50,6 @@ class FakeCfg:
 
     def synchronize(self, oid, subtree=True):
         self.syncs.append(oid)
-
-
-class FakePco:
-    """The sliver of an RPC server pyte.dpdk uses."""
-
-    def __init__(self, ta="Agt_A", out=""):
-        self.ta = ta
-        self.out = out
-        self.cmds = []
-
-    def sh(self, cmd):
-        self.cmds.append(cmd)
-        if isinstance(self.out, Exception):
-            raise self.out
-        return self.out
 
 
 class FakeModule:
@@ -156,72 +142,81 @@ def test_restore_driver_rebinds_and_synchronizes(fake_cfg, fake_shim):
         f"Binding {_PCI_OID} back to i40e"]
 
 
-# -- hugepage_size_kb --------------------------------------------------
+# -- hugepage_sizes_kb -------------------------------------------------
 
-def test_hugepage_size_reads_meminfo_with_the_pinned_command():
-    pco = FakePco(out="       2048 kB\n")
-
-    assert dpdk.hugepage_size_kb(pco) == 2048
-    assert pco.cmds == [
-        "/bin/bash -o pipefail -c 'grep Hugepagesize /proc/meminfo "
-        "| sed \"s/Hugepagesize://g\"'"]
+_HP = "/agent:Agt_A/mem:/hugepages:*"
 
 
-def test_hugepage_size_zero_or_negative_raises():
-    for out in ("       0 kB\n", "       -2048 kB\n"):
-        pco = FakePco(out=out)
-        with pytest.raises(DpdkError, match="nonsensical Hugepagesize"):
-            dpdk.hugepage_size_kb(pco)
+def _sizes(*sizes):
+    """A cfg.find() answer listing the given hugepage sizes."""
+    return {_HP: [FakeNode(f"/agent:Agt_A/mem:/hugepages:{s}", str(s))
+                  for s in sizes]}
 
 
-def test_hugepage_size_unparseable_raises():
-    pco = FakePco(out="not a number kB")
-    with pytest.raises(DpdkError, match="cannot parse Hugepagesize"):
-        dpdk.hugepage_size_kb(pco)
+def test_hugepage_sizes_are_listed_from_the_agent_smallest_first(fake_cfg):
+    """The sizes come straight from the configuration tree: the agent
+    enumerates what the kernel supports, so nothing runs on the host."""
+    fake_cfg(FakeCfg(found=_sizes(1048576, 2048)))
+
+    assert dpdk.hugepage_sizes_kb("Agt_A") == [2048, 1048576]
 
 
-def test_hugepage_size_without_kb_suffix_warns_and_raises(fake_shim):
-    """The unit is assumed by the arithmetic, so it must be confirmed."""
-    pco = FakePco(out=" 2048 MB")
+def test_hugepage_sizes_none_reported_raises(fake_cfg):
+    fake_cfg(FakeCfg(found={}))
 
-    with pytest.raises(DpdkError, match="'kB' suffix missing"):
-        dpdk.hugepage_size_kb(pco)
-
-    assert fake_shim.texts(FakeShimLib.TE_LL_WARN) == [
-        "The suffix 'kB' was not found in ' 2048 MB'"]
+    with pytest.raises(DpdkError, match="no supported hugepage sizes"):
+        dpdk.hugepage_sizes_kb("Agt_A")
 
 
 # -- hugepages_set -----------------------------------------------------
 
 def test_hugepages_set_divides_the_request_by_the_page_size(fake_cfg,
                                                             fake_shim):
-    cfg = fake_cfg(FakeCfg())
-    pco = FakePco(out=" 2048 kB")
+    cfg = fake_cfg(FakeCfg(found=_sizes(2048)))
 
-    dpdk.hugepages_set(pco, 4096)
+    dpdk.hugepages_set("Agt_A", 4096)
 
-    assert cfg.sets == [("/agent:Agt_A/sys:/vm:/nr_hugepages:", 2048)]
+    assert cfg.sets == [("/agent:Agt_A/mem:/hugepages:2048", 2048)]
     assert fake_shim.texts(FakeShimLib.TE_LL_RING) == [
         "Using 2048 nr_hugepages with size 2048 kB (total 4096 MB)"]
 
 
 def test_hugepages_set_names_the_consumer_when_given(fake_cfg, fake_shim):
-    fake_cfg(FakeCfg())
+    fake_cfg(FakeCfg(found=_sizes(2048)))
 
-    dpdk.hugepages_set(FakePco(out=" 2048 kB"), 4096, what="TRex")
+    dpdk.hugepages_set("Agt_A", 4096, what="TRex")
 
     assert fake_shim.texts(FakeShimLib.TE_LL_RING) == [
         "Using 2048 nr_hugepages with size 2048 kB for TRex "
         "(total 4096 MB)"]
 
 
-def test_hugepages_set_with_huge_pages_rounds_down(fake_cfg, fake_shim):
-    cfg = fake_cfg(FakeCfg())
+def test_hugepages_set_defaults_to_the_smallest_size(fake_cfg):
+    """Bigger pages usually have to be reserved at boot, so the size
+    the kernel can still allocate at run time is the safe default."""
+    cfg = fake_cfg(FakeCfg(found=_sizes(2048, 1048576)))
 
-    # 1 GiB pages: 4096 MB is 4 of them; a remainder is dropped.
-    dpdk.hugepages_set(FakePco(out=" 1048576 kB"), 5000)
+    dpdk.hugepages_set("Agt_A", 4096)
 
-    assert cfg.sets == [("/agent:Agt_A/sys:/vm:/nr_hugepages:", 4)]
+    assert cfg.sets == [("/agent:Agt_A/mem:/hugepages:2048", 2048)]
+
+
+def test_hugepages_set_with_huge_pages_rounds_down(fake_cfg):
+    cfg = fake_cfg(FakeCfg(found=_sizes(2048, 1048576)))
+
+    # 1 GiB pages: 5000 MB is 4 of them and a remainder that is dropped.
+    dpdk.hugepages_set("Agt_A", 5000, size_kb=1048576)
+
+    assert cfg.sets == [("/agent:Agt_A/mem:/hugepages:1048576", 4)]
+
+
+def test_hugepages_set_rejects_an_unsupported_size(fake_cfg):
+    cfg = fake_cfg(FakeCfg(found=_sizes(2048)))
+
+    with pytest.raises(DpdkError, match="does not support 1048576 kB"):
+        dpdk.hugepages_set("Agt_A", 4096, size_kb=1048576)
+
+    assert cfg.sets == []
 
 
 # -- vfio_configure ----------------------------------------------------

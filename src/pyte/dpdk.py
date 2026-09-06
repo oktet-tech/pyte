@@ -9,19 +9,19 @@ on the machine it runs on, independent of the tool itself:
   identity while it still has a netdev, and rebinding it to its
   original kernel driver afterwards (:func:`pci_info`,
   :func:`restore_driver`);
-* hugepages (:func:`hugepage_size_kb`, :func:`hugepages_set`);
+* hugepages (:func:`hugepage_sizes_kb`, :func:`hugepages_set`);
 * the vfio kernel modules, IOMMU-enabled or not
   (:func:`vfio_configure`).
 
-Everything here is a plain Configurator value change or an instance
-the suite prologue created, so nothing needs explicit undoing: the
-configuration backup restores it after the test.  The one exception is
-a driver bind, which :func:`restore_driver` reverses.
+Everything here goes through the Configurator: nothing shells out
+to the agent, and everything is a plain value change or an instance
+the suite's configuration created, so nothing needs explicit undoing
+-- the configuration backup restores it after the test.  The one
+exception is a driver bind, which :func:`restore_driver` reverses.
 """
 from __future__ import annotations
 
 import dataclasses
-import re
 
 from pyte import cfg, log
 from pyte.cfg.gen.module import Module
@@ -107,59 +107,63 @@ def restore_driver(info: PciInfo | None) -> None:
 # Hugepages
 # ---------------------------------------------------------------------
 
-#: Pipefail'd shell pipeline reading the hugepage size out of
-#: /proc/meminfo.  A plain Configurator read would be better, but no
-#: /proc/meminfo-backed CM node exists yet.
-_HUGEPAGE_SIZE_CMD = (
-    "/bin/bash -o pipefail -c 'grep Hugepagesize /proc/meminfo "
-    "| sed \"s/Hugepagesize://g\"'")
+def hugepage_sizes_kb(ta: str) -> list[int]:
+    """The hugepage sizes ``ta`` supports, in kB, smallest first.
 
-_HUGEPAGE_SIZE_RE = re.compile(r"\s*(-?\d+)")
+    The agent enumerates these from the kernel at startup, one
+    ``/agent:<ta>/mem:/hugepages:<size>`` instance per size, so no
+    command has to be run on the agent to find them out.
 
-
-def hugepage_size_kb(pco) -> int:
-    """Read the agent's hugepage size in kB.
-
-    Both a value that does not parse as a number and a missing "kB"
-    suffix are errors: the unit is assumed by the caller's arithmetic,
-    so it must be confirmed rather than guessed.
-
-    :param pco: an RPC server on the agent to ask.
-    :raises DpdkError: the size cannot be read as a positive kB value.
+    :raises DpdkError: the agent reports no hugepage sizes at all.
     """
-    out = pco.sh(_HUGEPAGE_SIZE_CMD)
-    m = _HUGEPAGE_SIZE_RE.match(out)
-    if not m:
-        raise DpdkError(f"cannot parse Hugepagesize from {out!r}")
-    if "kB" not in out[m.end():]:
-        log.warn(f"The suffix 'kB' was not found in '{out}'")
-        raise DpdkError(f"'kB' suffix missing in {out!r}")
-    size = int(m.group(1))
-    if size <= 0:
-        raise DpdkError(f"nonsensical Hugepagesize {size} kB in {out!r}")
-    return size
+    sizes = sorted(int(node.name)
+                   for node in cfg.find(f"/agent:{ta}/mem:/hugepages:*"))
+    if not sizes:
+        raise DpdkError(f"{ta} reports no supported hugepage sizes")
+    return sizes
 
 
-def hugepages_set(pco, mem_mb: int, what: str | None = None) -> None:
-    """Reserve ``mem_mb`` MiB of hugepage memory on ``pco``'s agent.
+def hugepages_set(ta: str, mem_mb: int, size_kb: int | None = None,
+                  what: str | None = None) -> None:
+    """Reserve ``mem_mb`` MiB of hugepage memory on ``ta``.
 
-    nr_hugepages is ``mem_mb`` expressed in kB divided by the agent's
-    hugepage size, written to ``/agent:<ta>/sys:/vm:/nr_hugepages:``.
-    Nothing needs to undo this: it is a plain value change, restored
-    from the configuration backup after the test.
+    The page count is ``mem_mb`` expressed in kB divided by the page
+    size, written to ``/agent:<ta>/mem:/hugepages:<size>``.  The agent
+    allocates the pages and verifies the kernel actually provided them,
+    failing with ENOSPC (and restoring the previous count) when it
+    could not -- unlike a bare write to /proc/sys/vm/nr_hugepages,
+    which reports nothing.  Nothing needs to undo the change: it is a
+    plain value change, restored from the configuration backup after
+    the test.
 
-    :param pco: an RPC server on the agent, used for the size read.
+    The node is a Configurator resource, so it must be grabbed
+    (``/agent:<ta>/rsrc:``) before this is called; grab it from the
+    suite's configuration file rather than at run time, so that the
+    value is part of every backup the Tester takes.
+
+    :param ta: the test agent to reserve memory on.
     :param mem_mb: hugepage memory to reserve, in MiB.
+    :param size_kb: page size to use; defaults to the smallest size the
+        agent supports, which is the one the kernel can still allocate
+        at run time (bigger pages, 1G especially, usually have to be
+        reserved on the kernel command line at boot).
     :param what: what the memory is for, named in the log line only.
+    :raises DpdkError: *size_kb* is not a size this agent supports.
     """
-    size_kb = hugepage_size_kb(pco)
+    sizes = hugepage_sizes_kb(ta)
+    if size_kb is None:
+        size_kb = sizes[0]
+    elif size_kb not in sizes:
+        raise DpdkError(
+            f"{ta} does not support {size_kb} kB hugepages (it has: "
+            + ", ".join(str(s) for s in sizes) + ")")
 
     nr_hugepages = (mem_mb * 1024) // size_kb
     use = f" for {what}" if what else ""
     log.ring(f"Using {nr_hugepages} nr_hugepages with size {size_kb} "
              f"kB{use} (total {mem_mb} MB)")
 
-    cfg.set(f"/agent:{pco.ta}/sys:/vm:/nr_hugepages:", nr_hugepages)
+    cfg.set(f"/agent:{ta}/mem:/hugepages:{size_kb}", nr_hugepages)
 
 
 # ---------------------------------------------------------------------
