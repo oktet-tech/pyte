@@ -109,9 +109,35 @@ def test_parse_latency_from_fixture_reads_port_entry():
     assert lat.avg > 0.0
     assert lat.min >= 0.0
     assert lat.max >= lat.min
-    assert isinstance(lat.dropped, int)
-    assert isinstance(lat.percentiles, dict)
-    assert lat.percentiles
+    assert isinstance(lat.seq_errors, int)
+    assert isinstance(lat.pkt_ok, int)
+    assert isinstance(lat.histogram, dict)
+    assert lat.histogram
+    assert all(isinstance(k, int) and isinstance(v, int)
+               for k, v in lat.histogram.items())
+
+
+def test_percentile_lands_in_the_bucket_the_cumulative_count_crosses():
+    lat = st.AstfLatency(port=0, avg=0.0, min=0.0, max=0.0, jitter=0.0,
+                          seq_errors=0, pkt_ok=100,
+                          histogram={0: 10, 100: 20, 200: 30, 300: 40})
+    assert lat.percentile(50) == 200.0
+    assert lat.percentile(95) == 300.0
+
+
+def test_percentile_of_empty_histogram_is_zero():
+    lat = st.AstfLatency(port=0, avg=0.0, min=0.0, max=0.0, jitter=0.0,
+                          seq_errors=0, pkt_ok=0, histogram={})
+    assert lat.percentile(50) == 0.0
+
+
+def test_percentile_out_of_range_raises():
+    lat = st.AstfLatency(port=0, avg=0.0, min=0.0, max=0.0, jitter=0.0,
+                          seq_errors=0, pkt_ok=1, histogram={0: 1})
+    with pytest.raises(ValueError):
+        lat.percentile(-1)
+    with pytest.raises(ValueError):
+        lat.percentile(101)
 
 
 def test_parse_tg_stats_builds_a_sorted_template_list():

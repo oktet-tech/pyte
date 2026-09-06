@@ -120,16 +120,48 @@ class AstfTraffic:
 
 @dataclass(frozen=True)
 class AstfLatency:
-    """One port's latency measurement, microseconds."""
+    """One port's latency measurement, microseconds.
+
+    seq_errors is TRex's one rx-check counter for sequence anomalies
+    on this stream: it fires for both a lost packet and a reordered
+    one, so a non-zero value means "something anomalous happened",
+    not "N packets were dropped" -- this layer does not let the
+    suite tell the two apart. pkt_ok is the matching count of
+    latency packets received in sequence.
+    """
 
     port: int
     avg: float
     min: float
     max: float
     jitter: float
-    dropped: int
-    out_of_order: int
-    percentiles: dict[str, float]
+    seq_errors: int
+    pkt_ok: int
+    #: TRex's raw bucketed latency histogram: bucket lower bound in
+    #: microseconds mapped to the count of samples in that bucket.
+    #: Not percentile ranks -- this build does not report those at
+    #: this call. Use percentile() to approximate one from here.
+    histogram: dict[int, int]
+
+    def percentile(self, p: float) -> float:
+        """Approximate the p-th percentile from the bucket histogram.
+
+        Resolution is limited by TRex's bucket widths, so treat the
+        result as the bucket the percentile falls in rather than an
+        exact figure. Returns 0.0 for an empty histogram.
+        """
+        if not 0.0 <= p <= 100.0:
+            raise ValueError(f"percentile out of range 0..100: {p}")
+        total = sum(self.histogram.values())
+        if total == 0:
+            return 0.0
+        target = p / 100.0 * total
+        cumulative = 0
+        for bucket in sorted(self.histogram):
+            cumulative += self.histogram[bucket]
+            if cumulative >= target:
+                return float(bucket)
+        return float(max(self.histogram))
 
 
 @dataclass(frozen=True)
@@ -219,14 +251,14 @@ def parse_latency(raw: dict, port: int) -> AstfLatency:
     directly by the port number (as a string), each entry holding
     'hist' and 'stats' sub-dictionaries; there is no 'latency' or
     'err_cntrs' wrapper. 'hist' carries the running latency figures
-    (microseconds) and the raw bucketed histogram ('key' = latency
-    bucket in usec, 'val' = count in that bucket -- not percentile
-    ranks, which this TRex build does not report at this call). 'stats'
-    carries the per-flow rx-check counters; 'm_seq_error' is the one
-    sequence-anomaly counter TRex exposes here, used below for
-    'dropped'. TRex does not separately report reordering at this
-    layer, so 'out_of_order' is always 0 pending a fixture that shows
-    otherwise.
+    (microseconds) and the raw bucketed histogram ('key' = bucket
+    lower bound in usec, 'val' = count in that bucket); this build
+    does not report percentile ranks at this call, so 'histogram'
+    keeps the raw buckets and AstfLatency.percentile() approximates a
+    percentile from them. 'stats' carries the per-flow rx-check
+    counters: 'm_seq_error' and 'm_pkt_ok' are the two read below (see
+    AstfLatency's docstring for what 'seq_errors' does and does not
+    distinguish).
     """
     entry = raw[str(port)]
     hist = entry.get("hist", {})
@@ -238,10 +270,10 @@ def parse_latency(raw: dict, port: int) -> AstfLatency:
         min=float(hist.get("min_usec", 0.0)),
         max=float(hist.get("max_usec", 0.0)),
         jitter=float(stats.get("m_jitter", 0.0)),
-        dropped=int(stats.get("m_seq_error", 0)),
-        out_of_order=0,
-        percentiles={str(bucket["key"]): float(bucket["val"])
-                     for bucket in histogram})
+        seq_errors=int(stats.get("m_seq_error", 0)),
+        pkt_ok=int(stats.get("m_pkt_ok", 0)),
+        histogram={int(bucket["key"]): int(bucket["val"])
+                   for bucket in histogram})
 
 
 def parse_tg_stats(raw: dict) -> list[TemplateStats]:
