@@ -18,7 +18,10 @@ copied through unexpanded.  References nested inside a default value
 are out of scope too -- a default is taken literally, so
 ``${A:-${B}}`` expands to the seven characters ``${B}`` (or, when B is
 also referenced elsewhere, whatever the single pass over the template
-produced there).
+produced there).  A default value cannot contain ``}`` at all: the
+reference ends at the first closing brace, so in ``${A:-{"k":1}}``
+the default is the six characters ``{"k":1`` and the final ``}``
+stays a literal part of the surrounding text.
 
 Strictness contract: by default an unresolved bare reference is an
 error, so a missing substitution surfaces at expansion time instead of

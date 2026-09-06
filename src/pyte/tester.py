@@ -48,9 +48,8 @@ def try_add_trc_tag(name: str, value: str | None = None) -> bool:
     """:func:`add_trc_tag` made non-fatal; True when it was accepted.
 
     Tag collection describes the rig, it does not test it: a tag TE
-    refuses (or one whose value could not be read) must never fail the
-    prologue and take the whole run with it.  The failure is logged
-    and that single tag is skipped.
+    refuses must never fail the prologue and take the whole run with
+    it.  The failure is logged and that single tag is skipped.
     """
     try:
         add_trc_tag(name, value)
