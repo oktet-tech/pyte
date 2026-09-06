@@ -12,6 +12,11 @@ stdout filter tables, report/series math and the create/start/wait/
 stop/kill/report/close job lifecycle) -- lives in
 :mod:`pyte.tools.trex.batch`; see its module docstring for a runnable
 example.
+
+Interactive ASTF support lives in :mod:`pyte.tools.trex.astf`; it
+drives the same native client that :mod:`pyte.tools.trex.batch` runs
+one-shot, but as a service, so a run can be watched and steered while
+it happens.
 """
 from pyte.tools.trex._config import ServerOpts
 from pyte.tools.trex._stream import (PktBuilder, Stream, TXCont,
@@ -23,5 +28,6 @@ __all__ = ["ServerOpts", "PktBuilder", "Stream", "TXCont", "TXSingleBurst",
 
 from pyte.tools.trex import stl  # noqa: E402,F401  (submodule re-export)
 from pyte.tools.trex import batch  # noqa: E402,F401  (submodule re-export)
+from pyte.tools.trex import astf  # noqa: E402,F401  (submodule re-export)
 
-__all__ += ["stl", "batch"]
+__all__ += ["stl", "batch", "astf"]
