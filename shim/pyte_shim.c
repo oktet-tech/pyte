@@ -125,16 +125,18 @@ pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on)
      * (tapi_job.c:tapi_job_create_named, tapi_job_attach_filter). Every
      * later call that uses that object -- job_receive*, job_filter_
      * add_regexp on an existing filter, job_poll/send/clear..., AND
-     * ALSO rpc_job_start/wait/stop/kill/destroy (rpc_job.c:118,171,212,
-     * each doing "rpcs->silent_pass = tapi_job_get_silent_pass(job)"
-     * around its own call) -- re-asserts the object's own baked-in
-     * silent_pass into rpcs->silent_pass for the duration of its own
-     * RPC, overwriting whatever the caller set here.  So toggling THIS
-     * function around any of those later calls is a no-op: every one
-     * of them, lifecycle calls included, logs according to whatever
-     * tapi_job_set_tracing() last set on the job, not the ambient
-     * silent_pass.  Set it only around job/filter creation, which is
-     * the one place it actually determines that baked-in value. */
+     * ALSO every rpc_job_* entry point (creation, channel allocation,
+     * start/wait/stop/kill/destroy, wrapper operations, exec params at
+     * rpc_job.c:171,740,784,637,812 and others), each doing
+     * "rpcs->silent_pass = tapi_job_get_silent_pass(job)" around its own
+     * call -- re-asserts the object's own baked-in silent_pass into
+     * rpcs->silent_pass for the duration of its own RPC, overwriting
+     * whatever the caller set here.  So toggling THIS function around
+     * any of those later calls is a no-op: every one of them, lifecycle
+     * calls included, logs according to whatever tapi_job_set_tracing()
+     * last set on the job, not the ambient silent_pass.  Set it only
+     * around job/filter creation, which is the one place it actually
+     * determines that baked-in value. */
     rpcs->silent_pass = on ? true : false;
 }
 

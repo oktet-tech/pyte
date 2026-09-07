@@ -185,8 +185,8 @@ class RpcServer:
         silenced for free. That baked-in silence is NOT limited to
         creation, though: ``job.start()``/``wait()``/``stop()``/
         ``kill()``/``destroy()`` (``rpc_job_{start,wait,stop,kill,
-        destroy}``, ``te/lib/tapi_job/rpc_job.c:118,171,212``) each
-        reassert ``rpcs->silent_pass = tapi_job_get_silent_pass(job)``
+        destroy}``, ``te/lib/tapi_job/rpc_job.c:171,740,784,637,812``)
+        each reassert ``rpcs->silent_pass = tapi_job_get_silent_pass(job)``
         around their own call, so a job born silent under this window
         stays silent for every later RPC made on it, lifecycle calls
         included, until something re-enables tracing on it.

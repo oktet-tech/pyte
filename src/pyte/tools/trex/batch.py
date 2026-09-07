@@ -32,10 +32,10 @@ are created under that toggle, so the ``job_create`` /
 logged (tapi_job bakes the RPC server's ambient silent_pass into each
 job/channel/filter object at creation time). That baked-in silence is
 NOT limited to creation: ``rpc_job_start``/``wait``/``stop``/``kill``/
-``destroy`` (``te/lib/tapi_job/rpc_job.c:118,171,212``) each reassert
-``rpcs->silent_pass = tapi_job_get_silent_pass(job)`` around their own
-call, and every :meth:`Filter.drain` on a filter created under it
-inherits the same field -- so a job born silent under this window
+``destroy`` (``te/lib/tapi_job/rpc_job.c:171,740,784,637,812``) each
+reassert ``rpcs->silent_pass = tapi_job_get_silent_pass(job)`` around
+their own call, and every :meth:`Filter.drain` on a filter created under
+it inherits the same field -- so a job born silent under this window
 stays silent for EVERY later RPC made on it, lifecycle calls included,
 not just the ones that created it, until something calls
 ``tapi_job_set_tracing(TRUE)`` on it again. :meth:`Trex.report` does
@@ -568,12 +568,12 @@ class Trex:
         this runs (nothing between creation and here flips
         ``silent_pass`` back), so the drain itself needs no
         ``tapi_job_set_tracing(FALSE)`` half of the bracket
-        ``trex_result_extract()`` uses (nap-trex-stats.c:831-978).
+        ``trex_result_extract()`` uses (nap-trex-stats.c:831-979).
 
         It DOES need that bracket's closing half:
         ``rpc_job_start``/``wait``/``stop``/``kill``/``destroy``
-        (``te/lib/tapi_job/rpc_job.c:118,171,212``) all reassert the
-        job's own baked-in ``silent_pass``, so a job born silent under
+        (``te/lib/tapi_job/rpc_job.c:171,740,784,637,812``) all reassert
+        the job's own baked-in ``silent_pass``, so a job born silent under
         :func:`create` stays silent for its ENTIRE remaining lifetime
         -- including :meth:`Trex.stop`/:meth:`kill`/:meth:`close`'s
         ``destroy()`` -- unless something re-enables tracing.
