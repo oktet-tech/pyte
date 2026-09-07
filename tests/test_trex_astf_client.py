@@ -172,7 +172,7 @@ def test_log_summary_logs_the_server_side_counters_too(fake_shim):
             "client": {"tcps_connattempt": 30, "tcps_connects": 30,
                        "tcps_closed": 30},
             "server": {"tcps_accepts": 28, "tcps_closed": 27,
-                       "tcps_drops": 2},
+                       "tcps_drops": 2, "udps_accepts": 5},
         },
         "get_latency_stats": {},
         "get_tg_names": [],
@@ -182,3 +182,8 @@ def test_log_summary_logs_the_server_side_counters_too(fake_shim):
     rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
     assert "server side: accepted 28" in rings
     assert "drops 2" in rings
+    # UDP is udps_accepts on the server, not
+    # udps_connects: that name is client-side only, and
+    # reading it here reported a flat zero on a live run
+    # whose server had accepted 62 UDP flows.
+    assert "udp accepted 5" in rings

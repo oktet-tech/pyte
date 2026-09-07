@@ -225,18 +225,19 @@ class Client:
         # AstfTraffic's connection properties and the drop percentage
         # the tests key on all read. The server's own view is logged
         # beside it rather than folded in: the two count different
-        # events (a server accepts where a client attempts) so they
-        # cannot be summed, but a device that drops connections the
-        # client never notices shows up as a difference here and
-        # nowhere else.
+        # events (a server accepts where a client attempts, and it
+        # counts UDP under udps_accepts where the client counts
+        # udps_connects) so they cannot be summed, but a device that
+        # drops connections the client never notices shows up as a
+        # difference here and nowhere else.
         srv = traffic.server
         log.ring("server side: accepted "
                  f"{int(srv.get('tcps_accepts', 0))}, connects "
                  f"{int(srv.get('tcps_connects', 0))}, closed "
                  f"{int(srv.get('tcps_closed', 0))}, drops "
                  f"{int(srv.get('tcps_drops', 0))}, conndrops "
-                 f"{int(srv.get('tcps_conndrops', 0))}, udp connects "
-                 f"{int(srv.get('udps_connects', 0))}, udp closed "
+                 f"{int(srv.get('tcps_conndrops', 0))}, udp accepted "
+                 f"{int(srv.get('udps_accepts', 0))}, udp closed "
                  f"{int(srv.get('udps_closed', 0))}")
         for port, lat in sorted(self.get_latency().items()):
             log.ring(f"latency port {port}: avg {lat.avg:.1f}us, "
