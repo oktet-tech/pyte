@@ -7,6 +7,8 @@ import re
 import sys
 import types
 
+import pytest
+
 from pyte.tools.trex import _astf_ops as ops
 
 
@@ -135,6 +137,76 @@ def test_bootstrap_cgi_shim_survives_non_import_error(monkeypatch):
     cli = ops.bootstrap("/nonexistent/interactive", "127.0.0.1",
                         4501, 4500, 1)
     assert isinstance(cli, _FakeASTFClient)
+
+    # The shim that blew up must say so. A guard that stops a broken
+    # shim from killing bring-up also stops it leaving any trace,
+    # which is what cost a live debugging session; the note is the
+    # trace.
+    notes = ops.shim_report(cli)["notes"]
+    assert any("cgi" in n and "FAILED" in n for n in notes), notes
+
+
+def _fake_astf_api(monkeypatch):
+    """Stand a fake trex.astf.api up so bootstrap can run offline."""
+    class _FakeASTFClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def set_verbose(self, level):
+            pass
+
+        def connect(self):
+            pass
+
+    api_mod = types.ModuleType("trex.astf.api")
+    api_mod.ASTFClient = _FakeASTFClient
+    monkeypatch.setitem(sys.modules, "trex", types.ModuleType("trex"))
+    monkeypatch.setitem(sys.modules, "trex.astf",
+                        types.ModuleType("trex.astf"))
+    monkeypatch.setitem(sys.modules, "trex.astf.api", api_mod)
+    return _FakeASTFClient
+
+
+def test_bootstrap_reports_every_shim_it_considered(monkeypatch):
+    """Skipped is as informative as fired, so both are recorded."""
+    _fake_astf_api(monkeypatch)
+
+    cli = ops.bootstrap("/nonexistent/interactive", "127.0.0.1",
+                        4501, 4500, 1)
+    notes = ops.shim_report(cli)["notes"]
+
+    joined = "\n".join(notes)
+    for subject in ("imp:", "cgi:", "sys.path:", "trex:",
+                    "scapy six:"):
+        assert subject in joined, (subject, notes)
+
+
+def test_shim_report_is_empty_for_a_client_from_elsewhere():
+    # Not "no shim was needed": that case has notes of its own.
+    class _Foreign:
+        pass
+
+    assert ops.shim_report(_Foreign()) == {"notes": []}
+
+
+def test_a_failed_client_import_names_the_shims_that_ran(monkeypatch):
+    # The failure the report exists for. The six.moves entries the
+    # scapy shim registers are what this import needs, and TRex purges
+    # them from sys.modules under conditions the traceback never
+    # mentions, so the message has to carry the shim history itself.
+    monkeypatch.setitem(sys.modules, "trex", types.ModuleType("trex"))
+    monkeypatch.setitem(sys.modules, "trex.astf",
+                        types.ModuleType("trex.astf"))
+    broken = types.ModuleType("trex.astf.api")
+    monkeypatch.setitem(sys.modules, "trex.astf.api", broken)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        ops.bootstrap("/nonexistent/interactive", "127.0.0.1",
+                      4501, 4500, 1)
+
+    text = str(excinfo.value)
+    assert "shims:" in text
+    assert "imp:" in text and "cgi:" in text
 
 
 def test_reset_calls_through():

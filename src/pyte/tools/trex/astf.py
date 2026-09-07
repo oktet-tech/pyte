@@ -294,6 +294,18 @@ def session(pco: "RpcServer", opts: ServerOpts,
                         f"TRex ASTF server did not come up on "
                         f"{pco.ta}: {exc}") from exc
                 log.ring("trex: ASTF client connected")
+                # Which compatibility shims fired and which were not
+                # needed. Each of them is independently guarded so an
+                # unnecessary one cannot break bring-up, which also
+                # means a broken one leaves no trace unless it says so
+                # -- and a live bring-up has already been debugged the
+                # hard way for want of exactly these lines.
+                try:
+                    report = rem.call(_ops.shim_report, cli)
+                    for note in report.get("notes", ()):
+                        log.ring(f"trex shim: {note}")
+                except Exception:       # noqa: BLE001 diagnostics only
+                    log.ring("trex: no compatibility-shim report")
                 client = Client(rem, cli, ports)
                 # A freshly connected client owns nothing: every
                 # command that changes state, load_profile included,

@@ -71,9 +71,23 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
     Each shim is independently guarded: one that turns out to be
     unnecessary (older Python, or a newer TRex that no longer needs
     it) must not break bring-up.
+
+    Every one of them therefore also records what it did into a list
+    of notes -- installed, not needed, or failed with the exception --
+    because a guard that keeps a broken shim from killing bring-up
+    also keeps it from leaving any trace. That silence cost a live
+    debugging session once: the client import died on ``six.moves``
+    with nothing to say which shims had run. The notes reach the
+    engine two ways. They ride back on the returned client as
+    ``_pyte_shim_notes``, which the session reads with the shim_report
+    op below and logs; and they are spelled out in the message of
+    every failure raised from here, since a bring-up that never
+    returns a client is exactly the case that needs them.
     """
     import sys
     import time
+
+    notes = []
 
     try:
         import importlib
@@ -82,13 +96,17 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
             _imp_shim = types.ModuleType("imp")
             _imp_shim.reload = importlib.reload
             sys.modules["imp"] = _imp_shim
-    except Exception:
-        pass
+            notes.append("imp: shim installed (reload only)")
+        else:
+            notes.append("imp: already in sys.modules, no shim")
+    except Exception as exc:
+        notes.append("imp: shim FAILED (%r)" % (exc,))
 
     try:
         try:
             import cgi
             del cgi
+            notes.append("cgi: stdlib module present, no shim")
         except ImportError:
             import html
             import types
@@ -108,22 +126,38 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
 
             _cgi_shim.parse_header = _parse_header
             sys.modules["cgi"] = _cgi_shim
-    except Exception:
-        pass
+            notes.append("cgi: shim installed (escape, parse_header)")
+    except Exception as exc:
+        notes.append("cgi: shim FAILED (%r)" % (exc,))
 
     if trex_lib_dir not in sys.path:
         sys.path.insert(0, trex_lib_dir)
+        notes.append("sys.path: prepended %s" % (trex_lib_dir,))
+    else:
+        notes.append("sys.path: %s already on it" % (trex_lib_dir,))
 
     import trex        # noqa: F401  sets up its bundled external_libs
+    notes.append("trex: imported from %s"
+                 % (getattr(trex, "__file__", "unknown"),))
 
     try:
         import scapy.modules.six as _six
         sys.modules["scapy.modules.six.moves"] = _six.moves
         sys.modules["scapy.modules.six.moves.queue"] = _six.moves.queue
-    except Exception:
-        pass
+        notes.append("scapy six: moves and moves.queue registered")
+    except Exception as exc:
+        notes.append("scapy six: shim FAILED (%r)" % (exc,))
 
-    from trex.astf.api import ASTFClient
+    try:
+        from trex.astf.api import ASTFClient
+    except Exception as exc:
+        # The failure the notes exist for: the six.moves entries the
+        # previous shim registered are the ones this import needs, and
+        # TRex purges them from sys.modules under conditions no
+        # traceback here mentions.
+        raise RuntimeError(
+            "could not import the bundled TRex ASTF client from %s: "
+            "%r -- shims: %s" % (trex_lib_dir, exc, "; ".join(notes)))
     c = ASTFClient(server=server, sync_port=sync_port,
                    async_port=async_port)
     c.set_verbose("none")
@@ -132,14 +166,35 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
     while True:
         try:
             c.connect()
-            return c
+            break
         except Exception as exc:      # server not up yet / transient
             last = exc
             if time.time() >= deadline:
                 raise RuntimeError(
                     "could not connect to the TRex ASTF server "
-                    "within %ss: %r" % (timeout, last))
+                    "within %ss: %r -- shims: %s"
+                    % (timeout, last, "; ".join(notes)))
             time.sleep(0.5)
+    # Attached rather than returned beside the client: this op's return
+    # value is the live object itself, which crosses back as a
+    # RemoteObject, so anything else has to travel on it.
+    try:
+        c._pyte_shim_notes = notes
+    except Exception:
+        pass
+    return c
+
+
+def shim_report(cli):
+    """The compatibility-shim notes left on a bootstrapped client.
+
+    The bring-up op attaches them to the live client, which crosses
+    back to the engine as a RemoteObject whose attributes stay on the
+    agent, so reading them is a call of its own. An empty list means
+    the client was not brought up by this module -- never that no shim
+    was needed, which is itself one of the notes.
+    """
+    return {"notes": list(getattr(cli, "_pyte_shim_notes", []))}
 
 
 def reset(cli):
