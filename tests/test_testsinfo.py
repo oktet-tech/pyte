@@ -92,11 +92,11 @@ def test_a_one_line_entry_stays_one_line():
     assert entries == [("duration", "How long to run, in seconds.")]
 
 
-def test_a_multi_line_entry_keeps_its_lines():
-    """Continuation lines keep their indent relative to the entry.
+def test_a_wrapped_sentence_is_filled_to_one_line():
+    """The docstring's own wrap is a source-formatting artifact.
 
-    Which is what makes a bullet list a bullet list; a wrapped
-    sentence pays for it with a four-space hanging indent.
+    Nothing downstream wants this repository's column rule: the log
+    viewer wraps the description at its own width.
     """
     doc = _doc("""
         Objective.
@@ -108,11 +108,11 @@ def test_a_multi_line_entry_keeps_its_lines():
     entries, _ = docstring.parameters(doc)
     assert entries == [(
         "duration",
-        "How long to run, in seconds. The `NAPTS_DURATION`\n"
-        "    environment variable overrides it.")]
+        "How long to run, in seconds. The `NAPTS_DURATION` "
+        "environment variable overrides it.")]
 
 
-def test_a_bullet_value_list_keeps_its_relative_indent():
+def test_a_bullet_value_list_is_one_line_per_bullet():
     doc = _doc("""
         Objective.
 
@@ -127,9 +127,149 @@ def test_a_bullet_value_list_keeps_its_relative_indent():
     assert entries == [(
         "fw_mode",
         "Which device under test is in the path:\n"
-        "    - `bridge`: raw forwarding at L2, no DUT application\n"
-        "    - `route`: raw forwarding at L3, no DUT application\n"
-        "    - `blackbox`: preconfigured appliance")]
+        "- `bridge`: raw forwarding at L2, no DUT application\n"
+        "- `route`: raw forwarding at L3, no DUT application\n"
+        "- `blackbox`: preconfigured appliance")]
+
+
+def test_a_wrapped_bullet_joins_into_its_own_line():
+    doc = _doc("""
+        Objective.
+
+        Parameters:
+            profile: Which vendored ASTF profile to run:
+                - `http_max_cps`: small responses, one transaction per
+                  connection, so the run is bounded by connection rate
+                - `udp_imix`: UDP, bounded by packet rate
+    """)
+    entries, _ = docstring.parameters(doc)
+    assert entries == [(
+        "profile",
+        "Which vendored ASTF profile to run:\n"
+        "- `http_max_cps`: small responses, one transaction per "
+        "connection, so the run is bounded by connection rate\n"
+        "- `udp_imix`: UDP, bounded by packet rate")]
+
+
+def test_a_negative_number_does_not_open_a_list_item():
+    """A marker needs whitespace after it; "-1" is a value."""
+    doc = _doc("""
+        Objective.
+
+        Parameters:
+            flow_size: Transactions per connection, for the profiles
+                that declare it.
+                -1 leaves the profile's own default.
+    """)
+    entries, _ = docstring.parameters(doc)
+    assert entries == [(
+        "flow_size",
+        "Transactions per connection, for the profiles that declare "
+        "it. -1 leaves the profile's own default.")]
+
+
+def test_a_blank_line_stays_a_paragraph_break():
+    doc = _doc("""
+        Objective.
+
+        Parameters:
+            duration: How long to run, in
+                seconds.
+
+                It must leave a usable steady-state
+                window.
+    """)
+    entries, _ = docstring.parameters(doc)
+    assert entries == [(
+        "duration",
+        "How long to run, in seconds.\n"
+        "\n"
+        "It must leave a usable steady-state window.")]
+
+
+def test_a_nested_list_keeps_its_relative_nesting():
+    doc = _doc("""
+        Objective.
+
+        Parameters:
+            fw_mode: Which device under test is in the path:
+                - `bridge`: raw forwarding at L2
+                    - only on a two-link rig
+                - `route`: raw forwarding at L3
+    """)
+    entries, _ = docstring.parameters(doc)
+    assert entries == [(
+        "fw_mode",
+        "Which device under test is in the path:\n"
+        "- `bridge`: raw forwarding at L2\n"
+        "    - only on a two-link rig\n"
+        "- `route`: raw forwarding at L3")]
+
+
+#: Five entries copied verbatim out of nap-ts's
+#: ts/trex_int/throughput.py, the richest real input the generator has.
+_REAL_ENTRIES = """
+    Objective.
+
+    Parameters:
+        profile: Which vendored ASTF profile to run:
+            - `http_max_cps`: small responses, one transaction per
+              connection, so the run is bounded by connection rate
+            - `tcp_http_16KB`: 16 Kbyte responses, keep-alive
+            - `tcp_http_64KB`: 64 Kbyte responses, keep-alive
+            - `udp_imix`: UDP, bounded by packet rate
+            - `emix_tg`: the enterprise mix built from TRex's own captures
+        rate_mult: TRex rate multiplier applied to the profile's own
+            rates:
+            - `auto`: search for the largest multiplier the path sustains
+            - a number: run at that multiplier and measure
+        delay: Server think time in seconds between transactions, for the
+            profiles that declare it. `-1` leaves the profile's own
+            default.
+        latency_pps: ICMP latency stream rate in packets per second. `0`
+            disables latency measurement. Beware that enabling the stream
+            raises the offered load by roughly eight times at the same
+            rate multiplier -- measured on the rig -- so a latency row and
+            its non-latency sibling are not two readings of the same
+            traffic and must not be compared as such.
+        traff_lost_max: Acceptable percentage of traffic loss. Applied
+            both to the forwarding path (transmitted versus received bits
+            over the steady-state window) and to TRex's own dropped
+            connections; either one exceeding it means the path did not
+            carry the rate.
+"""
+
+
+def _real(name):
+    entries, findings = docstring.parameters(_doc(_REAL_ENTRIES))
+    assert findings == []
+    return dict(entries)[name]
+
+
+def test_a_real_wrapped_sentence_is_one_line():
+    assert _real("delay") == (
+        "Server think time in seconds between transactions, for the "
+        "profiles that declare it. `-1` leaves the profile's own "
+        "default.")
+    assert _real("latency_pps").count("\n") == 0
+    assert _real("traff_lost_max").count("\n") == 0
+
+
+def test_a_real_lead_in_absorbs_its_wrap_above_the_bullets():
+    assert _real("rate_mult") == (
+        "TRex rate multiplier applied to the profile's own rates:\n"
+        "- `auto`: search for the largest multiplier the path sustains\n"
+        "- a number: run at that multiplier and measure")
+
+
+def test_a_real_five_value_list_is_six_lines():
+    lines = _real("profile").split("\n")
+    assert len(lines) == 6
+    assert lines[0] == "Which vendored ASTF profile to run:"
+    assert lines[1] == (
+        "- `http_max_cps`: small responses, one transaction per "
+        "connection, so the run is bounded by connection rate")
+    assert all(line.startswith("- ") for line in lines[1:])
 
 
 def test_a_column_zero_line_ends_the_section():
@@ -207,16 +347,57 @@ def test_if_adds_a_heading_and_a_level():
 
 def test_else_is_phrased_as_if_not():
     found, _ = _scenario("""
-        if rate_mult == "auto":
+        if enabled:
             t.step("Search")
         else:
             t.step("Run")
     """)
     assert found == [
-        (1, "If rate_mult == 'auto':"),
+        (1, "If enabled:"),
         (2, "Search"),
-        (1, "If not rate_mult == 'auto':"),
+        (1, "If not enabled:"),
         (2, "Run"),
+    ]
+
+
+def test_a_negated_operator_condition_is_parenthesised():
+    """"If not a and b:" reads as negating only a."""
+    found, _ = _scenario("""
+        if detect_performance and (tune_cps or tune_rpc):
+            t.step("Search")
+        else:
+            t.step("Run")
+        if rate_mult == "auto":
+            t.step("Auto")
+        else:
+            t.step("Fixed")
+    """)
+    assert found == [
+        (1, "If detect_performance and (tune_cps or tune_rpc):"),
+        (2, "Search"),
+        (1, "If not (detect_performance and (tune_cps or tune_rpc)):"),
+        (2, "Run"),
+        (1, "If rate_mult == 'auto':"),
+        (2, "Auto"),
+        (1, "If not (rate_mult == 'auto'):"),
+        (2, "Fixed"),
+    ]
+
+
+def test_a_negated_plain_condition_keeps_no_parentheses():
+    found, _ = _scenario("""
+        if dut_.ready:
+            t.step("Go")
+        else:
+            t.step("Wait")
+        if ts.two_testers():
+            t.step("Both")
+        else:
+            t.step("One")
+    """)
+    assert [text for _, text in found if text.startswith("If not")] == [
+        "If not dut_.ready:",
+        "If not ts.two_testers():",
     ]
 
 
@@ -642,10 +823,10 @@ _WHOLE_XML = '''<?xml version="1.0"?>
   <test name="throughput">
     <objective>Measure forwarding throughput</objective>
     <param name="env">Testing environment:
-    - `env-peer2peer-two_links`</param>
+- `env-peer2peer-two_links`</param>
     <param name="rate_mult">TRex rate multiplier:
-    - `auto`: search for the largest multiplier the path sustains
-    - a number: run at that multiplier and measure</param>
+- `auto`: search for the largest multiplier the path sustains
+- a number: run at that multiplier and measure</param>
     <param name="duration">How long to run, in seconds.</param>
     <scenario>
       <step depth="1">Bring the device under test into the requested \
@@ -653,7 +834,7 @@ mode.</step>
       <step depth="1">If rate_mult == 'auto':</step>
       <step depth="2">Search for the largest sustained rate \
 multiplier.</step>
-      <step depth="1">If not rate_mult == 'auto':</step>
+      <step depth="1">If not (rate_mult == 'auto'):</step>
       <step depth="2">Run at the requested rate multiplier.</step>
       <step depth="1">For each port in sorted(ports):</step>
       <step depth="2">Account for one port.</step>

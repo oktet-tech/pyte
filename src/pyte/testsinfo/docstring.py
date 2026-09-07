@@ -26,6 +26,11 @@ _HEADING = re.compile(r"(?:Parameters|Parameter|Args|Arguments):")
 #: first (or only) line of the description.
 _ENTRY = re.compile(r"(\w+):\s*(.*)")
 
+#: A list item opening a line.  Only these two markers count: a
+#: description is prose, and a line starting with a digit or a word is
+#: overwhelmingly a wrapped sentence, not an enumerated value.
+_MARKER = re.compile(r"[-*](?:\s|$)")
+
 
 def _is_heading(line: str) -> bool:
     """Whether a docstring line opens a parameter section."""
@@ -57,21 +62,54 @@ def objective(doc: str) -> str:
 
 
 def _describe(lines: list[str]) -> str:
-    """One entry's description text, dedented, blank edges trimmed.
+    """One entry's description, filled: logical lines, not source ones.
 
-    The line structure is kept: a value list written as bullets in the
-    docstring must reach the log as bullets, so the lines stay lines and
-    keep their indentation relative to the description's own first line.
+    A docstring wraps at whatever column the source file's style rule
+    says, here 72.  That wrap is a formatting artifact of this
+    repository and nothing downstream wants it: rgt carries the
+    description into the log and the viewer wraps it at its own width,
+    so shipping our column count would bake our source style into every
+    reader's display.  The C side does not do it either -- adjacent
+    string literals inside TEST_PARAM_DOC exist precisely so a long
+    logical line can be wrapped in source without becoming several
+    output lines.
+
+    So consecutive non-blank lines join with a single space.  What
+    survives as a line break is what the author meant as one: a blank
+    line stays a paragraph break, and a list item starts a line of its
+    own, absorbing its own wrapped continuations.
+
+    The block then loses its docstring indent.  List items keep their
+    indent relative to the shallowest item, so a list nested inside a
+    list still reads as nested; everything else is flush left.
     """
-    out = list(lines)
-    while out and not out[0].strip():
-        out.pop(0)
-    while out and not out[-1].strip():
-        out.pop()
-    if not out:
+    # [indent, is_item, parts, preceded by a blank line]
+    chunks: list[tuple[int, bool, list[str], bool]] = []
+    blank = False
+    for line in lines:
+        text = line.strip()
+        if not text:
+            # Only between chunks: leading and trailing blanks go.
+            blank = bool(chunks)
+            continue
+        indent = len(line) - len(line.lstrip())
+        item = _MARKER.match(text) is not None
+        if item or blank or not chunks:
+            chunks.append((indent, item, [text], blank))
+            blank = False
+        else:
+            chunks[-1][2].append(text)
+    if not chunks:
         return ""
-    cut = min(len(l) - len(l.lstrip()) for l in out if l.strip())
-    return "\n".join(l[cut:] if l.strip() else "" for l in out)
+    items = [indent for indent, item, _, _ in chunks if item]
+    cut = min(items) if items else 0
+    out: list[str] = []
+    for indent, item, parts, lead in chunks:
+        if lead:
+            out.append("")
+        pad = " " * max(0, indent - cut) if item else ""
+        out.append(pad + " ".join(parts))
+    return "\n".join(out)
 
 
 def parameters(doc: str) -> tuple[list[tuple[str, str]], list[str]]:

@@ -114,6 +114,22 @@ def _child_statements(node: ast.AST) -> Iterator[ast.stmt]:
                 yield from item.body
 
 
+def _negated(test: ast.expr) -> str:
+    """The ``else:`` branch heading for a condition.
+
+    The C side phrases it "If not <expr>:" whatever the expression is
+    (steptree.py's _LABELS), which on a compound condition is
+    ambiguous: "If not detect_performance and (tune_cps or tune_rpc):"
+    reads as negating only the first operand.  The wording stays, but a
+    condition that is an operator expression gets parentheses so it
+    cannot be misread.  A bare name, attribute or call needs none.
+    """
+    expr = ast.unparse(test)
+    if isinstance(test, (ast.BoolOp, ast.Compare)):
+        return f"If not ({expr}):"
+    return f"If not {expr}:"
+
+
 def _has_step(body: list[ast.stmt]) -> bool:
     """Whether a statement list declares a step anywhere below it.
 
@@ -195,8 +211,7 @@ class _Walker:
                 and inner.col_offset == node.col_offset):
             self._branch(inner, depth)
             return
-        self._construct(node.orelse, depth,
-                        f"If not {ast.unparse(node.test)}:")
+        self._construct(node.orelse, depth, _negated(node.test))
 
     def _leaf(self, node: ast.stmt, depth: int) -> None:
         """A statement that groups nothing: its scenario calls."""
