@@ -10,3 +10,9 @@ docs/_build/
 docs/api/generated/
 docs/showcase/
 docs/_snippets/
+.coverage
+.ruff_cache/
+.claude/
+.superpowers/
+# Local Bublik run-metadata sample; not a build input.
+meta_data.json
