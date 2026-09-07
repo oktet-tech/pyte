@@ -92,3 +92,64 @@ def test_log_summary_reports_non_zero_flow_table_errors(fake_shim):
     text = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING) +
                      fake_shim.texts(FakeShimLib.TE_LL_WARN))
     assert "err_cwf" in text
+
+
+class _FakeJob:
+    def __init__(self):
+        self.started = False
+        self.destroyed = False
+        self.stdout = self
+        self.stderr = self
+
+    def log(self, level=None):
+        pass
+
+    def start(self):
+        self.started = True
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class _FakePco:
+    ta = "TST1"
+
+    def __init__(self):
+        self.job_obj = _FakeJob()
+
+    def job(self, path, args):
+        return self.job_obj
+
+
+def test_session_acquires_the_ports_before_yielding(fake_shim,
+                                                    monkeypatch):
+    """A connected ASTF client owns no port yet.
+
+    TRex answers "must acquire the context for this operation" to
+    load_profile until the ports are taken, which is how the first
+    live bring-up failed. session() must therefore reset (force
+    acquire) before it hands the client over, not leave it to the
+    caller.
+    """
+    rem = FakeRemote(results={"write_cfg": "/tmp/c.yaml",
+                              "bootstrap": object()})
+    pco = _FakePco()
+
+    class _Ctx:
+        def __enter__(self):
+            return rem
+
+        def __exit__(self, *exc):
+            return False
+
+    import pyte.remote as remote_mod
+    monkeypatch.setattr(remote_mod, "python", lambda p: _Ctx())
+
+    opts = astf.ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                           ports=["0000:03:00.0", "0000:03:00.1"],
+                           astf=True)
+    with astf.session(pco, opts) as client:
+        seen = [name for name, _ in rem.calls]
+        assert "reset" in seen
+        assert seen.index("reset") > seen.index("bootstrap")
+        assert client is not None

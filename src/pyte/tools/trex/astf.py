@@ -225,9 +225,9 @@ def session(pco: "RpcServer", opts: ServerOpts,
     """Launch ``t-rex-64 -i --astf`` on pco's agent, yield a Client.
 
     Bring-up: open one pyte.remote session, write the cfg-YAML, launch
-    TRex as a tapi_job, then bootstrap the native ASTFClient over
-    loopback. Teardown disconnects the client, removes the temp files
-    and destroys the job on every exit path.
+    TRex as a tapi_job, bootstrap the native ASTFClient over loopback,
+    then acquire the ports. Teardown disconnects the client, removes
+    the temp files and destroys the job on every exit path.
     """
     from pyte import remote
     from pyte.tools.trex import _ops as _stl_ops
@@ -258,9 +258,19 @@ def session(pco: "RpcServer", opts: ServerOpts,
                         f"TRex ASTF server did not come up on "
                         f"{pco.ta}: {exc}") from exc
                 log.ring("trex: ASTF client connected")
+                client = Client(rem, cli, ports)
+                # A freshly connected client owns nothing: every
+                # command that changes state, load_profile included,
+                # answers "must acquire the context for this
+                # operation" until the ports are taken. reset() takes
+                # them by force and clears whatever an earlier client
+                # left loaded, so the session starts from a known
+                # state as well as an owned one. A failure here
+                # leaves ``popped`` false, so the outer teardown says
+                # bring-up failed and destroys the job.
+                client.reset()
                 log.step_pop(f"TRex ASTF ready on {pco.ta}")
                 popped = True
-                client = Client(rem, cli, ports)
                 try:
                     yield client
                 finally:
