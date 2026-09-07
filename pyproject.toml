@@ -18,7 +18,11 @@ pythonpath = ["src", "."]
 dev = ["pytest>=8", "PyYAML>=6"]
 
 [tool.pyte]
-# Minimum TE this pyte is ABI-compatible with: a git ref your TE checkout
-# must contain. Use a commit hash today; a tag works once TE publishes them.
-min_te_commit = "0c1dea9365e60a399895a249f894369d408c6c2b"
+# Minimum TE this pyte is ABI-compatible with: a git ref (tag or commit
+# hash) your TE checkout must contain. TE now publishes tags, so use a
+# tag here -- a bare commit hash is fragile across rebases (TE has
+# rebased its history repeatedly, and a hash with no branch or tag
+# pointing at it can be dropped and become unreachable, as happened to
+# the commit this used to name).
+min_te_commit = "v1.77.0"
 

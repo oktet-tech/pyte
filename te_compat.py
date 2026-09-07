@@ -21,6 +21,11 @@ def read_min_te_commit(pyproject_path):
 def check_te_compat(te_base, min_te_commit, *, env=None, run=subprocess.run):
     """Verify te_base's git HEAD contains min_te_commit.
 
+    min_te_commit may be any git ref that resolves to a commit -- a tag,
+    a branch name, or a commit hash (full or abbreviated); it is passed
+    straight to `git merge-base --is-ancestor`, which accepts any of
+    those.
+
     Returns None when the check passes or is intentionally skipped; raises
     RuntimeError when the TE checkout is provably too old. `env` and `run`
     are injectable for testing.
@@ -48,13 +53,16 @@ def check_te_compat(te_base, min_te_commit, *, env=None, run=subprocess.run):
         return
     if proc.returncode == 0:
         return
-    short = min_te_commit[:12]
+    # Only abbreviate min_te_commit when it looks like a full hash; a tag
+    # or short ref is already display-sized and slicing it would just be
+    # confusing.
+    ref = min_te_commit if len(min_te_commit) <= 12 else min_te_commit[:12]
     if proc.returncode == 1:
         raise RuntimeError(
-            f"pyte requires a TE that contains commit {short}, but the "
+            f"pyte requires a TE that contains ref {ref}, but the "
             f"checkout at {te_base} does not include it. Update TE, or set "
             "PYTE_SKIP_TE_CHECK=1 to override.")
     raise RuntimeError(
-        f"pyte could not verify TE compatibility: commit {short} is not "
-        f"present in {te_base} (TE too old, or a shallow clone). Set "
-        "PYTE_SKIP_TE_CHECK=1 to override.")
+        f"pyte could not verify TE compatibility: ref {ref} is not "
+        f"present in {te_base} (TE too old, unknown ref, or a shallow "
+        "clone). Set PYTE_SKIP_TE_CHECK=1 to override.")
