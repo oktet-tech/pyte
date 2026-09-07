@@ -11,10 +11,16 @@ a RemoteObject (bootstrap) and is passed back in as ``cli``.
 from __future__ import annotations
 
 
-def write_cfg(text):
-    """Write the TRex cfg-YAML to a temp file on the agent; return its path."""
+def write_cfg(text, dirpath=None):
+    """Write the TRex cfg-YAML to a temp file on the agent; return its path.
+
+    *dirpath* is the agent's own temp directory (/agent:<ta>/tmp_dir:),
+    read engine-side and passed in because an op cannot reach the
+    Configurator. None falls back to mkstemp's default, i.e. /tmp.
+    """
     import tempfile
-    fd, path = tempfile.mkstemp(prefix="pyte_trex_", suffix=".yaml")
+    fd, path = tempfile.mkstemp(prefix="pyte_trex_", suffix=".yaml",
+                                dir=dirpath)
     import os
     with os.fdopen(fd, "w") as f:
         f.write(text)

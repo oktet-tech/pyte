@@ -11,11 +11,17 @@ back as a RemoteObject (bootstrap) and is passed back in as ``cli``.
 from __future__ import annotations
 
 
-def write_profile(text, suffix):
-    """Write a profile source to a temp file on the agent; return path."""
+def write_profile(text, suffix, dirpath=None):
+    """Write a profile source to a temp file on the agent; return path.
+
+    *dirpath* is the agent's own temp directory (/agent:<ta>/tmp_dir:),
+    read engine-side and passed in because an op cannot reach the
+    Configurator. None falls back to mkstemp's default, i.e. /tmp.
+    """
     import os
     import tempfile
-    fd, path = tempfile.mkstemp(prefix="pyte_astf_", suffix=suffix)
+    fd, path = tempfile.mkstemp(prefix="pyte_astf_", suffix=suffix,
+                                dir=dirpath)
     with os.fdopen(fd, "w") as f:
         f.write(text)
     return path

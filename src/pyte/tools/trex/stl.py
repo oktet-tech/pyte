@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Iterator
 from pyte import log
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
-from pyte.tools.trex import _ops
+from pyte.tools.trex import _agent, _ops
 from pyte.tools.trex._config import ServerOpts
 from pyte.tools.trex._stats import (GlobalStats, LatencyStats, PortStats,
                                     parse_global_stats, parse_latency_stats,
@@ -213,7 +213,8 @@ def session(pco: "RpcServer", opts: ServerOpts,
             connect_timeout: float = CONNECT_TIMEOUT) -> Iterator[Client]:
     """Launch ``t-rex-64 -i`` on pco's agent and yield a connected Client.
 
-    Bring-up: open one pyte.remote session, write the cfg-YAML, launch TRex
+    Bring-up: open one pyte.remote session, write the cfg-YAML into the
+    agent's own temp directory (see :func:`_agent.tmp_dir`), launch TRex
     as a tapi_job (sh -c 'cd <dir> && exec ...'), then bootstrap the native
     STLClient over loopback. Teardown disconnects the client, destroys the
     job and removes the temp cfg on every exit path -- in that order, see
@@ -227,7 +228,8 @@ def session(pco: "RpcServer", opts: ServerOpts,
     primary = None
     try:
         with remote.python(pco) as rem:
-            cfg_path = rem.call(_ops.write_cfg, opts.cfg_yaml())
+            cfg_path = rem.call(_ops.write_cfg, opts.cfg_yaml(),
+                                _agent.tmp_dir(pco.ta))
             log.ring(f"trex cfg: {cfg_path}")
             try:
                 job = pco.job("/bin/sh", ["-c", opts.shell_command(cfg_path)])

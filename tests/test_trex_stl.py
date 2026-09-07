@@ -6,7 +6,7 @@ from scapy.all import IP, UDP, Ether
 
 from pyte.errors import TeError, TrexError
 from pyte.tools.trex import PktBuilder, Stream, TXCont
-from pyte.tools.trex import stl
+from pyte.tools.trex import _agent, stl
 
 
 def test_trexerror_message_path():
@@ -170,6 +170,8 @@ def test_session_removes_cfg_on_teardown(monkeypatch):
             return FakeJob()
 
     monkeypatch.setattr("pyte.remote.python", fake_python)
+    # No Configurator here: hand session() a directory directly.
+    monkeypatch.setattr(_agent, "tmp_dir", lambda ta: "/agent/tmp")
     # session() logs via the real shim; quiet it (no TE logger here)
     from pyte import log
     monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
@@ -179,6 +181,10 @@ def test_session_removes_cfg_on_teardown(monkeypatch):
     with stl.session(FakePco(), opts):
         pass
     assert ("remove_file", ("/tmp/pyte_trex_x.yaml",)) in calls
+    # The cfg is written into the agent's own tmp_dir, not /tmp: on a
+    # shared lab host /tmp belongs to nobody and nothing cleans it.
+    write = [args for name, args in calls if name == "write_cfg"][0]
+    assert write[1] == "/agent/tmp"
 
 
 def test_session_teardown_failure_does_not_mask_the_body_error(
@@ -223,6 +229,8 @@ def test_session_teardown_failure_does_not_mask_the_body_error(
             return FakeJob()
 
     monkeypatch.setattr("pyte.remote.python", fake_python)
+    # No Configurator here: hand session() a directory directly.
+    monkeypatch.setattr(_agent, "tmp_dir", lambda ta: "/agent/tmp")
     # session() logs via the real shim; quiet it (no TE logger here)
     from pyte import log
     monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
@@ -286,6 +294,8 @@ def test_session_destroys_trex_before_removing_its_cfg(monkeypatch):
             return FakeJob()
 
     monkeypatch.setattr("pyte.remote.python", fake_python)
+    # No Configurator here: hand session() a directory directly.
+    monkeypatch.setattr(_agent, "tmp_dir", lambda ta: "/agent/tmp")
     from pyte import log
     monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
     monkeypatch.setattr(log, "step_pop", lambda *a, **k: None)

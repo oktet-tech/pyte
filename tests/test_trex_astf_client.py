@@ -5,7 +5,7 @@ import pytest
 
 from pyte.errors import RemotePythonError, TrexError
 from pyte.testing import FakeShimLib
-from pyte.tools.trex import astf
+from pyte.tools.trex import _agent, astf
 
 
 class FakeRemote:
@@ -35,6 +35,26 @@ def test_load_profile_ships_the_text_then_loads_it():
                                                "load_profile"]
     assert rem.calls[1][1][1] == "/tmp/p.py"
     assert rem.calls[1][1][2] == {"flow_size": 10}
+
+
+def test_load_profile_writes_into_the_directory_it_was_given(fake_shim):
+    """write_profile() runs on the agent and cannot reach the
+    Configurator, so session() reads /agent:<ta>/tmp_dir: and hands the
+    value to the Client, which passes it to every profile write."""
+    rem = FakeRemote(results={"write_profile": "/agent/tmp/p.py"})
+    c = astf.Client(rem, cli=object(), ports=[0, 1],
+                    tmp_dir="/agent/tmp")
+    c.load_profile("print(1)\n", "emix")
+    assert rem.calls[0][1] == ("print(1)\n", ".py", "/agent/tmp")
+
+
+def test_load_profile_without_a_directory_keeps_the_mkstemp_default(
+        fake_shim):
+    """No usable tmp_dir on the agent is a fallback, not a failure."""
+    rem = FakeRemote(results={"write_profile": "/tmp/p.py"})
+    c = _client(rem)
+    c.load_profile("print(1)\n", "emix")
+    assert rem.calls[0][1][2] is None
 
 
 def test_load_profile_failure_names_the_profile_and_tunables():
@@ -136,6 +156,8 @@ def _fake_remote_python(monkeypatch, rem):
 
     import pyte.remote as remote_mod
     monkeypatch.setattr(remote_mod, "python", lambda p: _Ctx())
+    # No Configurator here: hand session() a directory directly.
+    monkeypatch.setattr(_agent, "tmp_dir", lambda ta: "/agent/tmp")
 
 
 def test_session_acquires_the_ports_before_yielding(fake_shim,
@@ -161,6 +183,11 @@ def test_session_acquires_the_ports_before_yielding(fake_shim,
         assert "reset" in seen
         assert seen.index("reset") > seen.index("bootstrap")
         assert client is not None
+        # Both temp files land in the agent's own directory: the cfg
+        # written here, and whatever the Client writes later.
+        assert rem.calls[0] == ("write_cfg", (opts.cfg_yaml(),
+                                              "/agent/tmp"))
+        assert client._tmp_dir == "/agent/tmp"
 
 
 def _astf_opts():

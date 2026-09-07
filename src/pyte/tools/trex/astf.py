@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Callable, Iterator
 from pyte import log
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
+from pyte.tools.trex import _agent
 from pyte.tools.trex import _astf_ops as _ops
 from pyte.tools.trex import _astf_stats as _stats
 from pyte.tools.trex._config import ServerOpts
@@ -83,10 +84,16 @@ def _rate(value: float, unit: str) -> str:
 class Client:
     """Engine-side handle to a connected, agent-local ASTF client."""
 
-    def __init__(self, rem, cli, ports: list[int]):
+    def __init__(self, rem, cli, ports: list[int],
+                 tmp_dir: str | None = None):
         self._rem = rem
         self._cli = cli
         self._ports = list(ports)
+        # Where load_profile() writes the profile source on the agent;
+        # None means mkstemp's default. session() reads the agent's
+        # published tmp_dir and passes it in -- the op that does the
+        # writing runs on the agent and cannot look it up itself.
+        self._tmp_dir = tmp_dir
         self._profile = None
         self._tg_names: list[str] | None = None
 
@@ -127,7 +134,8 @@ class Client:
         else:
             log.ring("no tunables, profile defaults apply")
         try:
-            path = self._rem.call(_ops.write_profile, text, ".py")
+            path = self._rem.call(_ops.write_profile, text, ".py",
+                                  self._tmp_dir)
         except RemotePythonError as exc:
             log.step_pop("profile could not be written")
             raise TrexError(
@@ -296,7 +304,9 @@ def session(pco: "RpcServer", opts: ServerOpts,
             ) -> Iterator[Client]:
     """Launch ``t-rex-64 -i --astf`` on pco's agent, yield a Client.
 
-    Bring-up: open one pyte.remote session, write the cfg-YAML, launch
+    Bring-up: open one pyte.remote session, write the cfg-YAML into the
+    agent's own temp directory (see :func:`_agent.tmp_dir`, which also
+    supplies the Client with somewhere to put a loaded profile), launch
     TRex as a tapi_job, bootstrap the native ASTFClient over loopback,
     then acquire the ports. Teardown disconnects the client, destroys
     the job and removes the temp files on every exit path -- in that
@@ -310,9 +320,13 @@ def session(pco: "RpcServer", opts: ServerOpts,
     job = None
     popped = False
     primary = None
+    # Read once, on the engine: both temp files land in the same place
+    # and a missing knob warns once rather than per profile load.
+    tmp_dir = _agent.tmp_dir(pco.ta)
     try:
         with remote.python(pco) as rem:
-            cfg_path = rem.call(_stl_ops.write_cfg, opts.cfg_yaml())
+            cfg_path = rem.call(_stl_ops.write_cfg, opts.cfg_yaml(),
+                                tmp_dir)
             log.ring(f"trex cfg: {cfg_path}")
             try:
                 job = pco.job("/bin/sh",
@@ -344,7 +358,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
                         log.ring(f"trex shim: {note}")
                 except Exception:       # noqa: BLE001 diagnostics only
                     log.ring("trex: no compatibility-shim report")
-                client = Client(rem, cli, ports)
+                client = Client(rem, cli, ports, tmp_dir=tmp_dir)
                 # A freshly connected client owns nothing: every
                 # command that changes state, load_profile included,
                 # answers "must acquire the context for this
