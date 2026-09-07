@@ -370,6 +370,12 @@ def borrowed_rsrc(name: str, owner_agent: str, borrower_agent: str,
             cleanup_all(
                 functools.partial(release_rsrc, borrower_agent, name),
                 primary=primary)
+    except BaseException as exc:
+        # A grab failure, or a release failure that escaped the inner
+        # cleanup_all, is the real cause for the outer restore.
+        if primary is None:
+            primary = exc
+        raise
     finally:
         cleanup_all(
             functools.partial(set, f"/agent:{owner_agent}/rsrc:{name}",

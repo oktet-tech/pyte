@@ -83,6 +83,40 @@ def test_borrowed_rsrc_failed_grab_restores_owner(calls, monkeypatch):
     assert calls == [_RELEASE_OWNER, _GRAB_BORROWER, _RESTORE_OWNER]
 
 
+def _flaky_restore_set(calls):
+    """cfg.set stand-in that fails only on the owner-restore write."""
+    def go(oid, value):
+        calls.append(("set", oid, value))
+        if oid == "/agent:Agt_A/rsrc:lo" and value:
+            raise RuntimeError("restore failed")
+    return go
+
+
+def test_borrowed_rsrc_failed_grab_and_failed_restore_keeps_grab_error(
+        calls, monkeypatch):
+    def boom_add(oid, value=None):
+        calls.append(("add", oid, value))
+        raise RuntimeError("GRAB FAILED")
+
+    monkeypatch.setattr(cfg, "add", boom_add)
+    monkeypatch.setattr(cfg, "set", _flaky_restore_set(calls))
+    with pytest.raises(RuntimeError, match="GRAB FAILED") as info:
+        with cfg.borrowed_rsrc("lo", "Agt_A", "Agt_B", "interface:lo"):
+            calls.append(("body",))  # pragma: no cover - never reached
+    assert info.value.cleanup_errors
+
+
+def test_borrowed_rsrc_body_raises_and_failed_restore_keeps_body_error(
+        calls, monkeypatch):
+    monkeypatch.setattr(cfg, "set", _flaky_restore_set(calls))
+    boom = RuntimeError("what the test actually failed on")
+    with pytest.raises(RuntimeError) as info:
+        with cfg.borrowed_rsrc("lo", "Agt_A", "Agt_B", "interface:lo"):
+            raise boom
+    assert info.value is boom
+    assert info.value.cleanup_errors
+
+
 # -- net.borrowed_iface -------------------------------------------------
 
 
