@@ -9,7 +9,7 @@ its handle explicitly via free() or in __del__.
 from __future__ import annotations
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import check
+from pyte.errors import ClosedResourceError, check
 from pyte._util import enc as _enc
 from pyte.tad.dsl import Layer, Stack, stack
 
@@ -147,7 +147,7 @@ class Receiver:
     def _finish(self, wait: bool) -> list[Packet]:
         ffi, lib = _shim()
         if self._done:
-            raise RuntimeError("receive operation already finished")
+            raise ClosedResourceError("receive operation already finished")
         out = ffi.new("pyte_pkts *")
         fn = lib.pyte_csap_recv_wait if wait else lib.pyte_csap_recv_stop
         rc = fn(_enc(self._csap.ta), self._csap._session,

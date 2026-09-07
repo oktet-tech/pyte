@@ -6,7 +6,7 @@ from __future__ import annotations
 import enum
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import RpcError, check
+from pyte.errors import ClosedResourceError, RpcError, check
 
 
 class Evt(enum.Flag):
@@ -158,7 +158,7 @@ class IoMux:
     def add(self, sock_or_fd, events: Evt) -> None:
         """Add *sock_or_fd* to the multiplexer watching *events*."""
         if self._h is None:
-            raise RuntimeError("IoMux is closed")
+            raise ClosedResourceError("IoMux is closed")
         lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
@@ -168,7 +168,7 @@ class IoMux:
     def mod(self, sock_or_fd, events: Evt) -> None:
         """Modify the watched *events* for *sock_or_fd*."""
         if self._h is None:
-            raise RuntimeError("IoMux is closed")
+            raise ClosedResourceError("IoMux is closed")
         lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         bits = _evt_bits(events)
@@ -178,7 +178,7 @@ class IoMux:
     def delete(self, sock_or_fd) -> None:
         """Remove *sock_or_fd* from the multiplexer."""
         if self._h is None:
-            raise RuntimeError("IoMux is closed")
+            raise ClosedResourceError("IoMux is closed")
         lib = _shim_lib()
         fd = self._fd(sock_or_fd)
         check(lib.pyte_iomux_del(self._h, fd),
@@ -198,7 +198,7 @@ class IoMux:
         time hitting a negative must not silently mean "forever".
         """
         if self._h is None:
-            raise RuntimeError("IoMux is closed")
+            raise ClosedResourceError("IoMux is closed")
         if timeout is not None and timeout < 0:
             raise ValueError(
                 f"timeout must not be negative, got {timeout!r} "

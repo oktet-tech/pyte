@@ -10,7 +10,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Iterator
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import check
+from pyte.errors import ClosedResourceError, check
 from pyte.errors import TimeoutError as TeTimeoutError
 from pyte._util import enc as _enc
 
@@ -125,7 +125,7 @@ class Channel:
         or dangling pointer would crash the test process in C.
         """
         if self._h is None:
-            raise RuntimeError(
+            raise ClosedResourceError(
                 f"channel {self.name} of job "
                 f"{self._job.program!r} is already destroyed")
         return self._h
@@ -167,7 +167,7 @@ class InputChannel:
     def _handle(self):
         """The live C handle; raises after the owning job is destroyed."""
         if self._h is None:
-            raise RuntimeError(
+            raise ClosedResourceError(
                 f"stdin of job {self._job.program!r} is already destroyed")
         return self._h
 
@@ -200,7 +200,7 @@ class Filter:
         TAPI frees it then).
         """
         if self._h is None:
-            raise RuntimeError(
+            raise ClosedResourceError(
                 f"filter {self.name!r} of job {self._job.program!r} is "
                 "already destroyed or fully detached")
         return self._h
@@ -495,7 +495,7 @@ class Job:
         handle would crash the test process in C instead of raising.
         """
         if self._h is None:
-            raise RuntimeError(
+            raise ClosedResourceError(
                 f"job {self.program!r} is already destroyed")
         return self._h
 

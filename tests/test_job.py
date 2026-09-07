@@ -710,3 +710,11 @@ def test_wait_accepts_none(monkeypatch):
 
     job.wait(timeout=None)
     assert ("job_wait", -1) in lib.calls
+
+
+def test_destroyed_job_guard_is_a_closed_resource_error():
+    from pyte.errors import ClosedResourceError
+    job = _fake_job()
+    job._h = None
+    with pytest.raises(ClosedResourceError, match="already destroyed"):
+        job._handle()

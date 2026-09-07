@@ -82,3 +82,23 @@ def test_dir_lists_errnos():
     listing = dir(errors)
     assert "ETIMEDOUT" in listing
     assert "ToolError" in listing
+
+
+def test_closed_resource_error_is_both_te_and_runtime():
+    exc = errors.ClosedResourceError("job 'ls' is already destroyed")
+    assert isinstance(exc, errors.TeError)
+    assert isinstance(exc, RuntimeError)
+    assert str(exc) == "job 'ls' is already destroyed"
+
+
+def test_closed_resource_error_needs_no_shim():
+    """TeError.__init__ calls the shim; a liveness guard must not."""
+    exc = errors.ClosedResourceError("x is closed")
+    assert (exc.rc, exc.module, exc.code) == (0, 0, 0)
+
+
+def test_trc_closed_error_satisfies_both_bases():
+    exc = errors.TrcClosedError("TRC database is closed")
+    assert isinstance(exc, errors.ClosedResourceError)
+    assert isinstance(exc, errors.TrcError)
+    assert isinstance(exc, RuntimeError)

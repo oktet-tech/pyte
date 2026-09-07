@@ -218,3 +218,13 @@ def test_wait_rejects_negative(monkeypatch):
     mux = IoMux.create(FakeServer(), Kind.EPOLL)
     with pytest.raises(ValueError, match="negative"):
         mux.wait(-1.0)
+
+
+def test_closed_iomux_guard_is_a_closed_resource_error(monkeypatch):
+    from pyte.errors import ClosedResourceError
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    mux = IoMux.create(FakeServer(), Kind.EPOLL)
+    mux.close()
+    with pytest.raises(ClosedResourceError, match="closed"):
+        mux.wait(0)

@@ -27,7 +27,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import TrcError, check
+from pyte.errors import TrcClosedError, TrcError, check
 
 # Public re-export so callers can do ``from pyte.trc import TrcError``.
 __all__ = [
@@ -127,7 +127,7 @@ class Entry:
     def _handle(self):
         """The borrowed C pointer; raises once the owning Db is closed."""
         if self._db._h is None:
-            raise TrcError("TRC database is closed")
+            raise TrcClosedError("TRC database is closed")
         return self._h
 
     @property
@@ -177,7 +177,7 @@ class Group:
     def _handle(self):
         """The borrowed C pointer; raises once the owning Db is closed."""
         if self._db._h is None:
-            raise TrcError("TRC database is closed")
+            raise TrcClosedError("TRC database is closed")
         return self._h
 
     def __eq__(self, other) -> bool:
@@ -256,7 +256,7 @@ class Iter:
     def _handle(self):
         """The borrowed C pointer; raises once the owning Db is closed."""
         if self._db._h is None:
-            raise TrcError("TRC database is closed")
+            raise TrcClosedError("TRC database is closed")
         return self._h
 
     @property
@@ -365,7 +365,7 @@ class Test:
     def _handle(self):
         """The borrowed C pointer; raises once the owning Db is closed."""
         if self._db._h is None:
-            raise TrcError("TRC database is closed")
+            raise TrcClosedError("TRC database is closed")
         return self._h
 
     @property
@@ -451,7 +451,7 @@ class Db:
     def _live(self):
         """The C handle; raises after close()."""
         if self._h is None:
-            raise TrcError("TRC database is closed")
+            raise TrcClosedError("TRC database is closed")
         return self._h
 
     @classmethod

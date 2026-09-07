@@ -208,6 +208,34 @@ class RemotePythonError(TeError):
         self.remote_traceback = remote_traceback
 
 
+class ClosedResourceError(TeError, RuntimeError):
+    """Operation on a resource that has already been closed.
+
+    One idiom for what used to be nine copy-pasted guards raising two
+    unrelated types.  Subclasses RuntimeError so the call sites that
+    raised it keep working, and TeError so ``except TeError`` covers a
+    closed-handle failure like any other pyte error.
+
+    Message-only: TeError.__init__ reaches the shim on every
+    construction, and a liveness guard must be raisable without one.
+    """
+
+    def __init__(self, msg: str):
+        Exception.__init__(self, msg)
+        self.rc = 0
+        self.module = 0
+        self.code = 0
+
+
+class TrcClosedError(ClosedResourceError, TrcError):
+    """A borrowed TRC view used after its Db was closed.
+
+    trc.py raised a plain TrcError here and trc-tool catches that, so
+    the unified error stays a TrcError as well as a
+    ClosedResourceError.
+    """
+
+
 class TimeoutError(TeError, builtins.TimeoutError):
     """TE_ETIMEDOUT from a TE call (job receive, csap recv, ...)."""
 
