@@ -17,8 +17,16 @@ from typing import Callable
 
 
 def _attach(exc: BaseException, failures: list[BaseException]) -> None:
-    """Record *failures* on *exc* without altering its message."""
-    exc.cleanup_errors = tuple(failures)
+    """Record *failures* on *exc* without altering its message.
+
+    Accumulates: a teardown can run more than one cleanup_all against
+    the same primary exception (cfg.borrowed_rsrc does, once for the
+    resource release and once for the owner restore), and assigning
+    here would silently drop the earlier failures from the tuple while
+    leaving them in the notes.
+    """
+    existing = getattr(exc, "cleanup_errors", ())
+    exc.cleanup_errors = existing + tuple(failures)
     for f in failures:
         exc.add_note(f"cleanup also failed: {f!r}")
 
@@ -30,7 +38,8 @@ def cleanup_all(*actions: Callable[[], object],
     With *primary* given (the exception being unwound) this returns
     normally -- the caller re-raises *primary* itself -- and teardown
     failures are attached to it as a ``cleanup_errors`` tuple and
-    exception notes.
+    exception notes. Failures accumulate across multiple calls to
+    cleanup_all on the same primary exception.
 
     With no *primary*, the first failure is raised carrying the rest
     the same way.

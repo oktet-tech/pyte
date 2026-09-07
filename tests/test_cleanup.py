@@ -66,3 +66,17 @@ def test_no_failures_leaves_the_primary_untouched():
 
 def test_no_failures_and_no_primary_is_a_no_op():
     cleanup_all(lambda: None, lambda: None)
+
+
+def test_repeated_calls_accumulate_onto_one_primary():
+    """A teardown may run several cleanup_all passes against the same
+    primary -- cfg.borrowed_rsrc does, one for the release and one for
+    the restore.  Assigning rather than accumulating dropped the
+    earlier failures from the tuple while leaving them in the notes."""
+    primary = RuntimeError("the real failure")
+    first, second = ValueError("release failed"), ValueError("restore failed")
+    cleanup_all(_raiser(first), primary=primary)
+    cleanup_all(_raiser(second), primary=primary)
+    assert primary.cleanup_errors == (first, second)
+    assert len(primary.__notes__) == 2
+    assert str(primary) == "the real failure"
