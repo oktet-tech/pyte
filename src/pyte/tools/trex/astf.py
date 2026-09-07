@@ -115,7 +115,7 @@ class Client:
                       f"duration={duration} latency_pps={latency_pps}")
         self._call(_ops.start, mult, duration, nc, latency_pps)
         log.ring("trex: ASTF traffic started")
-        log.step_pop()
+        log.step_pop("traffic started")
 
     def stop(self) -> None:
         log.step_push("stop ASTF traffic")
@@ -252,7 +252,7 @@ class Client:
             log.ring("flow table errors: none")
         for tmpl in self.get_template_stats():
             log.ring(f"template {tmpl.name}: {tmpl.counters}")
-        log.step_pop()
+        log.step_pop("summary logged")
 
 
 @contextmanager

@@ -81,14 +81,14 @@ class Client:
                 log.ring(f"stream {sp['name']!r}: {sp['summary']} "
                          f"({sp['len']} B)")
             self._call(_ops.add_streams, port, specs)
-            log.step_pop()
+            log.step_pop(f"{len(specs)} stream(s) on port {port}")
 
     def start(self, ports: list[int], mult: str = "1",
               duration: float = -1, force: bool = False) -> None:
         log.step_push(f"start: ports={ports} mult={mult} duration={duration}s")
         self._call(_ops.start, ports, mult, duration, force)
         log.ring("trex: traffic started")
-        log.step_pop()
+        log.step_pop("traffic started")
 
     def wait_on_traffic(self, timeout: float) -> None:
         """Block until traffic stops.  *timeout* is required and finite.
