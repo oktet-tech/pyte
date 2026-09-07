@@ -108,6 +108,30 @@ def test_serve_destroys_job_on_baseexception_during_start():
     assert "destroy" in job.events
 
 
+def test_start_failure_preserves_identity_when_destroy_also_fails():
+    """A destroy() failure while tearing down a failed start() must not
+    replace the real bring-up failure."""
+    boom = RuntimeError("start failed")
+    job = FakeJob()
+
+    def bad_start():
+        raise boom
+    job.start = bad_start
+
+    def bad_destroy(*a, **k):
+        job.events.append("destroy")
+        raise RuntimeError("destroy failed")
+    job.destroy = bad_destroy
+
+    pco = FakePco(job)
+    with pytest.raises(RuntimeError) as info:
+        with serve(pco, "iperf3", ["-s"], host="h", port=1, ready_delay=0):
+            pass
+    assert info.value is boom            # identity, not a message match
+    assert info.value.cleanup_errors     # destroy failure attached
+    assert "destroy" in job.events
+
+
 def test_readiness_delay_failure_destroys_the_server_job():
     """pco.sleep() is an RPC and can fail; the started job used to leak
     between the bring-up guard and the yield guard."""

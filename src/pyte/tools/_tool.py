@@ -138,8 +138,8 @@ def launch(pco, program: str, argv: list[str], *, setup=None):
     try:
         extras = None if setup is None else setup(job)
         job.start()
-    except BaseException:
-        job.destroy()
+    except BaseException as exc:
+        cleanup_all(job.destroy, primary=exc)
         raise
     return job, extras
 

@@ -53,8 +53,8 @@ def serve(pco: "RpcServer", program: str, argv: list[str], *,
         # failure here used to leak the already-started server job.
         if ready_delay:
             pco.sleep(ready_delay)
-    except BaseException:
-        job.destroy()
+    except BaseException as exc:
+        cleanup_all(job.destroy, primary=exc)
         raise
     primary = None
     try:

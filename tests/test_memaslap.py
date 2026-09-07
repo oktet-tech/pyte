@@ -104,3 +104,53 @@ def test_read_output_forwards_passed_timeout_not_hardcoded():
     h._read_output(2.5)
     assert tps_flt.calls == [2.5]
     assert net_flt.calls == [2.5]
+
+
+# -- run(): cfg-file cleanup must not mask a bring-up failure -----------
+
+_boom_start = RuntimeError("start failed")
+
+
+class _FakeJob:
+    def filter(self, **kw):
+        return _FakeFilter()
+
+    def start(self):
+        raise _boom_start
+
+    def destroy(self, *a, **k):
+        pass
+
+
+class _FakePco:
+    def __init__(self):
+        self.put = {}
+        self.unlinked = []
+
+    def file_put(self, path, data):
+        self.put[path] = data
+
+    def job(self, program, argv):
+        return _FakeJob()
+
+    def unlink(self, path):
+        self.unlinked.append(path)
+        raise RuntimeError("unlink failed")
+
+
+def test_run_preserves_bring_up_error_when_cfg_cleanup_also_fails():
+    """A pco.unlink() failure while cleaning up the temp cfg file after
+    a failed launch() must not replace the real bring-up failure."""
+    pco = _FakePco()
+    cfg_opts = memaslap.CfgOpts(key_len_min=16, key_len_max=16,
+                                value_len_min=1, value_len_max=1,
+                                set_share=0.5)
+    opts = memaslap.Opts(servers=(("h", 1),))
+
+    with pytest.raises(RuntimeError) as info:
+        with memaslap.run(pco, opts, cfg_opts):
+            pass  # pragma: no cover -- run() raises before yielding
+
+    assert info.value is _boom_start     # identity, not a message match
+    assert info.value.cleanup_errors     # unlink failure attached
+    assert len(pco.unlinked) == 1

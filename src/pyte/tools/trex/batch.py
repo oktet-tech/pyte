@@ -701,8 +701,9 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         # channel happens to be allocated).
         with pco.silent_pass():
             job = pco.job("/bin/sh", ["-c", _shell_cmd(opts.trex_exec, argv)])
-    except BaseException:
-        _remove_tmp_files(pco, yaml_path, astf_path)
+    except BaseException as exc:
+        cleanup_all(lambda: _remove_tmp_files(pco, yaml_path, astf_path),
+                    primary=exc)
         raise
 
     trex = Trex(pco, job, argv, yaml_path, astf_path)

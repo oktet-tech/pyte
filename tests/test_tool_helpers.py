@@ -367,6 +367,27 @@ def test_launch_destroys_on_start_failure():
     assert job.events == [("destroy",)]
 
 
+def test_launch_preserves_body_error_when_destroy_also_fails():
+    """A destroy() failure during launch() teardown must not replace
+    the real bring-up failure (start() here)."""
+    boom = RuntimeError("bring-up failed")
+
+    class NoStartFlakyDestroy(FakeJob):
+        def start(self):
+            raise boom
+
+        def destroy(self, *a, **k):
+            self.events.append(("destroy",))
+            raise RuntimeError("destroy failed")
+
+    job = NoStartFlakyDestroy()
+    with pytest.raises(RuntimeError) as info:
+        _tool.launch(FakePco(job), "t", [])
+    assert info.value is boom            # identity, not a message match
+    assert info.value.cleanup_errors     # destroy failure attached
+    assert job.events == [("destroy",)]
+
+
 def test_running_closes_on_exit_and_exception():
     class H:
         closed = 0

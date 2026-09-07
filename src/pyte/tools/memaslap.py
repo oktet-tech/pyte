@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from pyte._cleanup import cleanup_all
 from pyte.errors import MemaslapError
 from pyte.tools import _tool
 
@@ -246,9 +247,9 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
         cmd = " ".join([opts.memaslap_path, *argv])
         job, (tps_flt, net_flt) = _tool.launch(
             pco, opts.memaslap_path, argv, setup=_setup)
-    except BaseException:
+    except BaseException as exc:
         if cfg_fn is not None:
-            pco.unlink(cfg_fn)
+            cleanup_all(lambda: pco.unlink(cfg_fn), primary=exc)
         raise
     with _tool.running(Memaslap(job, tps_flt, net_flt, cmd,
                                 pco, cfg_fn)) as m:

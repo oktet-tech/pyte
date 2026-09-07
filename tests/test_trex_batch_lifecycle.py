@@ -349,6 +349,32 @@ def test_create_restores_silent_pass_and_cleans_up_tmp_files_on_error():
     assert set(pco.unlinked) == set(pco.files_put.keys())
 
 
+def test_create_preserves_bring_up_error_when_tmp_cleanup_also_fails():
+    """A _remove_tmp_files() failure while unwinding a job-creation
+    failure must not replace the real bring-up error."""
+    boom = RuntimeError("job_create failed")
+    pco = _FakePco()
+    pco._job_exc = boom
+
+    def bad_unlink(path):
+        pco.unlinked.append(path)
+        raise RuntimeError("unlink failed")
+    pco.unlink = bad_unlink
+
+    opts = _batch_opts()
+
+    with pytest.raises(RuntimeError) as info:
+        with batch.create(pco, opts):
+            pass  # pragma: no cover -- create() raises before yielding
+
+    assert info.value is boom            # identity, not a message match
+    assert info.value.cleanup_errors     # unlink failure(s) attached
+    # _remove_tmp_files() stops at the first non-ENOENT unlink failure
+    # (it only tolerates RpcError/ENOENT); the point here is only that
+    # the propagated failure did not replace `boom`.
+    assert pco.unlinked
+
+
 def test_create_iom_normal_attaches_port_and_global_filters():
     pco = _FakePco()
     opts = _batch_opts(iom=batch.Iom.NORMAL)
