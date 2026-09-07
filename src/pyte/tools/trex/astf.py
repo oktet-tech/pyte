@@ -78,14 +78,14 @@ class Client:
             raise TrexError(f"{fn.__name__} failed: {exc}") from exc
 
     def reset(self) -> None:
-        log.step_push("reset ASTF ports")
+        log.step_push("reset (ASTF ports)")
         self._call(_ops.reset)
         log.step_pop("reset done")
 
     def load_profile(self, text: str, name: str,
                      tunables: dict | None = None) -> None:
         """Ship a profile source to the agent and load it natively."""
-        log.step_push(f"load ASTF profile {name!r}")
+        log.step_push(f"load_profile {name!r}")
         if tunables:
             for key in sorted(tunables):
                 log.ring(f"tunable {key}={tunables[key]}")
@@ -111,14 +111,14 @@ class Client:
 
     def start(self, mult: float = 1.0, duration: float = -1.0,
               nc: bool = False, latency_pps: int = 0) -> None:
-        log.step_push(f"start ASTF traffic: mult={mult} "
-                      f"duration={duration} latency_pps={latency_pps}")
+        log.step_push(f"start mult={mult} duration={duration} "
+                      f"latency_pps={latency_pps}")
         self._call(_ops.start, mult, duration, nc, latency_pps)
         log.ring("trex: ASTF traffic started")
         log.step_pop("traffic started")
 
     def stop(self) -> None:
-        log.step_push("stop ASTF traffic")
+        log.step_push("stop (ASTF traffic)")
         self._call(_ops.stop)
         log.step_pop("stopped")
 
@@ -142,7 +142,7 @@ class Client:
         if timeout < 0:
             raise ValueError(
                 f"timeout must not be negative, got {timeout!r}")
-        log.step_push(f"wait_on_traffic (timeout={timeout})")
+        log.step_push(f"wait_on_traffic timeout={timeout}")
         self._call(_ops.wait_on_traffic, timeout,
                    timeout=timeout + WAIT_MARGIN)
         log.step_pop("traffic finished")
@@ -207,7 +207,7 @@ class Client:
     def log_summary(self, series: _stats.Series, t0: float,
                     t1: float) -> None:
         """RING a rendered end-of-run summary block."""
-        log.step_push("ASTF run summary")
+        log.step_push("log_summary (ASTF run summary)")
         log.ring(f"steady-state window {t0:.1f}s .. {t1:.1f}s")
         for attr, unit in (("tx_bps", "bps"), ("rx_bps", "bps"),
                            ("tx_pps", "pps"), ("rx_pps", "pps"),

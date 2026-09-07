@@ -67,14 +67,14 @@ class Client:
 
     def reset(self, ports: list[int] | None = None) -> None:
         ports = self._ports if ports is None else ports
-        log.step_push(f"reset ports {ports}")
+        log.step_push(f"reset ports={ports}")
         self._call(_ops.reset, ports)
         log.step_pop("reset done")
 
     def add_streams(self, streams, ports: list[int]) -> None:
         specs = [s.spec() for s in _streams(streams)]
         for port in ports:
-            log.step_push(f"add {len(specs)} stream(s) → port {port}")
+            log.step_push(f"add_streams {len(specs)} stream(s) to port {port}")
             # Summary/len are computed engine-side (Scapy), so log before
             # shipping — no round-trip needed just to render the log line.
             for sp in specs:
@@ -85,7 +85,8 @@ class Client:
 
     def start(self, ports: list[int], mult: str = "1",
               duration: float = -1, force: bool = False) -> None:
-        log.step_push(f"start: ports={ports} mult={mult} duration={duration}s")
+        log.step_push(f"start ports={ports} mult={mult} "
+                      f"duration={duration}s")
         self._call(_ops.start, ports, mult, duration, force)
         log.ring("trex: traffic started")
         log.step_pop("traffic started")
@@ -111,7 +112,7 @@ class Client:
         if timeout < 0:
             raise ValueError(
                 f"timeout must not be negative, got {timeout!r}")
-        log.step_push(f"wait_on_traffic (timeout={timeout})")
+        log.step_push(f"wait_on_traffic timeout={timeout}")
         self._call(_ops.wait_on_traffic, timeout,
                    timeout=timeout + WAIT_MARGIN)
         log.step_pop("traffic finished")
@@ -131,7 +132,7 @@ class Client:
 
     def stop(self, ports: list[int] | None = None) -> None:
         ports = self._ports if ports is None else ports
-        log.step_push(f"stop ports {ports}")
+        log.step_push(f"stop ports={ports}")
         self._call(_ops.stop, ports)
         log.step_pop("stopped")
 
