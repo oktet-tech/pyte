@@ -153,3 +153,32 @@ def test_session_acquires_the_ports_before_yielding(fake_shim,
         assert "reset" in seen
         assert seen.index("reset") > seen.index("bootstrap")
         assert client is not None
+
+
+def test_rate_scales_to_the_largest_prefix_that_fits():
+    assert astf._rate(0.0, "bps") == "0.00 bps"
+    assert astf._rate(615.94, "bps") == "615.94 bps"
+    assert astf._rate(4450.0, "bps") == "4.45 Kbps"
+    assert astf._rate(12.3e6, "pps") == "12.30 Mpps"
+    assert astf._rate(4.67e9, "bps") == "4.67 Gbps"
+
+
+def test_log_summary_logs_the_server_side_counters_too(fake_shim):
+    # The connection line above it is the client's view, which is
+    # what the tests key on; a device that drops connections only the
+    # server sees is invisible without this line.
+    rem = FakeRemote(results={
+        "get_traffic_stats": {
+            "client": {"tcps_connattempt": 30, "tcps_connects": 30,
+                       "tcps_closed": 30},
+            "server": {"tcps_accepts": 28, "tcps_closed": 27,
+                       "tcps_drops": 2},
+        },
+        "get_latency_stats": {},
+        "get_tg_names": [],
+    })
+    c = _client(rem)
+    c.log_summary(astf._stats.Series(), 0.0, 1.0)
+    rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
+    assert "server side: accepted 28" in rings
+    assert "drops 2" in rings

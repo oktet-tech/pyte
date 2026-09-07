@@ -39,6 +39,26 @@ CONNECT_TIMEOUT = 30.0
 #: and can report *why* the traffic did not finish.
 WAIT_MARGIN = 30.0
 
+#: Decade thresholds and prefixes for :func:`_rate`, largest first.
+_SI_STEPS = ((1e9, "G"), (1e6, "M"), (1e3, "K"), (1.0, ""))
+
+
+def _rate(value: float, unit: str) -> str:
+    """``value`` in ``unit``, scaled to the largest prefix that fits.
+
+    A fixed unit cannot render this suite's runs: the vendored ASTF
+    profiles run at their own connection rate times a small
+    multiplier, which on a 10G link is a few kilobits per second,
+    while a rate search climbs into the gigabits. Printing gigabits
+    throughout reports the first as a flat 0.00 for every sample --
+    which is what the first live run's progress lines looked like,
+    and is indistinguishable from no traffic at all.
+    """
+    for step, prefix in _SI_STEPS:
+        if abs(value) >= step:
+            return f"{value / step:.2f} {prefix}{unit}"
+    return f"0.00 {unit}"
+
 
 class Client:
     """Engine-side handle to a connected, agent-local ASTF client."""
@@ -174,10 +194,10 @@ class Client:
             log.ring(
                 f"t={now:6.1f}s active={glob.active_flows} "
                 f"est={glob.est_flows} "
-                f"tx={glob.tx_bps / 1e9:.2f} Gbps/"
-                f"{glob.tx_pps / 1e6:.2f} Mpps "
-                f"rx={glob.rx_bps / 1e9:.2f} Gbps/"
-                f"{glob.rx_pps / 1e6:.2f} Mpps "
+                f"tx={_rate(glob.tx_bps, 'bps')}/"
+                f"{_rate(glob.tx_pps, 'pps')} "
+                f"rx={_rate(glob.rx_bps, 'bps')}/"
+                f"{_rate(glob.rx_pps, 'pps')} "
                 f"drops={traffic.drop_pct:.2f}%")
             if every:
                 time.sleep(every)
@@ -188,21 +208,36 @@ class Client:
         """RING a rendered end-of-run summary block."""
         log.step_push("ASTF run summary")
         log.ring(f"steady-state window {t0:.1f}s .. {t1:.1f}s")
-        for attr, unit, scale in (("tx_bps", "Gbps", 1e9),
-                                  ("rx_bps", "Gbps", 1e9),
-                                  ("tx_pps", "Mpps", 1e6),
-                                  ("rx_pps", "Mpps", 1e6),
-                                  ("active_flows", "flows", 1.0)):
+        for attr, unit in (("tx_bps", "bps"), ("rx_bps", "bps"),
+                           ("tx_pps", "pps"), ("rx_pps", "pps"),
+                           ("active_flows", "flows")):
             log.ring(f"{attr}: mean "
-                     f"{series.mean(attr, t0, t1) / scale:.3f} {unit}, "
+                     f"{_rate(series.mean(attr, t0, t1), unit)}, "
                      f"median "
-                     f"{series.median(attr, t0, t1) / scale:.3f} {unit}")
+                     f"{_rate(series.median(attr, t0, t1), unit)}")
         traffic = self.get_traffic()
         log.ring(f"connections: attempted {traffic.connect_attempts}, "
                  f"established {traffic.connects}, "
                  f"closed {traffic.closes}, "
                  f"dropped {traffic.drops} "
                  f"({traffic.drop_pct:.2f}%)")
+        # The line above is the client side, which is what
+        # AstfTraffic's connection properties and the drop percentage
+        # the tests key on all read. The server's own view is logged
+        # beside it rather than folded in: the two count different
+        # events (a server accepts where a client attempts) so they
+        # cannot be summed, but a device that drops connections the
+        # client never notices shows up as a difference here and
+        # nowhere else.
+        srv = traffic.server
+        log.ring("server side: accepted "
+                 f"{int(srv.get('tcps_accepts', 0))}, connects "
+                 f"{int(srv.get('tcps_connects', 0))}, closed "
+                 f"{int(srv.get('tcps_closed', 0))}, drops "
+                 f"{int(srv.get('tcps_drops', 0))}, conndrops "
+                 f"{int(srv.get('tcps_conndrops', 0))}, udp connects "
+                 f"{int(srv.get('udps_connects', 0))}, udp closed "
+                 f"{int(srv.get('udps_closed', 0))}")
         for port, lat in sorted(self.get_latency().items()):
             log.ring(f"latency port {port}: avg {lat.avg:.1f}us, "
                      f"max {lat.max:.1f}us, jitter {lat.jitter:.1f}us, "
