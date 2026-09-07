@@ -18,6 +18,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 
+from pyte._cleanup import cleanup_all
 from pyte.errors import ToolError
 
 #: Sentinel: "use the class's default_timeout" (None now means forever).
@@ -205,6 +206,9 @@ class ToolHandle:
         self._stdout_filter = stdout_filter
         self._report = None
         self._closed = False
+        self._stopped = False
+        self._job_destroyed = False
+        self._after_close_done = False
 
     # -- hooks (override per tool) --------------------------------------
     def _parse(self, raw):
@@ -320,14 +324,32 @@ class ToolHandle:
             self._mi(logger, rep)
 
     def close(self) -> None:
-        """Stop the tool (best-effort) and destroy the job; idempotent."""
+        """Stop the tool and destroy the job; idempotent and retryable.
+
+        Tracks the steps that actually completed, so a close() that
+        failed part-way retries only what is left.  Setting a _closed
+        flag up front (what this replaced) made a failed teardown
+        permanent: the job stayed alive and the second call returned
+        having done nothing.
+        """
         if self._closed:
             return
-        self._closed = True
         from pyte.errors import TeError
-        try:
-            self._stop_for_close()
-        except TeError:
-            pass
-        self._job.destroy()
-        self._after_close()
+        if not self._stopped:
+            try:
+                self._stop_for_close()
+            except TeError:
+                pass
+            self._stopped = True
+        cleanup_all(self._destroy_job_once, self._after_close_once)
+        self._closed = True
+
+    def _destroy_job_once(self) -> None:
+        if not self._job_destroyed:
+            self._job.destroy()
+            self._job_destroyed = True
+
+    def _after_close_once(self) -> None:
+        if not self._after_close_done:
+            self._after_close()
+            self._after_close_done = True

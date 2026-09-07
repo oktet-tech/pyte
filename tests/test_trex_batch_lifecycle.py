@@ -15,6 +15,7 @@ import re
 
 import pytest
 
+from pyte.errors import TeError
 from pyte.tools.trex import batch
 
 _YAML_PATH_RE = re.compile(r"/tmp/[A-Za-z_][A-Za-z0-9_]{31}\.yaml")
@@ -251,6 +252,10 @@ def _batch_opts(**kw):
     return batch.Opts(**base)
 
 
+def _raise_te_error(*a, **k):
+    raise TeError(12)
+
+
 def test_create_does_not_start_but_attaches_filters_and_writes_files():
     pco = _FakePco()
     opts = _batch_opts()
@@ -371,6 +376,19 @@ def test_close_is_idempotent():
     assert pco._job.destroyed
     # unlink attempted exactly once per file across both close() calls.
     assert len(pco.unlinked) == 2
+
+
+def test_failed_close_can_be_retried():
+    pco = _FakePco()
+    trex = None
+    with pytest.raises(TeError):
+        with batch.create(pco, _batch_opts()) as trex_obj:
+            trex = trex_obj
+            trex.job.destroy = _raise_te_error
+    # the create() CM's own close() already failed; retry must work
+    trex.job.destroy = lambda *a, **k: None
+    trex.close()
+    assert trex._closed
 
 
 def test_wait_none_is_forever_and_forwards_to_job():

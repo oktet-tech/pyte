@@ -115,6 +115,7 @@ import string
 from typing import TYPE_CHECKING, Iterator
 
 from pyte import log, rcf
+from pyte._cleanup import cleanup_all
 from pyte.errors import RpcError, TeError
 from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools import _tool
@@ -478,6 +479,9 @@ class Trex:
         self._yaml_path = yaml_path
         self._astf_path = astf_path
         self._closed = False
+        self._stopped = False
+        self._job_destroyed = False
+        self._files_removed = False
         self._summary: dict[str, "Filter"] = {}
         self._m_traff_dur: tuple["Filter", "Filter"] | None = None
         self._opt: dict[str, tuple["Filter", "Filter"]] = {}
@@ -600,21 +604,36 @@ class Trex:
         return _rpt.build_report(filters)
 
     def close(self) -> None:
-        """Idempotent teardown: stop-tolerant destroy, then remove the
-        ``/tmp`` yaml and astf json files from the agent.
+        """Idempotent, retryable teardown: stop-tolerant destroy, then
+        remove the ``/tmp`` yaml and astf json files from the agent.
 
         DIVERGENCE: C's ``tapi_trex_destroy`` never removes either
         file -- a deliberate leak this port does not reproduce.
+
+        Each step is tracked separately, so a close() whose job
+        destroy failed retries only the unfinished work rather than
+        marking itself done and leaving the process alive.
         """
         if self._closed:
             return
+        if not self._stopped:
+            try:
+                self.job.stop()
+            except TeError:
+                pass
+            self._stopped = True
+        cleanup_all(self._destroy_job_once, self._remove_files_once)
         self._closed = True
-        try:
-            self.job.stop()
-        except TeError:
-            pass
-        self.job.destroy()
-        _remove_tmp_files(self._pco, self._yaml_path, self._astf_path)
+
+    def _destroy_job_once(self) -> None:
+        if not self._job_destroyed:
+            self.job.destroy()
+            self._job_destroyed = True
+
+    def _remove_files_once(self) -> None:
+        if not self._files_removed:
+            _remove_tmp_files(self._pco, self._yaml_path, self._astf_path)
+            self._files_removed = True
 
 
 @contextlib.contextmanager
@@ -679,6 +698,7 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         raise
 
     trex = Trex(pco, job, argv, yaml_path, astf_path)
+    primary = None
     try:
         # Every filter attached here inherits the JOB's baked-in
         # silent_pass (channels[0]->silent_pass in
@@ -698,5 +718,8 @@ def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
         with pco.silent_pass():
             trex._attach_filters(opts)
         yield trex
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        trex.close()
+        cleanup_all(trex.close, primary=primary)

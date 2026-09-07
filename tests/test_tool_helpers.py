@@ -417,3 +417,48 @@ def test_wait_none_timeout_blocks_everywhere():
     Demo(job, F()).wait(timeout=None)
     assert job.events[0] == ("wait", None)
     assert reads == [None]
+
+
+# -- close(): retryable, non-masking teardown ----------------------------
+
+class _FlakyJob(FakeJob):
+    """FakeJob whose destroy() fails until told otherwise."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.destroy_fails = True
+        self.destroys = 0
+
+    def destroy(self, *a, **k):
+        self.destroys += 1
+        self.events.append(("destroy",))
+        if self.destroy_fails:
+            raise TeError(12)
+
+
+def test_failed_close_can_be_retried():
+    job = _FlakyJob()
+    handle = Demo(job, FakeFilter())
+    with pytest.raises(TeError):
+        handle.close()
+    job.destroy_fails = False
+    handle.close()
+    assert job.destroys == 2      # actually retried
+
+
+def test_close_runs_after_close_even_if_destroy_fails():
+    job = _FlakyJob()
+    handle = Demo(job, FakeFilter())
+    ran = []
+    handle._after_close = lambda: ran.append("after")
+    with pytest.raises(TeError):
+        handle.close()
+    assert ran == ["after"]
+
+
+def test_successful_close_is_still_idempotent():
+    job = FakeJob()
+    handle = Demo(job, FakeFilter())
+    handle.close()
+    handle.close()
+    assert [e for e in job.events if e == ("destroy",)] == [("destroy",)]

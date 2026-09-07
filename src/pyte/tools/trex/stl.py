@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Iterator
 
 from pyte import log
+from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
 from pyte.tools.trex import _ops
 from pyte.tools.trex._config import ServerOpts
@@ -188,6 +189,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
     log.step_push(f"TRex STL: bring up on {pco.ta} ({len(ports)} ports)")
     job = None
     popped = False
+    primary = None
     try:
         with remote.python(pco) as rem:
             cfg_path = rem.call(_ops.write_cfg, opts.cfg_yaml())
@@ -225,8 +227,11 @@ def session(pco: "RpcServer", opts: ServerOpts,
                     rem.call(_ops.remove_file, cfg_path)
                 except Exception:   # noqa: BLE001  best-effort teardown
                     pass
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
         if not popped:
             log.step_pop(f"TRex STL bring-up failed on {pco.ta}")
         if job is not None:
-            job.destroy()
+            cleanup_all(job.destroy, primary=primary)

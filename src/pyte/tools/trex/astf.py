@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Callable, Iterator
 
 from pyte import log
+from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
 from pyte.tools.trex import _astf_ops as _ops
 from pyte.tools.trex import _astf_stats as _stats
@@ -272,6 +273,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
                   f"({len(ports)} ports)")
     job = None
     popped = False
+    primary = None
     try:
         with remote.python(pco) as rem:
             cfg_path = rem.call(_stl_ops.write_cfg, opts.cfg_yaml())
@@ -336,8 +338,11 @@ def session(pco: "RpcServer", opts: ServerOpts,
                     rem.call(_stl_ops.remove_file, cfg_path)
                 except Exception:           # noqa: BLE001 teardown
                     pass
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
         if not popped:
             log.step_pop(f"TRex ASTF bring-up failed on {pco.ta}")
         if job is not None:
-            job.destroy()
+            cleanup_all(job.destroy, primary=primary)

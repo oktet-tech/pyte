@@ -106,3 +106,19 @@ def test_serve_destroys_job_on_baseexception_during_start():
         with serve(pco, "iperf3", ["-s"], host="h", port=1, ready_delay=0):
             pass
     assert "destroy" in job.events
+
+
+def test_readiness_delay_failure_destroys_the_server_job():
+    """pco.sleep() is an RPC and can fail; the started job used to leak
+    between the bring-up guard and the yield guard."""
+    job = FakeJob()
+    pco = FakePco(job)
+
+    def _boom(seconds):
+        raise RuntimeError("sleep RPC failed")
+
+    pco.sleep = _boom
+    with pytest.raises(RuntimeError, match="sleep RPC failed"):
+        with serve(pco, "srv", [], host="h", port=1, ready_delay=1.0):
+            pass
+    assert "destroy" in job.events

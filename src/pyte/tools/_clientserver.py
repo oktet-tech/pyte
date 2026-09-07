@@ -14,6 +14,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte._cleanup import cleanup_all
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -40,23 +42,33 @@ def serve(pco: "RpcServer", program: str, argv: list[str], *,
     server (mirrors tapi_perf_server_start's SLEEP(1)), then yields
     :class:`Endpoint`. On exit the job is stopped (``term`` signal, via
     ``job.stop``) and destroyed — even if the block raises. If the server
-    fails to start, the job is destroyed before the exception propagates.
+    fails to start, or the readiness delay fails, the job is destroyed
+    before the exception propagates.
     """
     job = pco.job(program, argv)
     try:
         job.stderr.log(level="WARN")
         job.start()
+        # Inside the guard: pco.sleep() is an RPC and can fail, and a
+        # failure here used to leak the already-started server job.
+        if ready_delay:
+            pco.sleep(ready_delay)
     except BaseException:
         job.destroy()
         raise
-    if ready_delay:
-        pco.sleep(ready_delay)
+    primary = None
     try:
         yield Endpoint(host, port)
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
         from pyte.errors import TeError
-        try:
-            job.stop(signal=term)
-        except TeError:
-            pass
-        job.destroy()
+
+        def _stop():
+            try:
+                job.stop(signal=term)
+            except TeError:
+                pass
+
+        cleanup_all(_stop, job.destroy, primary=primary)
