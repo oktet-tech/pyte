@@ -179,3 +179,60 @@ def test_session_removes_cfg_on_teardown(monkeypatch):
     with stl.session(FakePco(), opts):
         pass
     assert ("remove_file", ("/tmp/pyte_trex_x.yaml",)) in calls
+
+
+def test_session_teardown_failure_does_not_mask_the_body_error(
+        monkeypatch):
+    """session()'s outermost finally used to let a failing job.destroy()
+    replace the exception the body raised -- so a real bring-up failure
+    surfaced as a teardown error instead."""
+    from contextlib import contextmanager
+
+    from pyte.tools.trex import _config
+
+    class FakeRem:
+        def call(self, fn, *args, **kwargs):
+            if fn.__name__ == "write_cfg":
+                return "/tmp/pyte_trex_x.yaml"
+            if fn.__name__ == "bootstrap":
+                return object()     # the remote cli
+            return None
+
+    @contextmanager
+    def fake_python(pco, timeout=30.0, interpreter="python3"):
+        yield FakeRem()
+
+    class FakeChannel:
+        def log(self, level=None):
+            pass
+
+    class FakeJob:
+        stdout = FakeChannel()
+        stderr = FakeChannel()
+
+        def start(self):
+            pass
+
+        def destroy(self, *a, **k):
+            raise RuntimeError("destroy failed")
+
+    class FakePco:
+        ta = "Agt_A"
+
+        def job(self, program, args=None):
+            return FakeJob()
+
+    monkeypatch.setattr("pyte.remote.python", fake_python)
+    # session() logs via the real shim; quiet it (no TE logger here)
+    from pyte import log
+    monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
+    monkeypatch.setattr(log, "step_pop", lambda *a, **k: None)
+    monkeypatch.setattr(log, "ring", lambda *a, **k: None)
+    opts = _config.ServerOpts(trex_exec="/x/t-rex-64", ports=["0000:04:00.0"])
+
+    boom = RuntimeError("BODY BOOM")
+    with pytest.raises(RuntimeError) as info:
+        with stl.session(FakePco(), opts):
+            raise boom
+    assert info.value is boom                 # identity, not just message
+    assert info.value.cleanup_errors          # destroy failure attached
