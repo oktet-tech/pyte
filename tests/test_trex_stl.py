@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex.stl unit tests (offline: orchestration with fakes)."""
+import pytest
 from scapy.all import IP, UDP, Ether
 
 from pyte.errors import TeError, TrexError
@@ -77,12 +78,20 @@ def test_client_get_stats_parses():
     assert ps.loss_pkts == 2
 
 
-def test_wait_on_traffic_default_blocks_forever():
-    c, rem = _client()
-    c.wait_on_traffic()
-    op, args, _ = rem.calls[-1]
-    assert op == "wait_on_traffic"
-    assert args[1] is None          # native "block until done"
+def test_wait_on_traffic_requires_an_explicit_timeout():
+    """None used to promise "forever" and deliver the 30 s session
+    default, killing any run longer than that."""
+    c, _ = _client()
+    with pytest.raises(ValueError, match="requires an explicit timeout"):
+        c.wait_on_traffic(None)
+    with pytest.raises(TypeError):
+        c.wait_on_traffic()
+
+
+def test_wait_on_traffic_rejects_a_negative_timeout():
+    c, _ = _client()
+    with pytest.raises(ValueError, match="must not be negative"):
+        c.wait_on_traffic(-1)
 
 
 def test_wait_on_traffic_explicit_zero_is_zero():
@@ -99,6 +108,23 @@ def test_wait_on_traffic_explicit_value_passes_through():
     c.wait_on_traffic(timeout=12.5)
     _, args, _ = rem.calls[-1]
     assert args[1] == 12.5
+
+
+def test_wait_on_traffic_gives_the_transport_a_margin():
+    """The native wait must expire before the transport carrying it,
+    so the agent-side client reports why traffic did not finish."""
+    c, rem = _client()
+    c.wait_on_traffic(timeout=600)
+    _, args, kwargs = rem.calls[-1]
+    assert args[1] == 600                                # native wait
+    assert kwargs["timeout"] == 600 + stl.WAIT_MARGIN    # transport
+
+
+def test_control_ops_leave_the_transport_at_the_session_default():
+    c, rem = _client()
+    c.reset()
+    _, _, kwargs = rem.calls[-1]
+    assert kwargs["timeout"] is None
 
 
 def test_session_removes_cfg_on_teardown(monkeypatch):

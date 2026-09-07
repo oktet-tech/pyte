@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 TREX_ASTF_PYLIB = "automation/trex_control_plane/interactive"
 #: Default seconds to wait for the RPC server to accept a connection.
 CONNECT_TIMEOUT = 30.0
+#: Extra seconds the pyte.remote transport is given on top of a native
+#: wait, so the agent-side client is always the one that times out first
+#: and can report *why* the traffic did not finish.
+WAIT_MARGIN = 30.0
 
 
 class Client:
@@ -97,11 +101,29 @@ class Client:
         self._call(_ops.stop)
         log.step_pop("stopped")
 
-    def wait_on_traffic(self, timeout: float | None = None) -> None:
-        log.step_push("wait_on_traffic (timeout="
-                      f"{'inf' if timeout is None else timeout})")
+    def wait_on_traffic(self, timeout: float) -> None:
+        """Block until traffic stops.  *timeout* is required and finite.
+
+        The value bounds the native ASTFClient wait; the pyte.remote
+        transport carrying it gets ``timeout + WAIT_MARGIN``, so the
+        agent-side client times out first and reports why.
+
+        There is deliberately no "wait forever" here: a pyte.remote
+        session that times out is left unusable, so an unbounded wait
+        could only ever hang a session with no recovery path.  Passing
+        None used to mean the 30 s session default, not forever.
+        """
+        if timeout is None:
+            raise ValueError(
+                "wait_on_traffic() requires an explicit timeout: a "
+                "pyte.remote session cannot wait forever (it is "
+                "unusable after a timeout).  Pass duration + a margin.")
+        if timeout < 0:
+            raise ValueError(
+                f"timeout must not be negative, got {timeout!r}")
+        log.step_push(f"wait_on_traffic (timeout={timeout})")
         self._call(_ops.wait_on_traffic, timeout,
-                   timeout=None if timeout is None else timeout + 30)
+                   timeout=timeout + WAIT_MARGIN)
         log.step_pop("traffic finished")
 
     def clear_stats(self) -> None:

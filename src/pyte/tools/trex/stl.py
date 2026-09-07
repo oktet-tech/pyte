@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 TREX_PYLIB = "automation/trex_control_plane/interactive"
 #: Default seconds to wait for the RPC server to accept a connection.
 CONNECT_TIMEOUT = 30.0
+#: Extra seconds the pyte.remote transport is given on top of a native
+#: wait, so the agent-side client is always the one that times out first
+#: and can report *why* the traffic did not finish.
+WAIT_MARGIN = 30.0
 
 
 def _streams(streams) -> list[Stream]:
@@ -48,10 +52,15 @@ class Client:
         self._cli = cli        # RemoteObject: the live STLClient on the agent
         self._ports = list(ports)
 
-    def _call(self, fn, *args):
-        """Ship one op-function, translating remote failures to TrexError."""
+    def _call(self, fn, *args, timeout=None):
+        """Ship one op-function, translating remote failures to TrexError.
+
+        *timeout* bounds the pyte.remote round trip; None leaves it at
+        the session default, which is right for the short control ops
+        but never for a wait (see :meth:`wait_on_traffic`).
+        """
         try:
-            return self._rem.call(fn, self._cli, *args)
+            return self._rem.call(fn, self._cli, *args, timeout=timeout)
         except RemotePythonError as exc:
             raise TrexError(f"{fn.__name__} failed: {exc}") from exc
 
@@ -80,13 +89,30 @@ class Client:
         log.ring("trex: traffic started")
         log.step_pop()
 
-    def wait_on_traffic(self, timeout: float | None = None) -> None:
-        """Block until traffic stops; None (the native default) waits
-        forever.  A numeric timeout — including 0 — is passed through
-        untouched."""
-        log.step_push("wait_on_traffic (timeout="
-                      f"{'inf' if timeout is None else timeout})")
-        self._call(_ops.wait_on_traffic, timeout)
+    def wait_on_traffic(self, timeout: float) -> None:
+        """Block until traffic stops.  *timeout* is required and finite.
+
+        The value bounds the native STLClient wait; the pyte.remote
+        transport carrying it gets ``timeout + WAIT_MARGIN``, so the
+        agent-side client times out first and reports why.
+
+        There is deliberately no "wait forever" here.  A pyte.remote
+        session that times out is left unusable (its late reply may
+        still be in flight), so an unbounded wait could only ever hang
+        a session with no recovery path.  Pass ``duration + margin``,
+        the way every caller already does.
+        """
+        if timeout is None:
+            raise ValueError(
+                "wait_on_traffic() requires an explicit timeout: a "
+                "pyte.remote session cannot wait forever (it is "
+                "unusable after a timeout).  Pass duration + a margin.")
+        if timeout < 0:
+            raise ValueError(
+                f"timeout must not be negative, got {timeout!r}")
+        log.step_push(f"wait_on_traffic (timeout={timeout})")
+        self._call(_ops.wait_on_traffic, timeout,
+                   timeout=timeout + WAIT_MARGIN)
         log.step_pop("traffic finished")
 
     def get_stats(self, ports: list[int] | None = None) -> dict[int, PortStats]:
