@@ -162,6 +162,19 @@ class Test:
         return self._env
 
 
+def _cleanup_detail(exc: BaseException) -> str:
+    """Render cleanup failures attached to *exc* by pyte._cleanup.
+
+    str(exc) does not include exception notes, so a teardown failure
+    attached during unwind would otherwise reach no log at all on the
+    TestFail path -- which is the common one (t.fail/check/expect).
+    """
+    errors = getattr(exc, "cleanup_errors", ())
+    if not errors:
+        return ""
+    return "".join(f"\n  cleanup also failed: {e!r}" for e in errors)
+
+
 def current() -> Test:
     if _current is None:
         raise RuntimeError("test.start() not active")
@@ -237,11 +250,21 @@ def start(name: str | None = None):
     except TestSkip as e:
         if str(e):
             t.verdict(str(e))
+        # A verdict is a formal result string, not a diagnostics log --
+        # a cleanup failure attached to the skip goes to a separate
+        # log.error instead of into the verdict text.
+        detail = _cleanup_detail(e)
+        if detail:
+            log.error(f"Test skipped, but cleanup also failed:{detail}")
         result = EXIT_SKIP
     except TestFail as e:
-        log.error(f"Test failed: {e}")
+        log.error(f"Test failed: {e}{_cleanup_detail(e)}")
         result = 1
     except SystemExit as e:
+        # sys.exit() can itself unwind through a `with` block whose
+        # __exit__ attaches a teardown failure to it (cleanup_all),
+        # same as TestFail/TestSkip -- so check here too.
+        detail = _cleanup_detail(e)
         if e.code is None:
             result = 0
         elif isinstance(e.code, int):
@@ -249,6 +272,9 @@ def start(name: str | None = None):
         else:
             log.error(f"SystemExit with non-integer code: {e.code!r}")
             result = 1
+        if detail:
+            log.error(f"SystemExit(code={e.code!r}), but cleanup also "
+                      f"failed:{detail}")
     except Exception:
         log.error("Unhandled exception:\n" + traceback.format_exc())
         result = 1

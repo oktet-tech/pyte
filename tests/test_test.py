@@ -17,6 +17,7 @@ import types
 import pytest
 
 from pyte import log, test
+from pyte._cleanup import cleanup_all
 from pyte._params import Params
 from pyte.errors import TestFail
 from pyte.testing import FakeShimLib
@@ -100,6 +101,70 @@ def test_start_bad_seed_fails_via_normal_exit_path(lib, monkeypatch):
     err_logs = [txt for lvl, txt in lib.logs
                 if lvl == FakeShimLib.TE_LL_ERROR]
     assert any("notanint" in txt for txt in err_logs)
+
+
+# -- cleanup_errors reaching the log -----------------------------------
+#
+# str(e) does not include exception notes, so a teardown failure
+# attached to the unwinding exception by pyte._cleanup.cleanup_all (via
+# a `with` block's __exit__) needs its own route to the log on each
+# outcome path.
+
+def test_start_test_fail_with_cleanup_errors_logs_the_detail(
+        lib, monkeypatch):
+    """A TestFail carrying cleanup_errors must have that failure reach
+    the log -- str(e) alone drops it."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start():
+            boom = TestFail("core dumped")
+            cleanup_all(lambda: (_ for _ in ()).throw(
+                RuntimeError("umount failed")), primary=boom)
+            raise boom
+    assert ei.value.code == 1
+    err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert any("Test failed: core dumped" in txt
+               and "umount failed" in txt
+               for txt in err_logs)
+
+
+def test_start_test_skip_with_cleanup_errors_logs_separately(
+        lib, monkeypatch):
+    """A TestSkip's cleanup failure must not pollute the formal verdict
+    text -- it goes to a separate log.error instead."""
+    # Imported locally: a module-level TestSkip binding makes pytest
+    # try (and fail) to collect it as a test class, same as TestFail's
+    # existing warning in tests/test_testing.py.
+    from pyte.errors import TestSkip
+
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start():
+            skip = TestSkip("no such device")
+            cleanup_all(lambda: (_ for _ in ()).throw(
+                RuntimeError("umount failed")), primary=skip)
+            raise skip
+    assert ei.value.code == test.EXIT_SKIP
+    assert lib.verdicts == [(FakeShimLib.TE_LL_RING, "no such device")]
+    err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert any("umount failed" in txt for txt in err_logs)
+
+
+def test_start_system_exit_with_cleanup_errors_logs_the_detail(
+        lib, monkeypatch):
+    """sys.exit() can itself unwind through a `with` block whose
+    __exit__ attaches a teardown failure to it; that failure must
+    reach the log too."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start():
+            exit_exc = SystemExit(3)
+            cleanup_all(lambda: (_ for _ in ()).throw(
+                RuntimeError("umount failed")), primary=exit_exc)
+            raise exit_exc
+    assert ei.value.code == 3
+    err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert any("umount failed" in txt for txt in err_logs)
 
 
 # -- expect() / check() -----------------------------------------------
