@@ -24,6 +24,7 @@ class _EnvLib:
         return 0
 
     def pyte_rpc_server_ta_name(self, h, out):
+        self.calls.append(("ta_name", h))
         out[0] = b"Agt_A"
         return 0
 
@@ -161,6 +162,21 @@ def test_enverror_is_teerror():
 def test_pco_returns_the_same_wrapper_for_the_same_server(monkeypatch):
     env, _ = _fake_env(monkeypatch)
     assert env.pco("iut_rpcs") is env.pco("iut_rpcs")
+
+
+def test_pco_cache_hit_does_not_refetch_or_leak_ta_name(monkeypatch):
+    """A cache hit must do no shim work: pyte_rpc_server_ta_name
+    strdup()s the TA name, and only _take_str() on a fresh lookup
+    frees it -- calling it again on a hit leaks that allocation."""
+    env, lib = _fake_env(monkeypatch)
+    env.pco("iut_rpcs")
+    ta_name_calls_after_first = sum(
+        1 for c in lib.calls if c[0] == "ta_name")
+    env.pco("iut_rpcs")
+    ta_name_calls_after_second = sum(
+        1 for c in lib.calls if c[0] == "ta_name")
+    assert ta_name_calls_after_first == 1
+    assert ta_name_calls_after_second == 1
 
 
 def test_close_invalidates_every_handed_out_pco(monkeypatch):

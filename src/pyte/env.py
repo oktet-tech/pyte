@@ -127,13 +127,13 @@ class Env:
         rc = lib.pyte_env_get_pco(self._h, _enc(name), out)
         if rc != 0:
             self._miss("pco", name, rc)
-        ta_out = ffi.new("char **")
-        check(lib.pyte_rpc_server_ta_name(out[0], ta_out),
-              f"pco {name!r} ta", EnvError)
         handle = out[0]
         cached = self._pcos.get(handle)
         if cached is not None:
             return cached
+        ta_out = ffi.new("char **")
+        check(lib.pyte_rpc_server_ta_name(handle, ta_out),
+              f"pco {name!r} ta", EnvError)
         srv = RpcServer(handle, _take_str(ta_out), name, owned=False)
         self._pcos[handle] = srv
         return srv
