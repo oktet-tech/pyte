@@ -37,6 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte._cleanup import cleanup_all
 from pyte.tools import _tool
 
 if TYPE_CHECKING:
@@ -345,10 +346,14 @@ def run(pco: "RpcServer", opts: Opts, timeout: float = 10.0) -> Report:
 
     job, (out_filter, err_filter) = _tool.launch(
         pco, "ethtool", opts.to_argv(), setup=_setup)
+    primary = None
     try:
         status = job.wait(timeout=timeout)
         out = out_filter.read_all(timeout=timeout)
         err = err_filter.read_all(timeout=timeout)
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        job.destroy()
+        cleanup_all(job.destroy, primary=primary)
     return _build_report(opts.cmd, out, err, status=status)

@@ -153,3 +153,87 @@ def test_stats_quiet_false_keeps_tracing():
                             opts=memcached.Opts(tcp_port=11211))
     m.stats(quiet=False)
     assert "quiet-on" not in pco.calls
+
+
+# -- Memcached.stats() teardown hygiene --------------------------------------
+
+class _StatsExitFailsJob:
+    """wait() raises the primary; destroy() also fails and used to
+    mask it via a bare `finally: j.destroy()`."""
+
+    def __init__(self, boom):
+        self.boom = boom
+
+    def filter(self, **kw):
+        return _FakeFilter()
+
+    def start(self):
+        pass
+
+    def wait(self, timeout):
+        raise self.boom
+
+    def destroy(self):
+        raise RuntimeError("destroy failed")
+
+    @contextmanager
+    def quiet(self):
+        yield self
+
+
+class _StatsExitFailsPco:
+    def __init__(self, job):
+        self._job = job
+
+    def job(self, program, argv):
+        return self._job
+
+
+def test_stats_exit_failure_survives_destroy_failure():
+    """A MemcachedError diagnosing a bad mc-stats exit must not be
+    replaced by a failing job.destroy() -- this was the worst of the
+    three masking sites: it hid a real diagnostic naming the exit
+    status behind a teardown error."""
+    boom = MemcachedError("mc-stats exited with exit status 1")
+    pco = _StatsExitFailsPco(_StatsExitFailsJob(boom))
+    m = memcached.Memcached(pco, job=None,
+                            opts=memcached.Opts(tcp_port=11211))
+    with pytest.raises(MemcachedError) as info:
+        m.stats()
+    assert info.value is boom                   # identity, not message
+    assert info.value.cleanup_errors             # destroy failure attached
+
+
+# -- server() teardown hygiene ------------------------------------------------
+
+class _ServerChannel:
+    def log(self, level=None):
+        pass
+
+
+class _ServerDestroyFailsJob:
+    stdout = _ServerChannel()
+    stderr = _ServerChannel()
+
+    def stop(self, *a, **k):
+        pass
+
+    def destroy(self, *a, **k):
+        raise RuntimeError("destroy failed")
+
+
+class _ServerDestroyFailsPco:
+    def job(self, program, argv):
+        return _ServerDestroyFailsJob()
+
+
+def test_server_body_failure_survives_destroy_failure():
+    """A body exception raised inside the `with server(...)` block must
+    not be replaced by a failing job.destroy() -- it used to, via a
+    bare `finally: ... job.destroy()` after the best-effort stop()."""
+    boom = RuntimeError("BODY BOOM")
+    with pytest.raises(RuntimeError) as info:
+        with memcached.server(_ServerDestroyFailsPco()):
+            raise boom
+    assert info.value is boom                   # identity, not message
+    assert info.value.cleanup_errors             # destroy failure attached

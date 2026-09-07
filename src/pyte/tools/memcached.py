@@ -47,6 +47,8 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pyte._cleanup import cleanup_all
+
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
 
@@ -269,6 +271,7 @@ class Memcached:
         from pyte.errors import MemcachedError
         port = _addr_port(self.opts.tcp_port)
         j = self._pco.job(program, [port])
+        primary = None
         try:
             with j.quiet() if quiet else nullcontext():
                 # Filter names match app-perf-ts mem-db/memcached.c:462,478
@@ -282,8 +285,11 @@ class Memcached:
                 if not status.ok:
                     raise MemcachedError(f"mc-stats exited with {status}")
                 return parse_stats(flt.read_all(timeout=timeout))
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            j.destroy()
+            cleanup_all(j.destroy, primary=primary)
 
 
 @contextmanager
@@ -300,14 +306,21 @@ def server(pco: "RpcServer", opts: Opts | None = None):
     opts = opts or Opts()
     job = pco.job(opts.memcached_path, opts.to_argv())
     m = Memcached(pco, job, opts)
+    primary = None
     try:
         job.stdout.log(level="RING")
         job.stderr.log(level="WARN")
         yield m
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
         from pyte.errors import TeError
-        try:
-            job.stop()
-        except TeError:
-            pass
-        job.destroy()
+
+        def _stop():
+            try:
+                job.stop()
+            except TeError:
+                pass
+
+        cleanup_all(_stop, job.destroy, primary=primary)

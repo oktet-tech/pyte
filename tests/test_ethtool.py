@@ -225,3 +225,36 @@ def test_run_destroys_job_when_filter_attach_fails():
     with pytest.raises(RuntimeError, match="attach failed"):
         ethtool.run(_FakePco(job), Opts(if_name="eth0"))
     assert job.events == ["destroy"]
+
+
+class _OkChannel:
+    def attach_filter(self, name=None, readable=True):
+        return self
+
+
+class _WaitFailsJob:
+    """wait() raises the primary; destroy() raises too, masking it."""
+
+    def __init__(self):
+        self.stdout = _OkChannel()
+        self.stderr = _OkChannel()
+
+    def start(self):
+        pass
+
+    def wait(self, timeout=None):
+        raise self.boom
+
+    def destroy(self, *a, **k):
+        raise RuntimeError("destroy failed")
+
+
+def test_run_wait_failure_survives_destroy_failure():
+    """A failing job.destroy() must not replace a job.wait() failure --
+    it used to, via a bare `finally: job.destroy()`."""
+    job = _WaitFailsJob()
+    job.boom = RuntimeError("wait failed")
+    with pytest.raises(RuntimeError) as info:
+        ethtool.run(_FakePco(job), Opts(if_name="eth0"))
+    assert info.value is job.boom              # identity, not just message
+    assert info.value.cleanup_errors            # destroy failure attached
