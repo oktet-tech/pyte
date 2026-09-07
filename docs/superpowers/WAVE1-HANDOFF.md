@@ -6,25 +6,28 @@ State: 1025 passed, 1 skipped, `ruff check src tests setup.py` clean.
 Spec: `../../../pyte-api-fixes-plan-2026-09-07.md` (wave 1 section).
 Evidence for the original findings: `../../../pyte-api-fixes-review-2026-09-07.md`.
 
-## THE MERGE GATE — read this first
+## Merge gate — CLOSED
 
-**The shim was never rebuilt, and the branch cannot run until it is.**
+This section used to say the shim had never been rebuilt and that no
+suite could bump its pyte pin until it was. That is resolved.
 
-`src/pyte/job.py` calls `pyte_rpc_get_silent_pass()` in **every**
-`Job.create()`. That symbol does not exist in the currently built
-`src/pyte/_shim.abi3.so`:
+The shim was rebuilt against `TE_INSTALL=/home/kostik/prj/te/te/build/inst`
+after this branch landed on `trexb`. The build succeeding is itself the
+proof of the Critical fix: `pyte_rpc_get_silent_pass` had been missing
+from `shim/pyte_shim.h`, which is a hard error on GCC >= 14, and the
+compile would have failed had the declaration not been added.
+
+Verified after the rebuild:
 
     nm -D src/pyte/_shim.abi3.so | grep silent
-    # shows set_silent and set_silent_pass; get_silent_pass is ABSENT
+      pyte_rpc_get_silent_pass      <- now present
+      pyte_rpc_set_silent
+      pyte_rpc_set_silent_pass
+    nm -D src/pyte/_shim.abi3.so | grep -c tapi_job_get_silent_pass
+      0    <- TE's non-installed internal symbol genuinely retired
+    full suite against the real shim: 1031 passed, 1 skipped
 
-So no suite can bump its pyte pin before the rebuild. It fails loudly
-(`AttributeError` on the first job), not subtly. All 1025 tests pass
-against fake shims and say nothing about the C.
-
-The rebuild was skipped deliberately: this worktree's `.so` is a copy of
-the one a live <tester-host> session was using.
-
-## Post-rebuild checklist
+## Post-rebuild checklist — items 1-4 DONE, 5-7 need a rig
 
 1. **It compiled.** `pyte_rpc_get_silent_pass` is now declared in
    `shim/pyte_shim.h` (it was missing — the only one of 200 cdef'd
@@ -50,7 +53,12 @@ the one a live <tester-host> session was using.
    `job_stop`/`job_destroy` lines after `report()` — the pair the C's
    `tapi_job_set_tracing(TRUE)` guarantees at
    `ngfw-ts/nap-ts/lib/nap-trex-stats.c:975,977`.
-7. Re-run the full suite against the rebuilt `.so`.
+7. Re-run the full suite against the rebuilt `.so`. **Done:** 1031
+   passed, 1 skipped.
+
+Items 5, 6 and 7's live halves (job-creation seeding on a real agent,
+and the nap-ts TRex teardown-logging pair) still need a testbed; they
+cannot be checked offline.
 
 ## Known gaps left open (none block merge)
 
