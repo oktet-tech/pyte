@@ -146,11 +146,21 @@ def launch(pco, program: str, argv: list[str], *, setup=None):
 
 @contextmanager
 def running(handle):
-    """Yield *handle*, close() it on exit — the tail of every run() CM."""
+    """Yield *handle*, close() it on exit — the tail of every run() CM.
+
+    A failing close() is attached to whatever the block raised rather
+    than replacing it: this is the teardown path behind every tool's
+    run() context manager, so a masked exception here loses the real
+    failure for nine wrappers at once.
+    """
+    primary = None
     try:
         yield handle
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        handle.close()
+        cleanup_all(handle.close, primary=primary)
 
 
 # ---------------------------------------------------------------------------

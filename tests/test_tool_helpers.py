@@ -462,3 +462,35 @@ def test_successful_close_is_still_idempotent():
     handle.close()
     handle.close()
     assert [e for e in job.events if e == ("destroy",)] == [("destroy",)]
+
+
+def test_running_does_not_mask_the_body_error():
+    """running() is the tail of every tool run() CM: a failing close()
+    must not replace the exception the block raised."""
+    class _FailingCloseHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+            raise RuntimeError("close failed")
+
+    handle = _FailingCloseHandle()
+    boom = RuntimeError("BODY BOOM")
+    with pytest.raises(RuntimeError) as info:
+        with _tool.running(handle):
+            raise boom
+    assert info.value is boom            # identity, not a message match
+    assert info.value.cleanup_errors     # close failure attached
+    assert handle.closed == 1            # close still ran
+
+
+def test_running_still_raises_a_close_failure_on_a_clean_block():
+    """With nothing to mask, a failing close() must still surface."""
+    class _FailingCloseHandle:
+        def close(self):
+            raise RuntimeError("close failed")
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        with _tool.running(_FailingCloseHandle()):
+            pass
