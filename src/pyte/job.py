@@ -527,7 +527,7 @@ class Job:
         envp = ffi.NULL if env_strs is None else ffi.new(
             "const char *[]", [*env_strs, ffi.NULL])
         fac = ffi.new("tapi_job_factory_t **")
-        check(lib.pyte_job_factory_rpc(server._h, fac),
+        check(lib.pyte_job_factory_rpc(server._handle(), fac),
               f"job_factory_rpc_create({server.name})")
         out = ffi.new("tapi_job_t **")
         rc = lib.pyte_job_create(fac[0], _enc(program), argv, envp, out)

@@ -300,6 +300,9 @@ class FakeServer:
     _h = object()
     name = "pco"
 
+    def _handle(self):
+        return self._h
+
     def _check_call(self, guard_rc, retval, ok, where):
         from pyte.errors import RpcError
         if guard_rc != 0:

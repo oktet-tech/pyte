@@ -6,7 +6,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import RpcError, TestFail, check
+from pyte.errors import ClosedResourceError, RpcError, TestFail, check
 from pyte._util import enc as _enc
 from typing import TYPE_CHECKING
 
@@ -45,6 +45,19 @@ class RpcServer:
         self._owned = owned
         self._silent_pass_depth = 0
 
+    def _handle(self):
+        """The live C handle; raises after destroy().
+
+        pyte_shim passes handles straight into the rcf_rpc_* calls, so
+        a NULL handle would crash the test process in C instead of
+        raising.  Env-owned PCOs are the sharp case: tapi_env_free
+        frees the server out from under any wrapper still holding it.
+        """
+        if self._h is None:
+            raise ClosedResourceError(
+                f"RPC server {self.ta}/{self.name} is already destroyed")
+        return self._h
+
     @classmethod
     def create(cls, ta: str, name: str) -> "RpcServer":
         ffi, lib = _shim()
@@ -54,20 +67,20 @@ class RpcServer:
         return cls(out[0], ta, name)
 
     def destroy(self) -> None:
-        """Destroy the RPC server.
+        """Destroy the RPC server; idempotent.
 
         Env-provided PCOs are owned by tapi_env (tapi_env_free destroys
-        them); the wrapper must not call pyte_rpc_server_destroy for them.
-        When ``owned=False`` this method returns immediately without
-        touching the shim or clearing the handle.
+        them), so the wrapper must not call pyte_rpc_server_destroy for
+        them.  It DOES clear the handle either way: tapi_env_free will
+        invalidate that pointer, and a wrapper the caller believes is
+        dead must not keep handing it to C.
         """
-        if not self._owned:
+        h, self._h = self._h, None
+        if h is None or not self._owned:
             return
         lib = _shim_lib()
-        if self._h is not None:
-            check(lib.pyte_rpc_server_destroy(self._h),
-                  f"rpc_server_destroy({self.name})", RpcError)
-            self._h = None
+        check(lib.pyte_rpc_server_destroy(h),
+              f"rpc_server_destroy({self.name})", RpcError)
 
     def __enter__(self):
         return self
@@ -94,10 +107,10 @@ class RpcServer:
         check(guard_rc, where, RpcError)
         if ok(retval):
             return retval
-        rpc_errno = lib.pyte_rpc_errno(self._h)
+        rpc_errno = lib.pyte_rpc_errno(self._handle())
         raise RpcError(
             rpc_errno, f"{where} -> {retval!r}",
-            ffi.string(lib.pyte_rpc_err_msg(self._h)).decode(
+            ffi.string(lib.pyte_rpc_err_msg(self._handle())).decode(
                 errors="replace"),
             output=output)
 
@@ -172,28 +185,30 @@ class RpcServer:
         """
         lib = _shim_lib()
         if self._silent_pass_depth == 0:
-            lib.pyte_rpc_set_silent_pass(self._h, 1)
+            lib.pyte_rpc_set_silent_pass(self._handle(), 1)
         self._silent_pass_depth += 1
         try:
             yield self
         finally:
             self._silent_pass_depth -= 1
             if self._silent_pass_depth == 0:
-                lib.pyte_rpc_set_silent_pass(self._h, 0)
+                lib.pyte_rpc_set_silent_pass(self._handle(), 0)
 
     # -- curated calls -------------------------------------------------
     def getpid(self) -> int:
         ffi, lib = _shim()
         out = ffi.new("int *")
-        return self._check_call(lib.pyte_rpc_getpid(self._h, out), out[0],
-                                lambda v: v >= 0, "getpid()")
+        return self._check_call(
+            lib.pyte_rpc_getpid(self._handle(), out), out[0],
+            lambda v: v >= 0, "getpid()")
 
     def hostname(self) -> str:
         ffi, lib = _shim()
         buf = ffi.new("char[]", _HOSTNAME_MAX)
         out = ffi.new("int *")
         self._check_call(
-            lib.pyte_rpc_gethostname(self._h, buf, _HOSTNAME_MAX - 1, out),
+            lib.pyte_rpc_gethostname(
+                self._handle(), buf, _HOSTNAME_MAX - 1, out),
             out[0], lambda v: v == 0, "gethostname()")
         return ffi.string(buf).decode(errors="replace")
 
@@ -212,7 +227,7 @@ class RpcServer:
         value = ffi.new("int *")
         # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED == 0)
         # with status 0.
-        rc = lib.pyte_rpc_shell_get_all(self._h, pbuf, _enc(cmd), flag,
+        rc = lib.pyte_rpc_shell_get_all(self._handle(), pbuf, _enc(cmd), flag,
                                         value)
         try:
             output = "" if pbuf[0] == ffi.NULL \
@@ -245,7 +260,7 @@ class RpcServer:
         flag = ffi.new("int *")
         value = ffi.new("int *")
         rc = lib.pyte_rpc_system(
-            self._h, 0 if timeout is None else int(timeout * 1000),
+            self._handle(), 0 if timeout is None else int(timeout * 1000),
             _enc(cmd), flag, value)
         # ok-predicate: process exited (flag RPC_WAIT_STATUS_EXITED
         # == 0); its exit status is reported via the return value.
@@ -277,12 +292,12 @@ class RpcServer:
         """Get an agent environment variable (None if unset)."""
         ffi, lib = _shim()
         out = ffi.new("char **")
-        rc = lib.pyte_rpc_getenv(self._h, _enc(name), out)
+        rc = lib.pyte_rpc_getenv(self._handle(), _enc(name), out)
         # rpc_getenv() returns NULL both for "unset" and "call
         # failed"; only the latter sets the remote errno.
         self._check_call(
             rc, out[0],
-            lambda v: v != ffi.NULL or lib.pyte_rpc_errno(self._h) == 0,
+            lambda v: v != ffi.NULL or lib.pyte_rpc_errno(self._handle()) == 0,
             f"getenv({name})")
         if out[0] == ffi.NULL:
             return None
@@ -296,7 +311,7 @@ class RpcServer:
         """Set an agent environment variable."""
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_setenv(self._h, _enc(name), _enc(value),
+        rc = lib.pyte_rpc_setenv(self._handle(), _enc(name), _enc(value),
                                  1 if overwrite else 0, out)
         self._check_call(rc, out[0], lambda v: v == 0,
                          f"setenv({name}={value!r})")

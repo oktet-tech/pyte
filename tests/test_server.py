@@ -343,3 +343,82 @@ def test_silent_pass_nested_restores_on_exception_from_inner_block(
                 raise ValueError("boom")
     assert lib.calls == [1, 0]
     assert srv._silent_pass_depth == 0
+
+
+class _LifecycleLib:
+    """Fake shim for the RpcServer destroy/getpid lifecycle."""
+
+    PYTE_ETIMEDOUT = 110
+
+    def __init__(self):
+        self.calls = []
+
+    def pyte_rpc_server_destroy(self, h):
+        self.calls.append(("destroy", h))
+        return 0
+
+    def pyte_rpc_getpid(self, h, out):
+        self.calls.append(("getpid", h))
+        out[0] = 4242
+        return 0
+
+    def pyte_rc_error(self, rc):
+        return rc
+
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def te_rc_mod2str(self, rc):
+        return b"RPC"
+
+    def te_rc_err2str(self, rc):
+        return b"E"
+
+
+class _LifecycleFfi:
+    NULL = object()
+
+    def new(self, spec):
+        return [0]
+
+    @staticmethod
+    def string(b):
+        return b
+
+
+def _fake_lifecycle_shim(monkeypatch):
+    lib = _LifecycleLib()
+    monkeypatch.setitem(
+        sys.modules, "pyte._shim",
+        types.SimpleNamespace(ffi=_LifecycleFfi(), lib=lib))
+    return lib
+
+
+def test_destroyed_server_raises_instead_of_passing_null(monkeypatch):
+    from pyte.errors import ClosedResourceError
+    _fake_lifecycle_shim(monkeypatch)
+    srv = RpcServer(object(), "Agt", "pco")
+    srv.destroy()
+    with pytest.raises(ClosedResourceError, match="pco"):
+        srv.getpid()
+
+
+def test_unowned_destroy_clears_the_handle(monkeypatch):
+    """tapi_env_free will free this pointer; the wrapper must stop
+    handing it to C just because destroy() is a no-op for env PCOs."""
+    from pyte.errors import ClosedResourceError
+    lib = _fake_lifecycle_shim(monkeypatch)
+    srv = RpcServer(object(), "Agt", "iut_rpcs", owned=False)
+    srv.destroy()
+    assert srv._h is None
+    assert not any(c[0] == "destroy" for c in lib.calls)
+    with pytest.raises(ClosedResourceError):
+        srv.getpid()
+
+
+def test_destroy_is_idempotent(monkeypatch):
+    lib = _fake_lifecycle_shim(monkeypatch)
+    srv = RpcServer(object(), "Agt", "pco")
+    srv.destroy()
+    srv.destroy()
+    assert len([c for c in lib.calls if c[0] == "destroy"]) == 1

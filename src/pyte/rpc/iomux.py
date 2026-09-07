@@ -125,7 +125,7 @@ class IoMux:
                 f"kind must be a Kind, not {type(kind).__name__}")
         kind_const = getattr(lib, kind.value)
         out = ffi.new("tapi_iomux_handle **")
-        check(lib.pyte_iomux_create(server._h, kind_const, out),
+        check(lib.pyte_iomux_create(server._handle(), kind_const, out),
               f"iomux_create({kind.name})", RpcError)
         return cls(server, out[0])
 

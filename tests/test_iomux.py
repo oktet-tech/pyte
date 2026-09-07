@@ -117,6 +117,9 @@ class FakeServer:
     _h = object()
     name = "pco"
 
+    def _handle(self):
+        return self._h
+
     def __repr__(self):
         return "<FakeServer>"
 

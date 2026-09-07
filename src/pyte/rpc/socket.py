@@ -208,7 +208,7 @@ class RpcSocket:
                 f"{type.__class__.__name__}")
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_socket(server._h,
+        rc = lib.pyte_rpc_socket(server._handle(),
                                  getattr(lib, family.value),
                                  getattr(lib, type.value),
                                  lib.PYTE_PROTO_DEF, out)
@@ -231,7 +231,7 @@ class RpcSocket:
         if self.fd < 0:
             return
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_close(self.server._h, self.fd, out)
+        rc = lib.pyte_rpc_close(self.server._handle(), self.fd, out)
         self.fd = -1
         self.server._check_call(rc, out[0], lambda v: v == 0, "close()")
 
@@ -248,7 +248,7 @@ class RpcSocket:
         ffi, lib = _shim()
         optname = getattr(lib, opt.value)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_setsockopt_int(self.server._h, self.fd,
+        rc = lib.pyte_rpc_setsockopt_int(self.server._handle(), self.fd,
                                          optname, value, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"setsockopt({opt.name}, {value})")
@@ -258,14 +258,14 @@ class RpcSocket:
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_bind(self.server._h, self.fd, sa, out)
+        rc = lib.pyte_rpc_bind(self.server._handle(), self.fd, sa, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"bind({addr})")
 
     def listen(self, backlog: int = 5) -> None:
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_listen(self.server._h, self.fd, backlog, out)
+        rc = lib.pyte_rpc_listen(self.server._handle(), self.fd, backlog, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"listen({backlog})")
 
@@ -274,7 +274,7 @@ class RpcSocket:
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_connect(self.server._h, self.fd, sa, out)
+        rc = lib.pyte_rpc_connect(self.server._handle(), self.fd, sa, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"connect({addr})")
 
@@ -284,7 +284,7 @@ class RpcSocket:
         sslen = ffi.new("socklen_t *",
                         ffi.sizeof("struct sockaddr_storage"))
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_accept(self.server._h, self.fd,
+        rc = lib.pyte_rpc_accept(self.server._handle(), self.fd,
                                  ffi.cast("struct sockaddr *", ss),
                                  sslen, out)
         self.server._check_call(rc, out[0], lambda v: v >= 0,
@@ -298,8 +298,8 @@ class RpcSocket:
                         ffi.sizeof("struct sockaddr_storage"))
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_getsockname(self.server._h, self.fd, sa, sslen,
-                                      out)
+        rc = lib.pyte_rpc_getsockname(
+            self.server._handle(), self.fd, sa, sslen, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                       "getsockname()")
         return _parse_addr(ffi, lib, sa)
@@ -311,8 +311,8 @@ class RpcSocket:
                         ffi.sizeof("struct sockaddr_storage"))
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_getpeername(self.server._h, self.fd, sa, sslen,
-                                      out)
+        rc = lib.pyte_rpc_getpeername(
+            self.server._handle(), self.fd, sa, sslen, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                       "getpeername()")
         return _parse_addr(ffi, lib, sa)
@@ -325,7 +325,7 @@ class RpcSocket:
         ffi, lib = _shim()
         val = ffi.new("int *")
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_getsockopt_int(self.server._h, self.fd,
+        rc = lib.pyte_rpc_getsockopt_int(self.server._handle(), self.fd,
                                          getattr(lib, opt.value), val, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                       f"getsockopt({opt.name})")
@@ -338,7 +338,7 @@ class RpcSocket:
                 f"how must be a Shut, not {how.__class__.__name__}")
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_shutdown(self.server._h, self.fd,
+        rc = lib.pyte_rpc_shutdown(self.server._handle(), self.fd,
                                    getattr(lib, how.value), out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"shutdown({how.name})")
@@ -347,7 +347,7 @@ class RpcSocket:
         """Set blocking (True) or non-blocking (False) mode (via fcntl)."""
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_sock_set_blocking(self.server._h, self.fd,
+        rc = lib.pyte_sock_set_blocking(self.server._handle(), self.fd,
                                         1 if blocking else 0, out)
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"set_blocking({blocking})")
@@ -357,7 +357,8 @@ class RpcSocket:
         ffi, lib = _shim()
         blk = ffi.new("int *")
         out = ffi.new("int *")
-        rc = lib.pyte_sock_get_blocking(self.server._h, self.fd, blk, out)
+        rc = lib.pyte_sock_get_blocking(
+            self.server._handle(), self.fd, blk, out)
         self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       "get_blocking()")
         return bool(blk[0])
@@ -366,7 +367,7 @@ class RpcSocket:
         bits = _msg_bits(flags)
         ffi, lib = _shim()
         out = ffi.new("ssize_t *")
-        rc = lib.pyte_rpc_send(self.server._h, self.fd, data, len(data),
+        rc = lib.pyte_rpc_send(self.server._handle(), self.fd, data, len(data),
                                bits, out)
         return self.server._check_call(rc, out[0], lambda v: v >= 0,
                                        f"send({len(data)} bytes)")
@@ -376,7 +377,7 @@ class RpcSocket:
         ffi, lib = _shim()
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("ssize_t *")
-        rc = lib.pyte_rpc_recv(self.server._h, self.fd, buf, size, bits,
+        rc = lib.pyte_rpc_recv(self.server._handle(), self.fd, buf, size, bits,
                                out)
         self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recv({size})")
@@ -389,8 +390,9 @@ class RpcSocket:
         ss = _mk_addr(ffi, lib, addr)
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("ssize_t *")
-        rc = lib.pyte_rpc_sendto(self.server._h, self.fd, data, len(data),
-                                 bits, sa, out)
+        rc = lib.pyte_rpc_sendto(
+            self.server._handle(), self.fd, data, len(data),
+            bits, sa, out)
         return self.server._check_call(
             rc, out[0], lambda v: v >= 0,
             f"sendto({len(data)} bytes, {addr})")
@@ -405,7 +407,7 @@ class RpcSocket:
                           ffi.sizeof("struct sockaddr_storage"))
         sa = ffi.cast("struct sockaddr *", ss)
         out = ffi.new("ssize_t *")
-        rc = lib.pyte_rpc_recvfrom(self.server._h, self.fd, buf, size,
+        rc = lib.pyte_rpc_recvfrom(self.server._handle(), self.fd, buf, size,
                                    bits, sa, fromlen, out)
         self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"recvfrom({size})")
@@ -483,7 +485,7 @@ class RpcSocket:
 
         sent = ffi.new("ssize_t *")
         rc = lib.pyte_rpc_sendmsg(
-            self.server._h, self.fd,
+            self.server._handle(), self.fd,
             iov_ptrs, iov_lens_arr, n_iov,
             addr_bytes, port,
             c_levels, c_types, c_data_ptrs, c_lens, n_cmsg,
@@ -522,7 +524,7 @@ class RpcSocket:
         p_received = ffi.new("ssize_t *")
 
         rc = lib.pyte_rpc_recvmsg(
-            self.server._h, self.fd, bufsize, ctrl_space, bits,
+            self.server._handle(), self.fd, bufsize, ctrl_space, bits,
             p_data, p_data_len,
             p_from_addr, p_from_port,
             p_levels, p_types, p_datas, p_lens,

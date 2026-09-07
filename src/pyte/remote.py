@@ -345,7 +345,7 @@ def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
             job.start()
             log.step_pop(f"remote python ready on {pco.ta}")
             popped = True
-            session = RemotePython(job, flt, timeout, server=pco._h)
+            session = RemotePython(job, flt, timeout, server=pco._handle())
             try:
                 yield session
             finally:

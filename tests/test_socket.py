@@ -69,6 +69,9 @@ class FakeServer:
     """Duck-typed RpcServer: records nothing, never suppresses."""
     _h = "srv-h"
 
+    def _handle(self):
+        return self._h
+
     def _check_call(self, rc, value, ok, where):
         return value
 

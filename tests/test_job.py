@@ -582,7 +582,8 @@ def test_run_one_shot_captures_output(monkeypatch):
     job (and its factory) are destroyed before it returns."""
     from pyte.job import run
     lib = _fake_shim(monkeypatch)
-    server = types.SimpleNamespace(_h="srv-h", name="pco")
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
     # stdout read_all() drains first, then stderr
     lib.recv_queue = [(b"out!", False), (b"", True),
                       (b"err!", False), (b"", True)]
@@ -603,7 +604,8 @@ def test_run_one_shot_reports_failure_status(monkeypatch):
     from pyte.job import run, StatusKind
     lib = _fake_shim(monkeypatch)
     lib.wait_result = (FakeLib.PYTE_JOB_EXITED, 3)
-    server = types.SimpleNamespace(_h="srv-h", name="pco")
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
     lib.recv_queue = [(b"", True), (b"", True)]
 
     result = run(server, "prog")
@@ -645,7 +647,8 @@ def test_create_with_stdin_kwarg_allocates_upfront(monkeypatch):
     """Job.create(..., stdin=True) allocates the input channel at
     creation, before any chance to start() — no ordering footgun."""
     lib = _fake_shim(monkeypatch)
-    server = types.SimpleNamespace(_h="srv-h", name="pco")
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
 
     job = Job.create(server, "cat", [], stdin=True)
 

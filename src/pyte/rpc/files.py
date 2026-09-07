@@ -30,7 +30,7 @@ class RpcFile:
         if self.fd < 0:
             return
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_close(self.server._h, self.fd, out)
+        rc = lib.pyte_rpc_close(self.server._handle(), self.fd, out)
         self.fd = -1
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"close({self.path})")
@@ -38,8 +38,8 @@ class RpcFile:
     def write(self, data: bytes) -> int:
         ffi, lib = _shim()
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_write(self.server._h, self.fd, data, len(data),
-                                out)
+        rc = lib.pyte_rpc_write(
+            self.server._handle(), self.fd, data, len(data), out)
         return self.server._check_call(rc, out[0], lambda v: v >= 0,
                                        f"write({self.path}, "
                                        f"{len(data)} bytes)")
@@ -48,7 +48,7 @@ class RpcFile:
         ffi, lib = _shim()
         buf = ffi.new("uint8_t[]", size)
         out = ffi.new("int *")
-        rc = lib.pyte_rpc_read(self.server._h, self.fd, buf, size, out)
+        rc = lib.pyte_rpc_read(self.server._handle(), self.fd, buf, size, out)
         self.server._check_call(rc, out[0], lambda v: v >= 0,
                                       f"read({self.path}, {size})")
         return bytes(ffi.buffer(buf, out[0]))
@@ -63,7 +63,7 @@ def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
         "a": lib.PYTE_O_WRONLY | lib.PYTE_O_CREAT | lib.PYTE_O_APPEND,
     }[mode]
     out = ffi.new("int *")
-    rc = lib.pyte_rpc_open(server._h, _enc(path), flags,
+    rc = lib.pyte_rpc_open(server._handle(), _enc(path), flags,
                            lib.PYTE_MODE_0644, out)
     server._check_call(rc, out[0], lambda v: v >= 0,
                              f"open({path}, {mode!r})")
@@ -74,7 +74,7 @@ def unlink(server, path: str) -> None:
     """Remove a file on the RPC server."""
     ffi, lib = _shim()
     out = ffi.new("int *")
-    rc = lib.pyte_rpc_unlink(server._h, _enc(path), out)
+    rc = lib.pyte_rpc_unlink(server._handle(), _enc(path), out)
     server._check_call(rc, out[0], lambda v: v == 0, f"unlink({path})")
 
 

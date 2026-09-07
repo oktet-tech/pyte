@@ -34,10 +34,13 @@ def test_env_iface_bridge(monkeypatch):
     assert captured["args"] == ("Agt_B", "veth0")
 
 
-def test_rpc_server_not_owned_skips_destroy():
+def test_rpc_server_not_owned_skips_destroy_but_clears_handle():
+    """The env owns this server: destroy() must not call the shim, but
+    it MUST drop the handle -- tapi_env_free frees that pointer, and a
+    retained wrapper would keep passing it to C."""
     srv = RpcServer(object(), "Agt_A", "pco", owned=False)
     srv.destroy()          # must not touch the shim
-    assert srv._h is not None  # handle intentionally left alone
+    assert srv._h is None  # but the handle is no longer usable
 
 
 def test_rpc_server_owned_default():
