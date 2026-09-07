@@ -23,11 +23,14 @@ exactly these shapes.
 """
 from __future__ import annotations
 
+import functools
+
 from pyte._util import shim_lib as _shim_lib
 
 from contextlib import contextmanager
 
 from pyte import cfg
+from pyte._cleanup import cleanup_all
 
 
 def _cvt_int(name: str) -> int:
@@ -66,10 +69,10 @@ class CfgObject:
         """Save the named knob attributes; restore them on block exit.
 
         Restore runs whether the block succeeds or raises, via the
-        normal typed setters.  Every named attribute must be a writable
-        knob: a read-only one raises TypeError up front, since restoring
-        it would otherwise fail inside the finally and mask the real
-        error.
+        normal typed setters, attempting every attribute even if an
+        earlier restore fails.  Every named attribute must be a
+        writable knob: a read-only one raises TypeError up front,
+        failing fast rather than partway through the restore.
         """
         for a in attrs:
             knob = getattr(type(self), a, None)
@@ -78,11 +81,20 @@ class CfgObject:
             if knob.access == "read_only":
                 raise TypeError(f"cannot save read-only knob {a!r}")
         old = {a: getattr(self, a) for a in attrs}
+        primary = None
         try:
             yield self
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            for a, value in old.items():
-                setattr(self, a, value)
+            # Every attribute attempted, in the order they were named:
+            # a failing restore must not abandon the rest, nor replace
+            # the exception that caused the unwind.
+            cleanup_all(
+                *[functools.partial(setattr, self, a, v)
+                  for a, v in old.items()],
+                primary=primary)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.oid!r})"

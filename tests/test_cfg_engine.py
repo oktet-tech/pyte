@@ -133,6 +133,61 @@ def test_saved_read_only_knob_raises_up_front(fake):
     assert fake.sets == []  # no snapshot/restore writes happened
 
 
+# -- saved(): attempt every restore, keep the real error --------------
+
+class _TwoKnob(CfgObject):
+    mtu = IntKnob("mtu")
+    ttl = IntKnob("ip4_ttl")
+
+    def __init__(self, ta, ifname):
+        super().__init__(f"/agent:{ta}/interface:{ifname}")
+
+
+def _fail_setting(fake, monkeypatch, bad_subid):
+    """Make cfg.set raise for one subid, recording every attempt."""
+    from pyte.errors import CfgError
+    attempts = []
+    real = cfg.set
+
+    def _set(oid, value, cvt=None):
+        attempts.append(oid)
+        if bad_subid in oid:
+            raise CfgError(12)  # arbitrary nonzero rc; message unused
+        real(oid, value, cvt)
+
+    monkeypatch.setattr(cfg, "set", _set)
+    return attempts
+
+
+def test_saved_restores_every_attribute_despite_one_failure(
+        fake, monkeypatch):
+    obj = _TwoKnob("A", "eth0")
+    fake.store["/agent:A/interface:eth0/mtu:"] = 1500
+    fake.store["/agent:A/interface:eth0/ip4_ttl:"] = 64
+    attempts = _fail_setting(fake, monkeypatch, "mtu")
+    from pyte.errors import CfgError
+    with pytest.raises(CfgError):
+        with obj.saved("mtu", "ttl"):
+            pass
+    # ttl attempted even though mtu's restore raised, in the order the
+    # attributes were named (matching the order they were saved in).
+    assert "/agent:A/interface:eth0/ip4_ttl:" in attempts
+    assert (attempts.index("/agent:A/interface:eth0/mtu:")
+            < attempts.index("/agent:A/interface:eth0/ip4_ttl:"))
+
+
+def test_saved_does_not_replace_the_body_exception(fake, monkeypatch):
+    obj = _TwoKnob("A", "eth0")
+    fake.store["/agent:A/interface:eth0/mtu:"] = 1500
+    _fail_setting(fake, monkeypatch, "mtu")
+    boom = RuntimeError("what the test actually failed on")
+    with pytest.raises(RuntimeError) as info:
+        with obj.saved("mtu"):
+            raise boom
+    assert info.value is boom
+    assert info.value.cleanup_errors
+
+
 def test_knob_rejects_invalid_access():
     with pytest.raises(ValueError, match="invalid access"):
         IntKnob("x", access="readonly")

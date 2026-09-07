@@ -353,19 +353,62 @@ def test_transaction_rolls_back_on_exception(backup_seam):
 
 def test_transaction_releases_even_if_restore_raises(backup_seam,
                                                      monkeypatch):
-    # The inner finally must still release; and a restore failure during
-    # unwind replaces the body's exception (standard finally semantics).
+    # The inner finally must still release; a restore failure during
+    # unwind is attached to the body's exception instead of replacing
+    # it.
     def boom_restore(name):
         backup_seam.append(("restore", name))
         raise RuntimeError("restore failed")
 
     monkeypatch.setattr(cfg, "_backup_restore", boom_restore)
-    with pytest.raises(RuntimeError, match="restore failed"):
+    with pytest.raises(RuntimeError, match="boom") as info:
         with cfg.transaction():
             backup_seam.append("body")
             raise RuntimeError("boom")
     assert backup_seam == ["create", "body",
                            ("restore", "BK"), ("release", "BK")]
+    assert info.value.cleanup_errors
+
+
+# -- backup()/transaction(): attempt every step, keep the real error --
+
+def _install_fake_backup(monkeypatch, fail=()):
+    """Record backup create/restore/release; fail the named steps."""
+    from pyte.errors import CfgError
+    calls = []
+
+    def _step(name):
+        def go(*a):
+            calls.append(name)
+            if name in fail:
+                raise CfgError(12)  # arbitrary nonzero rc
+            return "bk1" if name == "create" else None
+        return go
+
+    monkeypatch.setattr(cfg, "_backup_create", _step("create"))
+    monkeypatch.setattr(cfg, "_backup_restore", _step("restore"))
+    monkeypatch.setattr(cfg, "_backup_release", _step("release"))
+    return calls
+
+
+def test_backup_release_runs_even_when_restore_fails(monkeypatch):
+    calls = _install_fake_backup(monkeypatch, fail=("restore",))
+    from pyte.errors import CfgError
+    with pytest.raises(CfgError):
+        with cfg.backup():
+            pass
+    assert "release" in calls
+
+
+def test_backup_restore_failure_does_not_replace_the_body_error(
+        monkeypatch):
+    _install_fake_backup(monkeypatch, fail=("restore",))
+    boom = RuntimeError("the real failure")
+    with pytest.raises(RuntimeError) as info:
+        with cfg.backup():
+            raise boom
+    assert info.value is boom
+    assert info.value.cleanup_errors
 
 
 # -- CfgNotFoundError + exists() (P1.7) ---------------------------------

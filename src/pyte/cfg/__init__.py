@@ -32,9 +32,11 @@ Usage::
 """
 from __future__ import annotations
 
+import functools
 import re
 from contextlib import contextmanager
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import CfgError, check
 from pyte._util import enc as _enc
@@ -250,22 +252,26 @@ def _backup_release(name: str) -> None:
 def backup():
     """Snapshot the configuration; restore it on block exit.
 
-    Restore runs whether the block succeeds or raises; the backup name
-    is released afterwards.  This is TE's transactional rollback idiom.
+    Restore runs whether the block succeeds or raises, and the backup
+    name is released either way.  A failure in either step is attached
+    to the exception being unwound rather than replacing it.
     """
     name = _backup_create()
+    primary = None
     try:
         yield name
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        try:
-            _backup_restore(name)
-        finally:
-            _backup_release(name)
+        cleanup_all(functools.partial(_backup_restore, name),
+                    functools.partial(_backup_release, name),
+                    primary=primary)
 
 
 @contextmanager
 def transaction():
-    """Apply configuration changes with all-or-nothing rollback.
+    """Roll the configuration back if the block raises.
 
     Takes a configuration backup on entry.  Writes inside the block apply
     immediately (no batching).  On a clean exit the backup is released
@@ -279,16 +285,17 @@ def transaction():
     the safe primitive.
     """
     name = _backup_create()
-    ok = False
+    primary = None
     try:
         yield
-        ok = True
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        try:
-            if not ok:
-                _backup_restore(name)
-        finally:
-            _backup_release(name)
+        actions = [functools.partial(_backup_release, name)]
+        if primary is not None:
+            actions.insert(0, functools.partial(_backup_restore, name))
+        cleanup_all(*actions, primary=primary)
 
 
 def wait_changes() -> None:
@@ -348,22 +355,26 @@ def borrowed_rsrc(name: str, owner_agent: str, borrower_agent: str,
 
     ``subpath`` is the per-agent OID tail (e.g. ``"interface:lo"``);
     the full ``/agent:{X}/{subpath}`` target is built only here.
-
-    Standard ``finally`` semantics apply: if the body raises AND a
-    release/restore step also raises during unwind, the unwind error
-    replaces the body's exception (kept only as ``__context__``).
     """
     set(f"/agent:{owner_agent}/rsrc:{name}", "")
+    primary = None
     try:
         grab_rsrc(borrower_agent, name,
                   f"/agent:{borrower_agent}/{subpath}")
         try:
             yield
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
-            release_rsrc(borrower_agent, name)
+            cleanup_all(
+                functools.partial(release_rsrc, borrower_agent, name),
+                primary=primary)
     finally:
-        set(f"/agent:{owner_agent}/rsrc:{name}",
-            f"/agent:{owner_agent}/{subpath}")
+        cleanup_all(
+            functools.partial(set, f"/agent:{owner_agent}/rsrc:{name}",
+                              f"/agent:{owner_agent}/{subpath}"),
+            primary=primary)
 
 
 def node(oid: str) -> CfgNode:
