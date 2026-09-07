@@ -95,9 +95,12 @@ def test_log_summary_reports_non_zero_flow_table_errors(fake_shim):
 
 
 class _FakeJob:
-    def __init__(self):
+    def __init__(self, trace=None):
         self.started = False
         self.destroyed = False
+        # Shared with a FakeRemote's call list where a test wants one
+        # ordered trace of shipped ops and job lifecycle events.
+        self.trace = [] if trace is None else trace
         self.stdout = self
         self.stderr = self
 
@@ -109,16 +112,30 @@ class _FakeJob:
 
     def destroy(self):
         self.destroyed = True
+        self.trace.append(("destroy", ()))
 
 
 class _FakePco:
     ta = "TST1"
 
-    def __init__(self):
-        self.job_obj = _FakeJob()
+    def __init__(self, trace=None):
+        self.job_obj = _FakeJob(trace)
 
     def job(self, path, args):
         return self.job_obj
+
+
+def _fake_remote_python(monkeypatch, rem):
+    """Make pyte.remote.python() hand out *rem* instead of an agent."""
+    class _Ctx:
+        def __enter__(self):
+            return rem
+
+        def __exit__(self, *exc):
+            return False
+
+    import pyte.remote as remote_mod
+    monkeypatch.setattr(remote_mod, "python", lambda p: _Ctx())
 
 
 def test_session_acquires_the_ports_before_yielding(fake_shim,
@@ -134,16 +151,7 @@ def test_session_acquires_the_ports_before_yielding(fake_shim,
     rem = FakeRemote(results={"write_cfg": "/tmp/c.yaml",
                               "bootstrap": object()})
     pco = _FakePco()
-
-    class _Ctx:
-        def __enter__(self):
-            return rem
-
-        def __exit__(self, *exc):
-            return False
-
-    import pyte.remote as remote_mod
-    monkeypatch.setattr(remote_mod, "python", lambda p: _Ctx())
+    _fake_remote_python(monkeypatch, rem)
 
     opts = astf.ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
                            ports=["0000:03:00.0", "0000:03:00.1"],
@@ -153,6 +161,59 @@ def test_session_acquires_the_ports_before_yielding(fake_shim,
         assert "reset" in seen
         assert seen.index("reset") > seen.index("bootstrap")
         assert client is not None
+
+
+def _astf_opts():
+    return astf.ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                           ports=["0000:03:00.0", "0000:03:00.1"],
+                           astf=True)
+
+
+def test_session_destroys_trex_before_removing_its_cfg(fake_shim,
+                                                       monkeypatch):
+    """Teardown order, not just teardown coverage.
+
+    TRex reopens the config it was started with while shutting down
+    (cleanup_servers()), so unlinking the file first made every run --
+    passing ones included -- carry a FileNotFoundError traceback from
+    a TRex already on its way out.
+    """
+    rem = FakeRemote(results={"write_cfg": "/tmp/c.yaml",
+                              "bootstrap": object()})
+    pco = _FakePco(trace=rem.calls)
+    _fake_remote_python(monkeypatch, rem)
+
+    with astf.session(pco, _astf_opts()):
+        pass
+    seen = [name for name, _ in rem.calls]
+    assert "destroy" in seen and "remove_file" in seen
+    assert seen.index("destroy") < seen.index("remove_file")
+    assert pco.job_obj.destroyed
+
+
+def test_session_order_holds_and_keeps_the_body_error(fake_shim,
+                                                      monkeypatch):
+    """The reorder must not cost the property cleanup_all exists for:
+    a teardown failure is attached to the body's exception, never
+    substituted for it, and the cfg is still removed after the kill."""
+    rem = FakeRemote(results={"write_cfg": "/tmp/c.yaml",
+                              "bootstrap": object()})
+    pco = _FakePco(trace=rem.calls)
+    _fake_remote_python(monkeypatch, rem)
+
+    def _boom_destroy():
+        rem.calls.append(("destroy", ()))
+        raise RuntimeError("destroy failed")
+
+    pco.job_obj.destroy = _boom_destroy
+    boom = RuntimeError("BODY BOOM")
+    with pytest.raises(RuntimeError) as info:
+        with astf.session(pco, _astf_opts()):
+            raise boom
+    assert info.value is boom              # identity, not just message
+    assert info.value.cleanup_errors       # destroy failure attached
+    seen = [name for name, _ in rem.calls]
+    assert seen.index("destroy") < seen.index("remove_file")
 
 
 def test_rate_scales_to_the_largest_prefix_that_fits():

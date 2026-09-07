@@ -215,8 +215,9 @@ def session(pco: "RpcServer", opts: ServerOpts,
 
     Bring-up: open one pyte.remote session, write the cfg-YAML, launch TRex
     as a tapi_job (sh -c 'cd <dir> && exec ...'), then bootstrap the native
-    STLClient over loopback. Teardown disconnects the client and destroys
-    the job on every exit path.
+    STLClient over loopback. Teardown disconnects the client, destroys the
+    job and removes the temp cfg on every exit path -- in that order, see
+    the innermost ``finally`` below.
     """
     from pyte import remote
     ports = list(range(len(opts.ports)))
@@ -257,18 +258,30 @@ def session(pco: "RpcServer", opts: ServerOpts,
                         client._call(_ops.disconnect)
                     except Exception:   # noqa: BLE001  best-effort teardown
                         pass
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
+                # The order of these two is load-bearing. TRex reopens
+                # the config it was started with while shutting down
+                # (cleanup_servers()), so the process has to be gone
+                # before the file is. Removing it first put a
+                # FileNotFoundError traceback into the log of every
+                # run, passing runs included.
+                #
+                # job.destroy() goes through cleanup_all so a teardown
+                # failure is attached to the exception being unwound
+                # rather than replacing it; the removal below stays
+                # swallowed whole, so a failed unlink can neither mask
+                # a real error nor become one.
+                if job is not None:
+                    cleanup_all(job.destroy, primary=primary)
                 # The mkstemp'd cfg would otherwise accumulate on a
                 # shared DUT, one file per session.
                 try:
                     rem.call(_ops.remove_file, cfg_path)
                 except Exception:   # noqa: BLE001  best-effort teardown
                     pass
-    except BaseException as exc:
-        primary = exc
-        raise
     finally:
         if not popped:
             log.step_pop(f"TRex STL bring-up failed on {pco.ta}")
-        if job is not None:
-            cleanup_all(job.destroy, primary=primary)

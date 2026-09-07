@@ -238,6 +238,66 @@ def test_session_teardown_failure_does_not_mask_the_body_error(
     assert info.value.cleanup_errors          # destroy failure attached
 
 
+def test_session_destroys_trex_before_removing_its_cfg(monkeypatch):
+    """Teardown order, not just teardown coverage.
+
+    TRex reopens the config it was started with while shutting down
+    (cleanup_servers()), so unlinking the file first made every run --
+    passing ones included -- carry a FileNotFoundError traceback from
+    a TRex already on its way out.
+    """
+    from contextlib import contextmanager
+
+    from pyte.tools.trex import _config
+
+    trace = []          # shipped ops and job lifecycle, in order
+
+    class FakeRem:
+        def call(self, fn, *args, **kwargs):
+            trace.append(fn.__name__)
+            if fn.__name__ == "write_cfg":
+                return "/tmp/pyte_trex_x.yaml"
+            if fn.__name__ == "bootstrap":
+                return object()     # the remote cli
+            return None
+
+    @contextmanager
+    def fake_python(pco, timeout=30.0, interpreter="python3"):
+        yield FakeRem()
+
+    class FakeChannel:
+        def log(self, level=None):
+            pass
+
+    class FakeJob:
+        stdout = FakeChannel()
+        stderr = FakeChannel()
+
+        def start(self):
+            pass
+
+        def destroy(self, *a, **k):
+            trace.append("destroy")
+
+    class FakePco:
+        ta = "Agt_A"
+
+        def job(self, program, args=None):
+            return FakeJob()
+
+    monkeypatch.setattr("pyte.remote.python", fake_python)
+    from pyte import log
+    monkeypatch.setattr(log, "step_push", lambda *a, **k: None)
+    monkeypatch.setattr(log, "step_pop", lambda *a, **k: None)
+    monkeypatch.setattr(log, "ring", lambda *a, **k: None)
+    opts = _config.ServerOpts(trex_exec="/x/t-rex-64",
+                             ports=["0000:04:00.0"])
+    with stl.session(FakePco(), opts):
+        pass
+    assert "destroy" in trace and "remove_file" in trace
+    assert trace.index("destroy") < trace.index("remove_file")
+
+
 def test_every_shipped_op_is_announced_at_verb(fake_shim):
     # get_stats/get_pgid_stats open no step bracket, so a run left no
     # record of them; VERB is below RING, so the line is invisible at
