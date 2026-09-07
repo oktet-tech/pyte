@@ -37,46 +37,43 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
 
     TRex's bundled client stack predates several Python stdlib
     removals; the target agent's python3 may be new enough to hit all
-    of them. Each shim below is independently guarded: a shim that
-    turns out to be unnecessary (older Python, or a newer TRex that no
-    longer needs it) must not break bring-up.
+    of them. The shims are installed in a fixed order, and the order
+    is the whole point -- see below.
 
-    - TRex's bundled scapy (under ``external_libs/scapy-<version>``
-      inside the install directory, three levels up from
-      ``trex_lib_dir``) is added to sys.path. No version string is
-      hardcoded: the directory name is discovered with a glob.
-    - ``scapy.modules.six`` registers ``six.moves`` and
-      ``six.moves.queue`` via the old find_module/load_module
-      meta-path protocol, removed in Python 3.12; they are
-      pre-registered in sys.modules directly.
     - ``imp`` was removed in Python 3.12; ``trex_astf_profile.py``
       only calls ``imp.reload()``, so a stub exposing that one
       attribute (as importlib.reload) is registered.
     - ``cgi`` was removed in Python 3.13; the real module is used
       when present, and only on ImportError is a minimal stub
-      (escape, parse_header) registered instead.
+      (escape, parse_header) registered instead. It has to be in
+      place before anything imports scapy, whose ``themes`` module
+      imports ``cgi`` at module scope.
+    - ``import trex`` is then done on its own, BEFORE the scapy shim
+      and before ``trex.astf.api``. ``trex/__init__.py`` puts its own
+      bundled ``external_libs/*`` directories on sys.path, and while
+      doing so it deletes from sys.modules every already-imported
+      module whose name matches one of those libraries and whose
+      ``__path__`` does not start with the path it just computed.
+      That path comes from ``os.path.realpath(__file__)``, so on the
+      usual install (``/usr/local/trex`` a symlink to
+      ``/usr/local/trex-<version>``) it is spelled differently from
+      the caller's ``trex_lib_dir`` -- and a scapy imported by us
+      beforehand, under any other spelling, is purged along with the
+      sys.modules entries the next shim installs. Letting TRex set
+      scapy up itself sidesteps the whole question, which is why no
+      scapy path is derived here.
+    - ``scapy.modules.six`` registers ``six.moves`` and
+      ``six.moves.queue`` via the old find_module/load_module
+      meta-path protocol, removed in Python 3.12; they are
+      pre-registered in sys.modules directly, after the ``import
+      trex`` above so nothing removes them again.
+
+    Each shim is independently guarded: one that turns out to be
+    unnecessary (older Python, or a newer TRex that no longer needs
+    it) must not break bring-up.
     """
-    import glob
-    import os
     import sys
     import time
-
-    try:
-        install_dir = os.path.dirname(os.path.dirname(
-            os.path.dirname(trex_lib_dir)))
-        for scapy_dir in glob.glob(
-                os.path.join(install_dir, "external_libs", "scapy-*")):
-            if scapy_dir not in sys.path:
-                sys.path.insert(0, scapy_dir)
-    except Exception:
-        pass
-
-    try:
-        import scapy.modules.six as _six
-        sys.modules["scapy.modules.six.moves"] = _six.moves
-        sys.modules["scapy.modules.six.moves.queue"] = _six.moves.queue
-    except Exception:
-        pass
 
     try:
         import importlib
@@ -116,6 +113,16 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
 
     if trex_lib_dir not in sys.path:
         sys.path.insert(0, trex_lib_dir)
+
+    import trex        # noqa: F401  sets up its bundled external_libs
+
+    try:
+        import scapy.modules.six as _six
+        sys.modules["scapy.modules.six.moves"] = _six.moves
+        sys.modules["scapy.modules.six.moves.queue"] = _six.moves.queue
+    except Exception:
+        pass
+
     from trex.astf.api import ASTFClient
     c = ASTFClient(server=server, sync_port=sync_port,
                    async_port=async_port)

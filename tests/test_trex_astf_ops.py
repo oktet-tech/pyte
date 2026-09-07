@@ -70,12 +70,33 @@ def test_every_op_is_self_contained():
 
 
 def test_bootstrap_has_no_hardcoded_trex_version():
-    """The scapy path must be derived by globbing, never a fixed version."""
+    """No install path may name a TRex or scapy version."""
     src = inspect.getsource(ops.bootstrap)
     assert "3.06" not in src
     assert "trex-v" not in src
     assert "scapy-2.4.3" not in src
     assert not re.search(r"scapy-\d", src)
+
+
+def test_bootstrap_imports_trex_before_the_scapy_shim():
+    """``import trex`` must come first, then the six.moves shim.
+
+    ``trex/__init__.py`` puts its own bundled external_libs on
+    sys.path and, while doing so, deletes from sys.modules every
+    already-imported module of the same name whose path is not the
+    one it just computed from ``os.path.realpath(__file__)``. A scapy
+    imported before that -- and the ``scapy.modules.six.moves``
+    sys.modules entries installed alongside it -- is thrown away, and
+    the ASTF client import then fails on ``six.moves`` with no hint
+    of why. The live bring-up on <tester-host> failed exactly this way,
+    because ``/usr/local/trex`` is a symlink and so is spelled
+    differently from the realpath TRex compares against.
+    """
+    src = inspect.getsource(ops.bootstrap)
+    trex_at = re.search(r"^    import trex\b", src, re.M).start()
+    shim_at = src.index("import scapy.modules.six")
+    api_at = src.index("from trex.astf.api")
+    assert trex_at < shim_at < api_at
 
 
 def test_bootstrap_cgi_shim_survives_non_import_error(monkeypatch):
