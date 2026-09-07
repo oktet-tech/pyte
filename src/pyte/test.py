@@ -288,7 +288,7 @@ def start(name: str | None = None):
         if t._env is not None:
             try:
                 t._env.close()
-            except Exception:
+            except BaseException:  # noqa: BLE001  interrupt-safe teardown
                 log.error("env close failed:\n" + traceback.format_exc())
                 if result == 0:
                     result = 1

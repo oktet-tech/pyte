@@ -320,7 +320,7 @@ class Csap:
         session).  Packet.free() is not comparable: it is a local,
         synchronous ASN free with no RPC involved.
         """
-        if self._handle is None:
+        if getattr(self, "_handle", None) is None:
             return
         warnings.warn(
             f"Csap {self.stack_id!r} on {self.ta!r} was never "

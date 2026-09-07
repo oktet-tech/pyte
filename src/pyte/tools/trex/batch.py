@@ -42,7 +42,7 @@ not just the ones that created it, until something calls
 exactly that once its own drain (already silent from creation, so it
 needs no bracket of its own) is done, mirroring
 ``trex_result_extract()``'s closing ``tapi_job_set_tracing(TRUE)``
-(nap-trex-stats.c:694) -- see its docstring -- so ``stop``/``kill``/
+(nap-trex-stats.c:975,977) -- see its docstring -- so ``stop``/``kill``/
 ``destroy`` afterwards stay logged, same as the C. This is deliberate,
 stated intent in the port, not a side effect of
 :meth:`~pyte.job.Job.quiet`, which restores whatever tracing state it
@@ -568,7 +568,7 @@ class Trex:
         this runs (nothing between creation and here flips
         ``silent_pass`` back), so the drain itself needs no
         ``tapi_job_set_tracing(FALSE)`` half of the bracket
-        ``trex_result_extract()`` uses (nap-trex-stats.c:614-694).
+        ``trex_result_extract()`` uses (nap-trex-stats.c:831-978).
 
         It DOES need that bracket's closing half:
         ``rpc_job_start``/``wait``/``stop``/``kill``/``destroy``

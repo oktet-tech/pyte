@@ -3,6 +3,7 @@
 """pyte.tad.csap unit tests (fake shim): session cache + Receiver state."""
 import sys
 import types
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -248,6 +249,20 @@ def test_del_is_a_noop_after_destroy(monkeypatch, recwarn):
 
     assert lib.calls == []
     assert len(recwarn) == 0
+
+
+def test_del_on_early_init_failure_does_not_raise_attributeerror(
+        monkeypatch):
+    """__init__ can raise before self._handle is ever assigned (stack()
+    or _session() failing) -- __del__ must not turn that into a fresh
+    AttributeError obscuring the real construction error."""
+    _fake_shim(monkeypatch)
+    c = Csap.__new__(Csap)   # __init__ never ran: no _handle attribute
+    assert not hasattr(c, "_handle")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")   # any warning would fail the test
+        c.__del__()                      # must not raise AttributeError
 
 
 def test_context_manager_preserves_body_exception_when_destroy_fails(

@@ -304,3 +304,24 @@ def test_a_base_exception_in_cleanup_still_frees_the_env(fake_shim):
     ok = t._run_cleanups()
     assert closed == [True] or not ok   # the env is still freed
     assert not ok                       # and the failure is reported
+
+
+def test_a_base_exception_from_env_close_still_exits_cleanly(
+        lib, monkeypatch):
+    """start()'s own t._env.close() guard caught only Exception, one
+    line below the _run_cleanups widening to BaseException made for
+    exactly this reason -- a KeyboardInterrupt from env.close() must
+    not skip _current = None and sys.exit(result)."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+
+    class _Env:
+        def close(self):
+            raise KeyboardInterrupt()
+
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t._env = _Env()
+    assert ei.value.code == 1
+    assert test._current is None
+    err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert any("env close failed" in txt for txt in err_logs)

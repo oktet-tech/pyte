@@ -182,9 +182,14 @@ class RpcServer:
         silence has to be baked in when the job/filter was created.
         Wrap :meth:`RpcServer.job` and the filters it attaches in this
         block and every future ``drain()`` on those filters is
-        silenced for free; ``job.start()``/``wait()``/``stop()``/
-        ``kill()``/``destroy()`` never consult any object's
-        ``silent_pass``, so they keep logging regardless of this.
+        silenced for free. That baked-in silence is NOT limited to
+        creation, though: ``job.start()``/``wait()``/``stop()``/
+        ``kill()``/``destroy()`` (``rpc_job_{start,wait,stop,kill,
+        destroy}``, ``te/lib/tapi_job/rpc_job.c:118,171,212``) each
+        reassert ``rpcs->silent_pass = tapi_job_get_silent_pass(job)``
+        around their own call, so a job born silent under this window
+        stays silent for every later RPC made on it, lifecycle calls
+        included, until something re-enables tracing on it.
 
         Nests correctly (the previous state is restored, not forced
         off) and restores on exception::
@@ -192,7 +197,7 @@ class RpcServer:
             with pco.silent_pass():
                 job = pco.job(prog, args)
                 flt = job.filter(stdout=True, regex=r"...")
-            job.start()             # still logged
+            job.start()             # still silenced (baked in at creation)
             flt.drain()             # silenced (baked in at attach time)
         """
         lib = _shim_lib()

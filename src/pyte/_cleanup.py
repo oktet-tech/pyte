@@ -44,6 +44,15 @@ def cleanup_all(*actions: Callable[[], object],
     With no *primary*, the first failure is raised carrying the rest
     the same way.
 
+    A ``KeyboardInterrupt``/``SystemExit`` raised by an action is not
+    special-cased: with *primary* given it is recorded in
+    ``cleanup_errors`` like any other failure and NOT re-raised (the
+    caller re-raises *primary* itself, as documented above) -- this is
+    deliberate, not an oversight, so a Ctrl-C in one teardown action
+    does not abort the rest of the actions or replace the real error.
+    With no *primary* it is raised the same way a first failure always
+    is.
+
     Catches BaseException: an interrupt arriving mid-teardown must not
     skip the cleanups that have not run yet.
     """

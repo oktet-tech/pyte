@@ -228,7 +228,7 @@ class ClosedResourceError(TeError, RuntimeError):
 
 
 class TrcClosedError(ClosedResourceError, TrcError):
-    """A borrowed TRC view used after its Db was closed.
+    """A TRC database (or a view onto it) used after it was closed.
 
     trc.py raised a plain TrcError here and trc-tool catches that, so
     the unified error stays a TrcError as well as a
