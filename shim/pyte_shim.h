@@ -165,6 +165,7 @@ extern te_errno pyte_rpc_server_create(const char *ta, const char *name,
 extern te_errno pyte_rpc_server_destroy(rcf_rpc_server *rpcs);
 extern void pyte_rpc_set_silent(rcf_rpc_server *rpcs, int on);
 extern void pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on);
+extern int pyte_rpc_get_silent_pass(rcf_rpc_server *rpcs);
 extern int pyte_rpc_errno(rcf_rpc_server *rpcs);
 extern const char *pyte_rpc_err_msg(rcf_rpc_server *rpcs);
 extern void pyte_rpc_set_timeout(rcf_rpc_server *rpcs, uint32_t ms);
