@@ -3,11 +3,19 @@
 """Parameter documentation findings for a Python test module.
 
 The four findings mirror TE's C-side checker
-(``te/scripts/scenario/cparam.py``): a parameter the source reads with
-no doc entry, a doc entry nothing reads, two entries for one name, and
-an entry with nothing in it.  An empty entry still occupies its name --
-it is reported for being empty, not also for being undocumented, and a
-second entry for the same name is still a duplicate of it.
+(``te/scripts/scenario/cparam.py``): a parameter with no doc entry, a
+doc entry for no parameter, two entries for one name, and an entry with
+nothing in it.  An empty entry still occupies its name -- it is
+reported for being empty, not also for being undocumented, and a second
+entry for the same name is still a duplicate of it.
+
+What a parameter *is* differs from the C side, because a Python suite
+has a second authority the C side lacks: the package.xml sitting beside
+the script says what the Tester passes, while the source says only what
+the test has got round to reading.  Both cross-checks run against the
+union (see the packagexml module), so documentation that runs ahead of
+the code is clean rather than stale, and a declared parameter nobody
+documented is a finding rather than invisible.
 
 What counts as a read is pyte's ``Params`` API and nothing else:
 ``p["name"]`` and the typed accessors ``get``/``int``/``float``/
@@ -129,14 +137,23 @@ def reads(tree: ast.Module) -> list[str]:
     return list(dict.fromkeys(name for _, _, name in found))
 
 
-def check_params(tree: ast.Module,
-                 entries: list[tuple[str, str]]) -> list[str]:
+def check_params(tree: ast.Module, entries: list[tuple[str, str]],
+                 declared: frozenset[str] = frozenset()) -> list[str]:
     """Parameter documentation findings for one test module.
+
+    A parameter exists if either authority says so: the source reads
+    it, or the package declares it.  Both cross-checks are against that
+    union, which is what stops a documented-but-not-yet-read <arg> from
+    being called stale (see packagexml) and what makes a declared
+    parameter nobody documented a finding.
 
     Args:
         tree: The module's AST, for the reads.
         entries: The (name, description) documentation entries, in
             docstring order and with duplicates kept.
+        declared: The parameters package.xml declares for this script;
+            empty when there is no package.xml to read, which reduces
+            both checks to the C side's reads-only behaviour.
 
     Returns:
         The findings, undocumented parameters first and then one group
@@ -145,11 +162,13 @@ def check_params(tree: ast.Module,
     names = [name for name, _ in entries]
     empty = {name for name, descr in entries if not descr.strip()}
     read = reads(tree)
+    seen = set(read) | set(declared)
+    # Read ones first, in source order, then the merely declared.
+    exists = list(read) + sorted(n for n in declared if n not in set(read))
     findings = [
         f"parameter {name} is undocumented"
-        for name in read if name not in names
+        for name in exists if name not in names
     ]
-    seen = set(read)
     for name in dict.fromkeys(names):
         if name in empty:
             findings.append(f"empty documentation for parameter {name}")

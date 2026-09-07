@@ -11,6 +11,11 @@ compiled shim, nothing installed.  That is why this package imports
 only the standard library, and why nothing here reaches into the rest
 of pyte.
 
+``<srcdir>/package.xml`` is read once, for the parameters the Tester
+declares; without it the parameter checks narrow to what the source
+reads.  Either way the document itself is unaffected -- the
+declarations inform the findings, never the output.
+
 Two severities, deliberately far apart:
 
 Hard errors -- a missing module docstring, a syntax error, a file that
@@ -36,6 +41,7 @@ import sys
 from . import check as _check
 from . import docstring as _docstring
 from . import emit as _emit
+from . import packagexml as _packagexml
 from . import steps as _steps
 
 #: The name findings and errors are reported under, so a build log
@@ -43,8 +49,9 @@ from . import steps as _steps
 PROG = "te_py_tests_info"
 
 
-def analyze(path: str) -> tuple[str, list[tuple[str, str]],
-                                list[tuple[int, str]], list[str]]:
+def analyze(path: str, declared: frozenset[str] = frozenset()
+            ) -> tuple[str, list[tuple[str, str]],
+                       list[tuple[int, str]], list[str]]:
     """Everything the document needs about one test module.
 
     The module is parsed, never imported: a test module runs its whole
@@ -52,6 +59,8 @@ def analyze(path: str) -> tuple[str, list[tuple[str, str]],
 
     Args:
         path: The test module's path.
+        declared: The parameters the package declares for this script.
+            Empty reduces the parameter checks to reads alone.
 
     Returns:
         The objective, the (name, description) parameter entries, the
@@ -72,7 +81,7 @@ def analyze(path: str) -> tuple[str, list[tuple[str, str]],
         raise ValueError("missing module docstring (test objective)")
     params, findings = _docstring.parameters(doc)
     scenario, step_findings = _steps.scenario(tree)
-    findings += _check.check_params(tree, params)
+    findings += _check.check_params(tree, params, declared)
     findings += step_findings
     return objective, params, scenario, findings
 
@@ -105,13 +114,22 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
 
+    # Once per package, not once per script.  A note rather than a
+    # finding: a directory that is not a Tester package is a legitimate
+    # thing to run this on, and the checks simply narrow to the reads.
+    declared, note = _packagexml.declarations(args.srcdir)
+    if note is not None:
+        print(f"{PROG}: {note}: checking documented parameters against "
+              f"the source reads alone", file=sys.stderr)
+
     blocks: list[str] = []
     findings: list[str] = []
     errors: list[str] = []
     for name in args.names:
         path = os.path.join(args.srcdir, name + ".py")
         try:
-            objective, params, scenario, found = analyze(path)
+            objective, params, scenario, found = analyze(
+                path, declared.get(name, frozenset()))
         except OSError as exc:
             errors.append(f"{path}: {exc.strerror or exc}")
             continue

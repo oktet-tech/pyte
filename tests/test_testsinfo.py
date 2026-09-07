@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from pyte import testsinfo
-from pyte.testsinfo import check, docstring, steps
+from pyte.testsinfo import check, docstring, packagexml, steps
 
 
 def _module(tmp_path, source, name="t"):
@@ -683,6 +683,242 @@ def test_a_lookup_on_something_else_is_not_a_parameter_read():
     ''') == []
 
 
+# ------------------------------------------------------------ package.xml
+
+
+def _package(tmp_path, body):
+    """Write a package.xml around a session body, return its directory."""
+    (tmp_path / "package.xml").write_text(
+        '<?xml version="1.0"?>\n<package version="1.0">\n<session>\n'
+        + textwrap.dedent(body)
+        + "\n</session>\n</package>\n",
+        encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_a_run_declares_its_own_scripts_parameters(tmp_path):
+    declared, note = packagexml.declarations(_package(tmp_path, """
+        <run>
+            <script name="throughput"/>
+            <arg name="rate_mult" type="rate_mult_values"/>
+            <arg name="profile"><value>udp_imix</value></arg>
+        </run>
+    """))
+    assert note is None
+    assert declared == {"throughput": frozenset({"rate_mult", "profile"})}
+
+
+def test_a_session_argument_reaches_every_script(tmp_path):
+    """nap-ts hoists fw_mode to the session in ts/trex_int."""
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <arg name="fw_mode" type="fw_modes"/>
+        <run>
+            <script name="throughput"/>
+            <arg name="rate_mult"/>
+        </run>
+        <run>
+            <script name="conn_cap"/>
+            <arg name="cc_dur"/>
+        </run>
+    """))
+    assert declared == {
+        "throughput": frozenset({"fw_mode", "rate_mult"}),
+        "conn_cap": frozenset({"fw_mode", "cc_dur"}),
+    }
+
+
+def test_an_argument_belongs_to_one_script_not_its_sibling(tmp_path):
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <run>
+            <script name="throughput"/>
+            <arg name="latency_pps"/>
+        </run>
+        <run>
+            <script name="conn_cap"/>
+            <arg name="cc_dur"/>
+        </run>
+    """))
+    assert "latency_pps" not in declared["conn_cap"]
+    assert "cc_dur" not in declared["throughput"]
+
+
+def test_nested_runs_inherit_the_outer_arguments(tmp_path):
+    """The shape every nap-ts package uses: run/session/run/script."""
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <run name="bridge">
+            <session>
+                <arg name="fw_layer"/>
+                <arg name="fw_mode"/>
+                <run>
+                    <script name="throughput"/>
+                    <arg name="rate_mult"/>
+                </run>
+            </session>
+        </run>
+    """))
+    assert declared == {"throughput": frozenset(
+        {"fw_layer", "fw_mode", "rate_mult"})}
+
+
+def test_the_same_script_unions_the_runs_that_use_it(tmp_path):
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <run>
+            <script name="throughput"/>
+            <arg name="flow_size"/>
+        </run>
+        <run>
+            <script name="throughput"/>
+            <arg name="frame_size_b"/>
+        </run>
+    """))
+    assert declared["throughput"] == frozenset({"flow_size",
+                                                "frame_size_b"})
+
+
+def test_enum_and_var_are_not_parameters(tmp_path):
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <enum name="rate_mult_values">
+            <value>auto</value>
+        </enum>
+        <var name="iut_only" global="true"><value>1</value></var>
+        <run>
+            <script name="throughput"/>
+            <arg name="rate_mult" type="rate_mult_values"/>
+        </run>
+    """))
+    assert declared == {"throughput": frozenset({"rate_mult"})}
+
+
+def test_a_prologue_script_named_by_path_is_also_keyed_bare(tmp_path):
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <prologue>
+            <script name="../pre_test_prologue"/>
+            <arg name="test_mode"/>
+        </prologue>
+    """))
+    assert declared["../pre_test_prologue"] == frozenset({"test_mode"})
+    assert declared["pre_test_prologue"] == frozenset({"test_mode"})
+
+
+def test_a_commented_out_run_declares_nothing(tmp_path):
+    """A disabled block is not a declaration.
+
+    nap-ts's ts/trex/package.xml keeps four whole suricata run blocks
+    inside "wave-2 ... not ported yet" XML comments, 261 <arg> elements
+    in all.  Grepping the file finds them; the Tester does not pass
+    them.  Reading the file with a parser rather than a regular
+    expression is what keeps this checker from trusting configuration
+    that is switched off.
+    """
+    declared, _ = packagexml.declarations(_package(tmp_path, """
+        <run>
+            <script name="trex"/>
+            <arg name="req_size"/>
+        </run>
+        <!-- wave-2: not ported yet.
+        <run>
+            <script name="trex"/>
+            <arg name="suri_type"/>
+        </run>
+        -->
+    """))
+    assert declared == {"trex": frozenset({"req_size"})}
+
+
+def test_a_missing_package_xml_is_a_note_not_an_error(tmp_path):
+    declared, note = packagexml.declarations(str(tmp_path))
+    assert declared == {}
+    assert note is not None and "package.xml" in note
+
+
+def test_a_malformed_package_xml_is_a_note_not_an_error(tmp_path):
+    (tmp_path / "package.xml").write_text("<package><session>\n",
+                                          encoding="utf-8")
+    declared, note = packagexml.declarations(str(tmp_path))
+    assert declared == {}
+    assert note is not None and "package.xml" in note
+
+
+# ------------------------------------------- findings across both sources
+
+
+def _findings_with(source, declared):
+    """Parameter findings for a source against a declaration set."""
+    import ast
+    tree = ast.parse(textwrap.dedent(source))
+    doc = ast.get_docstring(tree, clean=True)
+    entries, _ = docstring.parameters(doc)
+    return check.check_params(tree, entries, frozenset(declared))
+
+
+_DOCUMENTS_SURI = '''
+    """Objective.
+
+    Parameters:
+        suri_type: Type of suricata setup.
+    """
+    with test.start() as t:
+        pass
+'''
+
+
+def test_a_declared_but_unread_parameter_is_not_stale():
+    """Documentation ahead of the code is the right direction."""
+    assert _findings_with(_DOCUMENTS_SURI, {"suri_type"}) == []
+
+
+def test_an_undeclared_unread_parameter_is_still_stale():
+    assert _findings_with(_DOCUMENTS_SURI, set()) == [
+        "stale documentation for parameter suri_type (no such read)"]
+
+
+def test_a_declared_but_undocumented_parameter_is_a_finding():
+    assert _findings_with(_DOCUMENTS_SURI, {"suri_type", "suri_rules"}) == [
+        "parameter suri_rules is undocumented"]
+
+
+def test_reads_are_reported_before_merely_declared_ones():
+    found = _findings_with('''
+        """Objective."""
+        with test.start() as t:
+            p = t.params
+            zzz = p["zzz"]
+    ''', {"aaa"})
+    assert found == [
+        "parameter zzz is undocumented",
+        "parameter aaa is undocumented",
+    ]
+
+
+def test_a_package_without_package_xml_notes_it_once(tmp_path, capsys):
+    _module(tmp_path, _CLEAN, "one")
+    _module(tmp_path, _CLEAN, "two")
+    assert testsinfo.main([str(tmp_path), "one", "two"]) == 0
+    err = capsys.readouterr().err
+    assert err.count("package.xml") == 1
+    assert "source reads alone" in err
+
+
+def test_the_missing_package_xml_note_is_not_a_finding(tmp_path, capsys):
+    """A directory that is not a Tester package is legitimate input."""
+    _module(tmp_path, _CLEAN, "one")
+    assert testsinfo.main(["--strict", str(tmp_path), "one"]) == 0
+    assert "package.xml" in capsys.readouterr().err
+
+
+def test_package_xml_declarations_reach_the_cli(tmp_path, capsys):
+    _package(tmp_path, """
+        <run>
+            <script name="one"/>
+            <arg name="undeclared_nowhere_else"/>
+        </run>
+    """)
+    _module(tmp_path, _CLEAN, "one")
+    assert testsinfo.main([str(tmp_path), "one"]) == 0
+    assert ("parameter undeclared_nowhere_else is undocumented"
+            in capsys.readouterr().err)
+
+
 # ------------------------------------------------------------ exit codes
 
 
@@ -698,6 +934,12 @@ _CLEAN = '''
 
 
 def test_a_clean_input_exits_zero(tmp_path, capsys):
+    _package(tmp_path, """
+        <run>
+            <script name="throughput"/>
+            <arg name="env"/>
+        </run>
+    """)
     _module(tmp_path, _CLEAN, "throughput")
     assert testsinfo.main([str(tmp_path), "throughput"]) == 0
     captured = capsys.readouterr()
@@ -846,6 +1088,13 @@ multiplier.</step>
 
 
 def test_a_whole_document_is_rendered_exactly(tmp_path, capsys):
+    _package(tmp_path, """
+        <run>
+            <script name="throughput"/>
+            <arg name="env"/>
+            <arg name="rate_mult"/>
+        </run>
+    """)
     _module(tmp_path, _WHOLE_SOURCE, "throughput")
     assert testsinfo.main([str(tmp_path), "throughput"]) == 0
     captured = capsys.readouterr()

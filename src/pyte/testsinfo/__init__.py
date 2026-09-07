@@ -29,6 +29,7 @@ from .check import INDIRECT_READERS, check_params, reads
 from .cli import PROG, analyze, main
 from .docstring import objective, parameters
 from .emit import render_document, render_test
+from .packagexml import declarations
 from .steps import scenario
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "PROG",
     "analyze",
     "check_params",
+    "declarations",
     "main",
     "objective",
     "parameters",
