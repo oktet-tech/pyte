@@ -9,6 +9,81 @@ from pyte.errors import EnvError
 from pyte.rpc.server import RpcServer
 
 
+class _EnvLib:
+    """Fake shim for Env lookups and teardown."""
+
+    PYTE_ENOENT = 0x7E02
+
+    def __init__(self):
+        self.calls = []
+        self.pco_handle = object()
+
+    def pyte_env_get_pco(self, h, name, out):
+        self.calls.append(("get_pco", h, bytes(name)))
+        out[0] = self.pco_handle
+        return 0
+
+    def pyte_rpc_server_ta_name(self, h, out):
+        out[0] = b"Agt_A"
+        return 0
+
+    def pyte_env_get_addr(self, h, name, ip_out, fam_out, port_out):
+        self.calls.append(("get_addr", h, bytes(name)))
+        ip_out[0] = b"10.0.0.1"
+        fam_out[0] = b"inet"
+        port_out[0] = 0
+        return 0
+
+    def pyte_free_string(self, h):
+        self.calls.append(("free_string", h))
+        return 0
+
+    def pyte_env_free(self, h):
+        self.calls.append(("env_free", h))
+        return 0
+
+    def pyte_allocate_port(self, h, out):
+        self.calls.append(("allocate_port", h))
+        out[0] = 12345
+        return 0
+
+    def pyte_rc_error(self, rc):
+        return rc
+
+    def pyte_rc_module(self, rc):
+        return 0
+
+    def te_rc_mod2str(self, rc):
+        return b"TAPI"
+
+    def te_rc_err2str(self, rc):
+        return b"E"
+
+
+class _EnvFfi:
+    NULL = None
+
+    def new(self, spec):
+        return [None]
+
+    @staticmethod
+    def string(value):
+        return value
+
+
+def _fake_env(monkeypatch):
+    import sys
+    import types
+    lib = _EnvLib()
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=_EnvFfi(), lib=lib))
+    env = env_mod.Env.__new__(env_mod.Env)
+    env._h = object()
+    env._cfg = "test-env"
+    env._pcos = {}
+    return env, lib
+
+
 def test_addr_pair():
     a = env_mod.Addr(ip="10.38.10.1", family="inet", port=7777)
     assert a.pair == ("10.38.10.1", 7777)
@@ -81,6 +156,31 @@ def test_enverror_is_teerror():
     assert isinstance(e, TeError)
     assert e.rc == 0
     assert "pco" in str(e)
+
+
+def test_pco_returns_the_same_wrapper_for_the_same_server(monkeypatch):
+    env, _ = _fake_env(monkeypatch)
+    assert env.pco("iut_rpcs") is env.pco("iut_rpcs")
+
+
+def test_close_invalidates_every_handed_out_pco(monkeypatch):
+    from pyte.errors import ClosedResourceError
+    env, _ = _fake_env(monkeypatch)
+    pco = env.pco("iut_rpcs")
+    env.close()
+    with pytest.raises(ClosedResourceError):
+        pco._handle()
+
+
+def test_addr_rejects_a_stale_pco_as_port(monkeypatch):
+    """A destroyed PCO passed as port= must raise, not reach the shim."""
+    from pyte.errors import ClosedResourceError
+    env, lib = _fake_env(monkeypatch)
+    pco = env.pco("iut_rpcs")
+    env.close()
+    with pytest.raises(ClosedResourceError):
+        env.addr("iut_addr", port=pco)
+    assert not any(c[0] == "allocate_port" for c in lib.calls)
 
 
 def test_env_close_idempotent():

@@ -71,6 +71,10 @@ class Env:
     def __init__(self, handle, cfg: str):
         self._h = handle
         self._cfg = cfg
+        #: RpcServer wrappers handed out by pco(), keyed by C handle.
+        #: Aliases must share one object: silent_pass depth is
+        #: per-wrapper while rpcs->silent_pass is one shared C field.
+        self._pcos: dict = {}
 
     @classmethod
     def bind(cls, cfg: str) -> "Env":
@@ -85,8 +89,16 @@ class Env:
         return cls(out[0], cfg)
 
     def close(self) -> None:
-        """Free the environment (closes env-created RPC servers)."""
+        """Free the environment (closes env-created RPC servers).
+
+        Invalidates every PCO wrapper handed out first: tapi_env_free
+        frees the underlying rcf_rpc_server, so a retained wrapper
+        would otherwise hold a dangling pointer.
+        """
         lib = _shim_lib()
+        for srv in self._pcos.values():
+            srv._h = None
+        self._pcos.clear()
         if self._h is not None:
             h, self._h = self._h, None   # struct is freed even on error
             check(lib.pyte_env_free(h), "env free", EnvError)
@@ -118,7 +130,13 @@ class Env:
         ta_out = ffi.new("char **")
         check(lib.pyte_rpc_server_ta_name(out[0], ta_out),
               f"pco {name!r} ta", EnvError)
-        return RpcServer(out[0], _take_str(ta_out), name, owned=False)
+        handle = out[0]
+        cached = self._pcos.get(handle)
+        if cached is not None:
+            return cached
+        srv = RpcServer(handle, _take_str(ta_out), name, owned=False)
+        self._pcos[handle] = srv
+        return srv
 
     def addr(self, name: str, port=None) -> Addr:
         """The named address; port=RpcServer allocates a fresh port.
@@ -142,7 +160,7 @@ class Env:
         p = port_out[0]
         if port is not None and family != "ether":
             alloc = ffi.new("unsigned int *")
-            check(lib.pyte_allocate_port(port._h, alloc),
+            check(lib.pyte_allocate_port(port._handle(), alloc),
                   f"allocate_port for {name!r}", EnvError)
             p = alloc[0]
         return Addr(ip=ip, family=family, port=p)
