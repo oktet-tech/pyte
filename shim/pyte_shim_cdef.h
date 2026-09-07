@@ -29,6 +29,7 @@ te_errno pyte_rpc_server_create(const char *ta, const char *name,
 te_errno pyte_rpc_server_destroy(rcf_rpc_server *rpcs);
 void pyte_rpc_set_silent(rcf_rpc_server *rpcs, int on);
 void pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on);
+int pyte_rpc_get_silent_pass(rcf_rpc_server *rpcs);
 int pyte_rpc_errno(rcf_rpc_server *rpcs);
 const char *pyte_rpc_err_msg(rcf_rpc_server *rpcs);
 void pyte_rpc_set_timeout(rcf_rpc_server *rpcs, uint32_t ms);
@@ -177,6 +178,7 @@ te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
 te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                        int timeout_ms);
 void pyte_job_set_tracing(tapi_job_t *job, int trace);
+int pyte_job_get_tracing(tapi_job_t *job);
 
 /* tapi_job wrappers (command-line prefixes, e.g. accel launchers) */
 typedef struct tapi_job_wrapper_t tapi_job_wrapper_t;

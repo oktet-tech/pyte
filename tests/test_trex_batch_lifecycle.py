@@ -432,26 +432,24 @@ def test_report_drains_summary_filters():
     assert rep.avg_tx == pytest.approx(12.34e6)
 
 
-def test_report_resilences_filters_via_job_quiet_not_rpcserver():
-    """DIVERGENCE #11 fix, part 2: report()'s drain re-silences its
-    filters via Job.quiet() (tapi_job_set_tracing(), which rewrites
-    every filter's own silent_pass field), NOT another
-    RpcServer.silent_pass() window -- that only affects RPCs made
-    while creating NEW job/channel/filter objects, and has no effect
-    on filters that already exist by report() time (mirrors
-    trex_result_extract()'s own tapi_job_set_tracing(FALSE)/(TRUE)
-    bracket around tapi_trex_get_report(), which is needed precisely
-    because something else -- here, any job.quiet()-wrapped raw
-    stdout drain the caller does between wait() and report(), mirrors
-    trex_proc_drain_stdout() -- may have already turned filters loud
-    again by the time report() runs)."""
+def test_report_does_not_open_its_own_quiet_or_silent_pass_window():
+    """DIVERGENCE #11 fix, part 2, superseded: report()'s filters are
+    attached under create()'s pco.silent_pass() window and now stay
+    silent for their whole lifetime, because Job.quiet() restores the
+    tracing state it found instead of forcing it back on -- a caller's
+    job.quiet()-wrapped raw stdout drain between wait() and report()
+    (mirrors trex_proc_drain_stdout()) no longer turns those filters
+    loud again on exit. report() therefore needs no
+    tapi_job_set_tracing(FALSE)/(TRUE) bracket of its own around the
+    drain (mirrors trex_result_extract(), nap-trex-stats.c:614-694),
+    nor a new RpcServer.silent_pass() window (that only affects RPCs
+    that create NEW job/channel/filter objects)."""
     pco = _FakePco()
     opts = _batch_opts()
 
     with batch.create(pco, opts) as trex:
         # Simulate nap-ts's own _drain_stdout(): a job.quiet() window
-        # closing loudly (as tapi_job_set_tracing(TRUE) really does)
-        # right before report() -- report() must still come out quiet.
+        # around raw stdout drain, exiting before report() runs.
         with pco._job.quiet():
             pass
         pco._job.quiet_calls.clear()
@@ -461,8 +459,9 @@ def test_report_resilences_filters_via_job_quiet_not_rpcserver():
         rep = trex.report()
 
     assert rep.avg_tx == pytest.approx(12.34e6)
-    assert pco._job.quiet_calls == ["enter", "exit"]
-    # report() opened no NEW RpcServer.silent_pass() window of its own.
+    # report() opened no quiet() window of its own...
+    assert pco._job.quiet_calls == []
+    # ...nor a NEW RpcServer.silent_pass() window.
     assert pco.silent_pass_calls == silent_pass_before
 
 

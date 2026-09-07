@@ -727,19 +727,30 @@ class Job:
         lib = _shim_lib()
         lib.pyte_job_set_tracing(self._h, 1 if enable else 0)
 
+    def tracing_enabled(self) -> bool:
+        """Whether per-call RPC logging is currently on for this job."""
+        h = self._handle()
+        lib = _shim_lib()
+        return bool(lib.pyte_job_get_tracing(h))
+
     @contextmanager
     def quiet(self):
-        """Suppress RPC tracing for the block.
+        """Suppress RPC tracing for the block, restoring what it found.
 
-        The C suites' set_tracing(FALSE)/.../set_tracing(TRUE) idiom
-        around chatty polling loops; tracing is restored even if the
-        block raises.
+        Restores the PREVIOUS state, not an unconditional "on": a job
+        created inside pco.silent_pass() is already silent, and the
+        old hardcoded restore turned its logging on permanently.
+        Nests.
         """
+        if self._h is None:      # mirrors tracing()'s post-destroy no-op
+            yield self
+            return
+        was = self.tracing_enabled()
         self.tracing(False)
         try:
             yield self
         finally:
-            self.tracing(True)
+            self.tracing(was)
 
     def kill(self, signal: int | signal.Signals = signal.SIGKILL) -> None:
         """Send a signal to the job."""

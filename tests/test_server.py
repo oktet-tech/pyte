@@ -107,6 +107,7 @@ def _bare_server():
     srv = RpcServer.__new__(RpcServer)
     srv._h = object()
     srv._silent_pass_depth = 0
+    srv._silent_pass_was = 0
     return srv
 
 
@@ -291,9 +292,15 @@ class _SilentPassLib:
 
     def __init__(self):
         self.calls: list[int] = []
+        #: current value of the (single, shared) rcf_rpc_server field
+        self.silent_pass = 0
 
     def pyte_rpc_set_silent_pass(self, h, on):
         self.calls.append(on)
+        self.silent_pass = on
+
+    def pyte_rpc_get_silent_pass(self, h):
+        return self.silent_pass
 
 
 def _fake_silent_pass_shim(monkeypatch):
@@ -343,6 +350,17 @@ def test_silent_pass_nested_restores_on_exception_from_inner_block(
                 raise ValueError("boom")
     assert lib.calls == [1, 0]
     assert srv._silent_pass_depth == 0
+
+
+def test_silent_pass_restores_an_ambient_setting(monkeypatch):
+    """An enclosing block (or another wrapper) already set silent_pass;
+    leaving this block must not clobber it back to 0."""
+    lib = _fake_silent_pass_shim(monkeypatch)
+    lib.silent_pass = 1                    # set by an enclosing block
+    srv = _bare_server()
+    with srv.silent_pass():
+        pass
+    assert lib.silent_pass == 1
 
 
 class _LifecycleLib:

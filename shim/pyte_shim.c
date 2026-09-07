@@ -136,6 +136,15 @@ pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on)
 }
 
 int
+pyte_rpc_get_silent_pass(rcf_rpc_server *rpcs)
+{
+    /* Read-only accessor so the Python facade can save and restore the
+     * state it actually found: silent_pass is one shared field and may
+     * have been set by an enclosing block or another wrapper. */
+    return rpcs->silent_pass ? 1 : 0;
+}
+
+int
 pyte_rpc_errno(rcf_rpc_server *rpcs)
 {
     return RPC_ERRNO(rpcs);
@@ -1431,6 +1440,27 @@ pyte_job_set_tracing(tapi_job_t *job, int trace)
      * inside is reachable for a NULL job — but the Python facade now
      * guards tracing() against NULL after destroy(), so this is safe.) */
     tapi_job_set_tracing(job, trace ? true : false);
+}
+
+/*
+ * tapi_job_get_silent_pass() is declared only in tapi_job_internal.h,
+ * which TE's meson build does not install (lib/tapi_job/meson.build
+ * lists only tapi_job.h, tapi_job_factory_{cfg,rpc}.h and
+ * tapi_job_opt.h under `headers`) -- so pyte_shim.h, built against the
+ * installed include tree, cannot see its prototype.  It is nonetheless
+ * an ordinary exported symbol in libtapi_job.so (confirmed with
+ * `nm -D`), so its prototype is redeclared here instead of pulling in
+ * the internal header.
+ */
+extern bool tapi_job_get_silent_pass(const tapi_job_t *job);
+
+int
+pyte_job_get_tracing(tapi_job_t *job)
+{
+    /* tapi_job_set_tracing() writes !trace to the job and to every
+     * channel and filter (tapi_job.c:1627-1650); the job's own flag is
+     * the one to save and restore. */
+    return tapi_job_get_silent_pass(job) ? 0 : 1;
 }
 
 te_errno

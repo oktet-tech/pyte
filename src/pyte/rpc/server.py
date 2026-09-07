@@ -45,6 +45,7 @@ class RpcServer:
         self.name = name
         self._owned = owned
         self._silent_pass_depth = 0
+        self._silent_pass_was = 0
 
     def _handle(self):
         """The live C handle; raises after destroy().
@@ -195,15 +196,17 @@ class RpcServer:
             flt.drain()             # silenced (baked in at attach time)
         """
         lib = _shim_lib()
+        h = self._handle()
         if self._silent_pass_depth == 0:
-            lib.pyte_rpc_set_silent_pass(self._handle(), 1)
+            self._silent_pass_was = lib.pyte_rpc_get_silent_pass(h)
+            lib.pyte_rpc_set_silent_pass(h, 1)
         self._silent_pass_depth += 1
         try:
             yield self
         finally:
             self._silent_pass_depth -= 1
             if self._silent_pass_depth == 0:
-                lib.pyte_rpc_set_silent_pass(self._handle(), 0)
+                lib.pyte_rpc_set_silent_pass(h, self._silent_pass_was)
 
     # -- curated calls -------------------------------------------------
     def getpid(self) -> int:

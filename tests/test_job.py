@@ -46,6 +46,8 @@ class FakeLib:
         self.destroy_rc = 0
         self.factory_destroy_rc = 0
         self.in_channel_rc = 0
+        #: job handle -> current tracing state (1 = on, 0 = off)
+        self.tracing = {}
 
     def pyte_job_wrapper_add(self, job_h, tool, argv, prio, out):
         self.calls.append(("wrapper_add", job_h, bytes(tool),
@@ -87,7 +89,11 @@ class FakeLib:
         self.calls.append(("free_string",))
 
     def pyte_job_set_tracing(self, job_h, trace):
+        self.tracing[job_h] = trace
         self.calls.append(("set_tracing", job_h, trace))
+
+    def pyte_job_get_tracing(self, job_h):
+        return self.tracing.get(job_h, 1)
 
     def pyte_job_destroy(self, job_h, timeout_ms):
         self.calls.append(("destroy", job_h, timeout_ms))
@@ -664,6 +670,26 @@ def test_quiet_noop_after_destroy(monkeypatch):
     with job2.quiet():
         pass
     assert lib.calls == []
+
+
+def test_quiet_restores_the_state_it_found(monkeypatch):
+    """A job created under pco.silent_pass() is already silent; leaving
+    a quiet() block must not turn its tracing on."""
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    lib.tracing["job-h"] = 0            # created silent
+    with job.quiet():
+        pass
+    assert lib.tracing["job-h"] == 0
+
+
+def test_nested_quiet_does_not_unsilence_the_outer_block(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    job = _fake_job(handle="job-h")
+    with job.quiet():
+        with job.quiet():
+            pass
+        assert lib.tracing["job-h"] == 0
 
 
 # ---------------------------------------------------------------------------
