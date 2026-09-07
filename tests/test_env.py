@@ -35,6 +35,28 @@ class _EnvLib:
         port_out[0] = 0
         return 0
 
+    def pyte_env_get_if(self, h, name, n_out, idx):
+        self.calls.append(("get_if", h, bytes(name)))
+        n_out[0] = b"veth0"
+        idx[0] = 5
+        return 0
+
+    def pyte_env_get_if_ta(self, h, name, ta_out):
+        self.calls.append(("get_if_ta", h, bytes(name)))
+        ta_out[0] = b"Agt_A"
+        return 0
+
+    def pyte_env_get_host_ta(self, h, name, out):
+        self.calls.append(("get_host_ta", h, bytes(name)))
+        out[0] = b"Agt_A"
+        return 0
+
+    def pyte_env_get_net_subnet(self, h, name, v6, s_out, pfx):
+        self.calls.append(("get_net_subnet", h, bytes(name), v6))
+        s_out[0] = b"10.0.0.0"
+        pfx[0] = 24
+        return 0
+
     def pyte_free_string(self, h):
         self.calls.append(("free_string", h))
         return 0
@@ -253,3 +275,27 @@ def test_env_close_clears_handle_on_error(monkeypatch):
     # A second close must be a no-op (shim called exactly once).
     e.close()
     assert call_count == 1
+
+
+def test_lookups_raise_closed_resource_error_after_close_not_shim(
+        monkeypatch):
+    """pco/addr/iface/host/net must all route through _handle() so a
+    closed Env raises ClosedResourceError instead of passing a NULL
+    handle into the shim -- host()/net() bypass tapi_env's own NULL
+    check in C (pyte_shim.c) and would otherwise segfault on the
+    default-name call form."""
+    from pyte.errors import ClosedResourceError
+    env, lib = _fake_env(monkeypatch)
+    env.close()
+
+    for call in (lambda: env.pco("iut_rpcs"),
+                 lambda: env.addr("iut_addr"),
+                 lambda: env.iface("iut_if"),
+                 lambda: env.host(),
+                 lambda: env.net()):
+        with pytest.raises(ClosedResourceError):
+            call()
+
+    # None of the lookups reached the shim: only teardown calls (the
+    # env_free from close()) are recorded.
+    assert all(c[0] == "env_free" for c in lib.calls)

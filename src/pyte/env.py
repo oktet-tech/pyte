@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import EnvError, check
+from pyte.errors import ClosedResourceError, EnvError, check
 from pyte._util import enc as _enc
 
 
@@ -107,6 +107,20 @@ class Env:
     def __enter__(self) -> "Env":
         return self
 
+    def _handle(self):
+        """The live C handle; raises after close().
+
+        host()/net() bypass tapi_env's own accessor for their default-
+        name case and walk the env's host/net list directly in C
+        (pyte_shim.c); a NULL env there is a segfault, not a checked
+        error, so every lookup must go through this guard rather than
+        pass self._h straight through.
+        """
+        if self._h is None:
+            raise ClosedResourceError(
+                f"env {self._cfg!r} is already closed")
+        return self._h
+
     def __exit__(self, exc_type, exc, tb) -> bool:
         cleanup_all(self.close, primary=exc)
         return False
@@ -125,7 +139,7 @@ class Env:
         ffi, lib = _shim()
         from pyte.rpc.server import RpcServer
         out = ffi.new("rcf_rpc_server **")
-        rc = lib.pyte_env_get_pco(self._h, _enc(name), out)
+        rc = lib.pyte_env_get_pco(self._handle(), _enc(name), out)
         if rc != 0:
             self._miss("pco", name, rc)
         handle = out[0]
@@ -151,8 +165,8 @@ class Env:
         ip_out = ffi.new("char **")
         fam_out = ffi.new("char **")
         port_out = ffi.new("int *")
-        rc = lib.pyte_env_get_addr(self._h, _enc(name), ip_out, fam_out,
-                                   port_out)
+        rc = lib.pyte_env_get_addr(self._handle(), _enc(name), ip_out,
+                                   fam_out, port_out)
         if rc != 0:
             self._miss("addr", name, rc)
         # Decode C strings first so they are freed even if port alloc fails.
@@ -171,12 +185,12 @@ class Env:
         ffi, lib = _shim()
         n_out = ffi.new("char **")
         idx = ffi.new("unsigned int *")
-        rc = lib.pyte_env_get_if(self._h, _enc(name), n_out, idx)
+        rc = lib.pyte_env_get_if(self._handle(), _enc(name), n_out, idx)
         if rc != 0:
             self._miss("interface", name, rc)
         ifname = _take_str(n_out)
         ta_out = ffi.new("char **")
-        check(lib.pyte_env_get_if_ta(self._h, _enc(name), ta_out),
+        check(lib.pyte_env_get_if_ta(self._handle(), _enc(name), ta_out),
               f"env if {name!r} ta", EnvError)
         return EnvIface(name=ifname, index=idx[0],
                         agent=_take_str(ta_out))
@@ -186,7 +200,7 @@ class Env:
         the env string)."""
         ffi, lib = _shim()
         out = ffi.new("char **")
-        rc = lib.pyte_env_get_host_ta(self._h, _enc(name), out)
+        rc = lib.pyte_env_get_host_ta(self._handle(), _enc(name), out)
         if rc != 0:
             self._miss("host", name, rc)
         return _take_str(out)
@@ -203,7 +217,7 @@ class Env:
         for v6 in (0, 1):
             s_out = ffi.new("char **")
             pfx = ffi.new("unsigned int *")
-            rc = lib.pyte_env_get_net_subnet(self._h, _enc(name), v6,
+            rc = lib.pyte_env_get_net_subnet(self._handle(), _enc(name), v6,
                                              s_out, pfx)
             if rc == 0:
                 subnets.append(f"{_take_str(s_out)}/{pfx[0]}")
