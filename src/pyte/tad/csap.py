@@ -8,6 +8,8 @@ its handle explicitly via free() or in __del__.
 """
 from __future__ import annotations
 
+import warnings
+
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, check
 from pyte._util import enc as _enc
@@ -302,6 +304,26 @@ class Csap:
                                     self._handle),
               f"csap_destroy({self.stack_id})")
         self._handle = None
+
+    def __del__(self):
+        """Free the agent-side CSAP if it was never destroy()ed.
+
+        A Csap not used as a context manager (or explicitly
+        destroy()ed) had no owner and no finalizer: the agent-side
+        CSAP leaked for the whole run.  Mirrors Packet.__del__ --
+        warn (the leak would otherwise be silent) and try to clean up
+        anyway; exceptions here must not propagate out of GC.
+        """
+        if self._handle is None:
+            return
+        warnings.warn(
+            f"Csap {self.stack_id!r} on {self.ta!r} was not destroyed "
+            "(missing destroy() or a context manager); destroying it "
+            "now", ResourceWarning)
+        try:
+            self.destroy()
+        except Exception:  # noqa: BLE001  never raise out of __del__
+            pass
 
     def __enter__(self) -> "Csap":
         return self

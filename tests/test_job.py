@@ -42,6 +42,10 @@ class FakeLib:
         self.recv_rc = 0
         #: queued (data: bytes, eos: bool) pairs for single receive
         self.recv_queue = []
+        #: rc-steering knobs for destroy()/create() failure tests
+        self.destroy_rc = 0
+        self.factory_destroy_rc = 0
+        self.in_channel_rc = 0
 
     def pyte_job_wrapper_add(self, job_h, tool, argv, prio, out):
         self.calls.append(("wrapper_add", job_h, bytes(tool),
@@ -87,7 +91,7 @@ class FakeLib:
 
     def pyte_job_destroy(self, job_h, timeout_ms):
         self.calls.append(("destroy", job_h, timeout_ms))
-        return 0
+        return self.destroy_rc
 
     def pyte_job_out_channels(self, job_h, o, e):
         self.calls.append(("out_channels", job_h))
@@ -98,7 +102,7 @@ class FakeLib:
     def pyte_job_in_channel(self, job_h, i):
         self.calls.append(("in_channel", job_h))
         i[0] = "in-h"
-        return 0
+        return self.in_channel_rc
 
     def pyte_job_attach_filter(self, arr, n, name, readable, level, out):
         self.calls.append(("attach_filter", list(arr), n, readable, level))
@@ -125,7 +129,7 @@ class FakeLib:
 
     def pyte_job_factory_destroy(self, fac_h):
         self.calls.append(("factory_destroy", fac_h))
-        return 0
+        return self.factory_destroy_rc
 
     def pyte_job_start(self, job_h):
         self.calls.append(("start", job_h))
@@ -442,6 +446,84 @@ def test_destroy_remains_idempotent(monkeypatch):
     assert lib.calls == []
 
 
+def test_destroy_still_destroys_factory_when_job_destroy_raises(
+        monkeypatch):
+    """A failing tapi_job_destroy() must not skip the factory destroy:
+    the factory has no other owner, so stopping partway leaked it with
+    no way to retry."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12   # job destroy itself fails
+    job = Job("fac-h", "job-h", "prog")
+
+    with pytest.raises(TeError, match="job.destroy"):
+        job.destroy()
+
+    assert ("destroy", "job-h", 10000) in lib.calls
+    assert ("factory_destroy", "fac-h") in lib.calls
+    assert job._factory is None, "factory must not leak"
+    assert job._h is None, "job side must not be retried: TE already " \
+        "freed it regardless of the reported rc"
+
+
+def test_destroy_invalidates_children_even_when_job_destroy_raises(
+        monkeypatch):
+    """TE frees channels/filters with the job whether or not the call
+    reports success, so a retry must never hand those pointers back to
+    C -- invalidation cannot wait for a successful check()."""
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12
+    job = Job("fac-h", "job-h", "prog")
+    out = job.stdout
+    flt = out.attach_filter(name="f")
+
+    from pyte.errors import TeError
+    with pytest.raises(TeError):
+        job.destroy()
+
+    with pytest.raises(RuntimeError, match="destroyed"):
+        flt.receive()
+    assert job._stdout is None
+
+
+def test_destroy_retries_only_the_factory_after_a_partial_failure(
+        monkeypatch):
+    """Once the job side is destroyed (successfully or not), a second
+    destroy() call must not repeat tapi_job_destroy() -- it retries
+    only the factory destroy that is still pending."""
+    lib = _fake_shim(monkeypatch)
+    lib.factory_destroy_rc = 12   # factory destroy fails first time
+    job = Job("fac-h", "job-h", "prog")
+
+    from pyte.errors import TeError
+    with pytest.raises(TeError, match="job_factory_destroy"):
+        job.destroy()
+    lib.calls.clear()
+
+    lib.factory_destroy_rc = 0    # now let the retry succeed
+    job.destroy()   # no exception: factory retried, job not repeated
+
+    assert lib.calls == [("factory_destroy", "fac-h")]
+    assert job._factory is None
+
+
+def test_destroy_attaches_factory_failure_to_job_failure(monkeypatch):
+    """When both the job destroy and the factory destroy fail, the
+    job's failure is the one raised (first-attempted wins) and the
+    factory failure is attached, not lost."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12
+    lib.factory_destroy_rc = 34
+    job = Job("fac-h", "job-h", "prog")
+
+    with pytest.raises(TeError, match="job.destroy") as exc_info:
+        job.destroy()
+
+    assert len(exc_info.value.cleanup_errors) == 1
+    assert "job_factory_destroy" in str(exc_info.value.cleanup_errors[0])
+
+
 def test_filter_detached_from_all_channels_is_dead(monkeypatch):
     """Once detach() drops the last channel, TAPI frees the filter;
     the Python object must refuse further use instead of crashing."""
@@ -656,6 +738,43 @@ def test_create_with_stdin_kwarg_allocates_upfront(monkeypatch):
     job.start()
     job.stdin.send("x")             # allocated: no RuntimeError
     assert ("send", "in-h", b"x", 1) in lib.calls
+
+
+def test_create_stdin_failure_destroys_job_and_factory(monkeypatch):
+    """Job.create(stdin=True) must not leak the job or its factory
+    when the input-channel allocation fails: create() destroys what
+    it already built before re-raising the original error."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    lib.in_channel_rc = 12
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
+
+    with pytest.raises(TeError, match="alloc_input_channels"):
+        Job.create(server, "cat", [], stdin=True)
+
+    assert ("destroy", "job-h", 10000) in lib.calls
+    assert ("factory_destroy", "fac-h") in lib.calls
+
+
+def test_create_stdin_failure_keeps_original_error_if_cleanup_fails(
+        monkeypatch):
+    """A destroy() failure while cleaning up after a failed stdin
+    allocation must not replace the real error -- it is attached as a
+    cleanup failure instead, the same non-masking rule every other
+    teardown in pyte follows."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    lib.in_channel_rc = 12
+    lib.destroy_rc = 34
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
+
+    with pytest.raises(TeError, match="alloc_input_channels") as exc_info:
+        Job.create(server, "cat", [], stdin=True)
+
+    assert len(exc_info.value.cleanup_errors) == 1
+    assert "job.destroy" in str(exc_info.value.cleanup_errors[0])
 
 
 def test_channel_log_defaults_to_ring(monkeypatch):

@@ -153,6 +153,7 @@ def test_finish_success_marks_done(monkeypatch):
 
     assert [p._h for p in pkts] == ["p1", "p2"]
     assert rx._done and c._rx is None
+    c.destroy()   # avoid leaking the bare CSAP past this test
 
 
 def test_finish_timeout_is_not_an_error(monkeypatch):
@@ -167,6 +168,7 @@ def test_finish_timeout_is_not_an_error(monkeypatch):
 
     assert len(pkts) == 1
     assert rx._done and c._rx is None
+    c.destroy()   # avoid leaking the bare CSAP past this test
 
 
 def test_finish_failure_keeps_receiver_active_and_frees_partials(
@@ -191,6 +193,9 @@ def test_finish_failure_keeps_receiver_active_and_frees_partials(
     assert [x for x in lib.calls if x[0] == "pkt_free"] == [
         ("pkt_free", "p1"), ("pkt_free", "p2")]
 
+    lib.recv_rc = 0     # let destroy()'s stop-then-destroy succeed;
+    c.destroy()         # avoid leaking the bare CSAP past this test
+
 
 def test_destroy_logs_swallowed_stop_failure(monkeypatch):
     """destroy() ignores a failing receive-stop by design (the CSAP is
@@ -209,3 +214,33 @@ def test_destroy_logs_swallowed_stop_failure(monkeypatch):
 
     assert [x for x in lib.calls if x[0] == "csap_destroy"]
     assert warnings and "stop" in warnings[0]
+
+
+# -- Csap.__del__ (finalizer) --------------------------------------------
+
+def test_del_warns_and_destroys_a_live_csap(monkeypatch):
+    """A Csap dropped without destroy()/a context manager leaks the
+    agent-side CSAP for the whole run; __del__ must free it and warn
+    (like Packet's) so the leak is visible instead of silent."""
+    lib = _fake_shim(monkeypatch)
+    c = _bare_csap()
+
+    with pytest.warns(ResourceWarning, match="not destroyed"):
+        c.__del__()
+
+    assert [x for x in lib.calls if x[0] == "csap_destroy"]
+    assert c._handle is None
+
+
+def test_del_is_a_noop_after_destroy(monkeypatch, recwarn):
+    """__del__ on an already-destroyed Csap must not warn or touch the
+    shim again -- idempotent, like Packet.__del__."""
+    lib = _fake_shim(monkeypatch)
+    c = _bare_csap()
+    c.destroy()
+    lib.calls.clear()
+
+    c.__del__()
+
+    assert lib.calls == []
+    assert len(recwarn) == 0

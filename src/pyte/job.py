@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Iterator
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, check
 from pyte.errors import TimeoutError as TeTimeoutError
@@ -351,7 +352,7 @@ def _attach_filter(channels: list[Channel], *, name: str | None,
     flt = Filter(job, out[0], name or regex or "filter",
                  n_channels=len(channels))
     if regex is not None:
-        check(lib.pyte_job_filter_regexp(flt._h, _enc(regex), group),
+        check(lib.pyte_job_filter_regexp(flt._handle(), _enc(regex), group),
               f"job.filter_add_regexp({regex!r})")
     job._filters.append(flt)
     return flt
@@ -536,7 +537,16 @@ class Job:
             check(rc, f"job_create({program})")
         job = cls(fac[0], out[0], program)
         if stdin:
-            _ = job.stdin
+            try:
+                _ = job.stdin
+            except BaseException as exc:  # noqa: BLE001  re-raised below
+                # The job (and its factory) were already created; a
+                # failed input-channel allocation must not leak them.
+                # A destroy() failure here is attached to exc, not
+                # raised in its place -- the allocation failure is the
+                # one the caller needs to see.
+                cleanup_all(job.destroy, primary=exc)
+                raise
         return job
 
     # -- channels ------------------------------------------------------
@@ -741,30 +751,43 @@ class Job:
     def destroy(self, timeout: float = DEFAULT_TIMEOUT) -> None:
         """Destroy the job (terminating it if needed) and its factory.
 
-        Idempotent: safe to call more than once.  Channel, Filter and
-        InputChannel objects created from this job are invalidated:
-        TE frees them together with the job, so any further use would
-        dereference freed memory in C — they raise RuntimeError
-        instead.
+        Idempotent and retryable: the job side and the factory side
+        are attempted independently, so a destroy() that raised out
+        of the job destroy still destroys the factory in the same
+        call (it has no other owner and would otherwise leak with no
+        way to retry it), and a later destroy() call retries only
+        whichever side is still pending.
+
+        Channel, Filter and InputChannel objects created from this
+        job are invalidated before the job-destroy call is made, not
+        after it reports success: TE frees them together with the job
+        whether or not tapi_job_destroy() reports success, so a retry
+        must never hand the (possibly already-freed) pointers back to
+        C — they raise RuntimeError instead.
         """
         lib = _shim_lib()
-        if self._h is not None:
-            check(lib.pyte_job_destroy(self._h, _ms(timeout)),
-                  f"job.destroy({self.program})")
-            self._h = None
-            # TE freed all channels/filters with the job: mark every
-            # Python wrapper dead so held references raise instead of
-            # passing dangling pointers into C.
+
+        def _destroy_job_once() -> None:
+            if self._h is None:
+                return
+            h, self._h = self._h, None
             for child in (self._stdout, self._stderr, self._stdin,
                           *self._filters):
                 if child is not None:
                     child._h = None
             self._stdout = self._stderr = self._stdin = None
             self._filters.clear()
-        if self._factory is not None:
+            check(lib.pyte_job_destroy(h, _ms(timeout)),
+                  f"job.destroy({self.program})")
+
+        def _destroy_factory_once() -> None:
+            if self._factory is None:
+                return
             check(lib.pyte_job_factory_destroy(self._factory),
                   "job_factory_destroy")
             self._factory = None
+
+        cleanup_all(_destroy_job_once, _destroy_factory_once)
 
     def __enter__(self) -> "Job":
         return self
