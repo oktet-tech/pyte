@@ -803,8 +803,8 @@ class Job:
     def __enter__(self) -> "Job":
         return self
 
-    def __exit__(self, *exc) -> bool:
-        self.destroy()
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        cleanup_all(self.destroy, primary=exc)
         return False
 
     def __repr__(self) -> str:

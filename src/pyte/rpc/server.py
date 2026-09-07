@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, RpcError, TestFail, check
 from pyte._util import enc as _enc
@@ -95,8 +96,8 @@ class RpcServer:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.destroy()
+    def __exit__(self, exc_type, exc, tb):
+        cleanup_all(self.destroy, primary=exc)
         return False
 
     def __repr__(self):

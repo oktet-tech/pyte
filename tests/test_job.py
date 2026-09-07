@@ -541,6 +541,39 @@ def test_destroy_attaches_factory_failure_to_job_failure(monkeypatch):
     assert "job_factory_destroy" in str(exc_info.value.cleanup_errors[0])
 
 
+def test_context_manager_preserves_body_exception_when_destroy_fails(
+        monkeypatch):
+    """__exit__ already receives the body's exception as its second
+    argument, so a failing destroy() must not replace it: the body's
+    exception keeps its identity and the destroy failure is attached
+    as a cleanup_errors entry instead."""
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12
+    job = Job("fac-h", "job-h", "prog")
+    boom = RuntimeError("BODY BOOM")
+
+    with pytest.raises(RuntimeError) as info:
+        with job:
+            raise boom
+
+    assert info.value is boom
+    assert len(boom.cleanup_errors) == 1
+
+
+def test_context_manager_raises_destroy_failure_on_clean_exit(
+        monkeypatch):
+    """With no body exception to preserve, a teardown failure must
+    still surface -- it is the only failure there is to report."""
+    from pyte.errors import TeError
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12
+    job = Job("fac-h", "job-h", "prog")
+
+    with pytest.raises(TeError, match="job.destroy"):
+        with job:
+            pass
+
+
 def test_filter_detached_from_all_channels_is_dead(monkeypatch):
     """Once detach() drops the last channel, TAPI frees the filter;
     the Python object must refuse further use instead of crashing."""

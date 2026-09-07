@@ -6,6 +6,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
 from pyte._util import enc as _enc
@@ -219,8 +220,8 @@ class RpcSocket:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, exc_type, exc, tb):
+        cleanup_all(self.close, primary=exc)
         return False
 
     def __repr__(self):

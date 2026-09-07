@@ -26,6 +26,7 @@ import weakref
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import TrcClosedError, TrcError, check
 
@@ -472,8 +473,9 @@ class Db:
     def __enter__(self) -> "Db":
         return self
 
-    def __exit__(self, *exc) -> None:
-        self.close()
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        cleanup_all(self.close, primary=exc)
+        return False
 
     @property
     def last_match(self) -> bool:

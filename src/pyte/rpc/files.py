@@ -3,6 +3,7 @@
 """RPC files: pythonic facade over tapi_rpc_unistd file calls."""
 from __future__ import annotations
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim
 from pyte._util import enc as _enc
 
@@ -18,8 +19,8 @@ class RpcFile:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, exc_type, exc, tb):
+        cleanup_all(self.close, primary=exc)
         return False
 
     def __repr__(self):

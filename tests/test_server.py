@@ -445,3 +445,22 @@ def test_owned_destroy_retries_after_failure(monkeypatch):
 
     assert len([c for c in lib.calls if c[0] == "destroy"]) == 1
     assert srv._h is None
+
+
+def test_context_manager_preserves_body_exception_when_destroy_fails(
+        monkeypatch):
+    """__exit__ already receives the body's exception as its second
+    argument, so a failing destroy() must not replace it: the body's
+    exception keeps its identity and the destroy failure is attached
+    as a cleanup_errors entry instead."""
+    lib = _fake_lifecycle_shim(monkeypatch)
+    lib.destroy_rc = 12
+    srv = RpcServer(object(), "Agt", "pco")
+    boom = RuntimeError("BODY BOOM")
+
+    with pytest.raises(RuntimeError) as info:
+        with srv:
+            raise boom
+
+    assert info.value is boom
+    assert len(boom.cleanup_errors) == 1

@@ -32,6 +32,7 @@ import enum
 import warnings
 import weakref
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import check
 
@@ -237,5 +238,6 @@ class Logger:
     def __enter__(self) -> "Logger":
         return self
 
-    def __exit__(self, *exc_info) -> None:
-        self.close()
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        cleanup_all(self.close, primary=exc)
+        return False

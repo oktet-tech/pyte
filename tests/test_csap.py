@@ -26,6 +26,8 @@ class FakeLib:
         self.calls = []
         self.session_rc = 0
         self.recv_rc = 0
+        #: rc-steering knob for destroy() failure tests
+        self.destroy_rc = 0
         #: packet handles pyte_csap_recv_wait/stop deliver
         self.recv_pkts = []
 
@@ -54,7 +56,7 @@ class FakeLib:
 
     def pyte_csap_destroy(self, ta, session, handle):
         self.calls.append(("csap_destroy", bytes(ta)))
-        return 0
+        return self.destroy_rc
 
     # TeError construction helpers
     def pyte_rc_error(self, rc):
@@ -246,3 +248,22 @@ def test_del_is_a_noop_after_destroy(monkeypatch, recwarn):
 
     assert lib.calls == []
     assert len(recwarn) == 0
+
+
+def test_context_manager_preserves_body_exception_when_destroy_fails(
+        monkeypatch):
+    """__exit__ already receives the body's exception as its second
+    argument, so a failing destroy() must not replace it: the body's
+    exception keeps its identity and the destroy failure is attached
+    as a cleanup_errors entry instead of being logged and swallowed."""
+    lib = _fake_shim(monkeypatch)
+    lib.destroy_rc = 12
+    c = _bare_csap()
+    boom = RuntimeError("BODY BOOM")
+
+    with pytest.raises(RuntimeError) as info:
+        with c:
+            raise boom
+
+    assert info.value is boom
+    assert len(boom.cleanup_errors) == 1

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import EnvError, check
 from pyte._util import enc as _enc
@@ -106,8 +107,8 @@ class Env:
     def __enter__(self) -> "Env":
         return self
 
-    def __exit__(self, *exc) -> bool:
-        self.close()
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        cleanup_all(self.close, primary=exc)
         return False
 
     # -- lookups -------------------------------------------------------

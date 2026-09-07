@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import warnings
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, check
 from pyte._util import enc as _enc
@@ -330,14 +331,7 @@ class Csap:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        if exc_type is None:
-            self.destroy()
-        else:
-            try:
-                self.destroy()
-            except Exception as e:
-                import pyte.log as _log
-                _log.error(f"csap.destroy failed during exception unwind: {e}")
+        cleanup_all(self.destroy, primary=exc_val)
         return False
 
     def __repr__(self) -> str:
