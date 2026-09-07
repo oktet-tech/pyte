@@ -10,8 +10,10 @@ strings, so parsers index with str(...).
 A Series is the record of one traffic window: snapshots taken by
 Client.poll(), with window()/mean()/median() for steady-state
 arithmetic. Its shape deliberately mirrors
-pyte.tools.trex.batch.Report so suite code reads the same on both
-drivers.
+pyte.tools.trex._batch_report.Report so suite code reads the same on
+both drivers. That is where Report is defined; batch.py imports it
+under an alias, so pyte.tools.trex.batch.Report is not a path that
+resolves.
 """
 from __future__ import annotations
 
