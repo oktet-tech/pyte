@@ -30,22 +30,23 @@ tapi_trex_create(...); proc->rpcs->silent_pass = false;`` idiom via
 are created under that toggle, so the ``job_create`` /
 ``job_attach_filter`` / ``job_filter_add_regexp`` RPC calls are not
 logged (tapi_job bakes the RPC server's ambient silent_pass into each
-job/channel/filter object at creation time). That baked-in silence
-lasts for the object's lifetime -- ``job_start``/``wait``/``stop``/
-``kill``/``destroy`` and every :meth:`Filter.drain` (including
-:meth:`Trex.report`'s) are wrapped by no idiom of their own and are
-always logged, same as the C, EXCEPT that the filters stay silent
-because nothing after creation flips their ``silent_pass`` back.
-(:meth:`Trex.report` used to wrap its drain in its own
-:meth:`~pyte.job.Job.quiet` bracket to counteract a bug in
-:meth:`Job.quiet` that unconditionally re-enabled tracing on exit --
-``tapi_job_set_tracing()`` rewrites the ``silent_pass`` field of the
-job and every one of its channels/filters, so any caller's
-``job.quiet()`` window between :meth:`wait` and :meth:`report`, e.g.
-nap-ts's raw-stdout drain mirroring ``trex_proc_drain_stdout()``,
-used to turn every filter loud again on exit. :meth:`Job.quiet` now
-restores the tracing state it found instead of forcing it back on, so
-that side effect no longer happens and the bracket was removed.)
+job/channel/filter object at creation time). That baked-in silence is
+NOT limited to creation: ``rpc_job_start``/``wait``/``stop``/``kill``/
+``destroy`` (``te/lib/tapi_job/rpc_job.c:118,171,212``) each reassert
+``rpcs->silent_pass = tapi_job_get_silent_pass(job)`` around their own
+call, and every :meth:`Filter.drain` on a filter created under it
+inherits the same field -- so a job born silent under this window
+stays silent for EVERY later RPC made on it, lifecycle calls included,
+not just the ones that created it, until something calls
+``tapi_job_set_tracing(TRUE)`` on it again. :meth:`Trex.report` does
+exactly that once its own drain (already silent from creation, so it
+needs no bracket of its own) is done, mirroring
+``trex_result_extract()``'s closing ``tapi_job_set_tracing(TRUE)``
+(nap-trex-stats.c:694) -- see its docstring -- so ``stop``/``kill``/
+``destroy`` afterwards stay logged, same as the C. This is deliberate,
+stated intent in the port, not a side effect of
+:meth:`~pyte.job.Job.quiet`, which restores whatever tracing state it
+finds rather than forcing it back on.
 
 Interface resolution: this port only understands :class:`LinuxIface`
 (used verbatim, never bound) and :class:`PciBdf` (used verbatim, bound
@@ -563,33 +564,51 @@ class Trex:
         itself is :func:`pyte.tools.trex._batch_report.build_report`.
 
         Every filter drained here was attached under :func:`create`'s
-        ``pco.silent_pass()`` window and stays silent for its whole
-        lifetime (nothing after creation flips ``silent_pass`` back),
-        so unlike ``trex_result_extract()`` (nap-trex-stats.c:614-694)
-        this needs no ``tapi_job_set_tracing(FALSE)``/``(TRUE)``
-        bracket of its own around the drain -- see the module
-        docstring for why the C does and this port does not.
+        ``pco.silent_pass()`` window and is already silent by the time
+        this runs (nothing between creation and here flips
+        ``silent_pass`` back), so the drain itself needs no
+        ``tapi_job_set_tracing(FALSE)`` half of the bracket
+        ``trex_result_extract()`` uses (nap-trex-stats.c:614-694).
+
+        It DOES need that bracket's closing half:
+        ``rpc_job_start``/``wait``/``stop``/``kill``/``destroy``
+        (``te/lib/tapi_job/rpc_job.c:118,171,212``) all reassert the
+        job's own baked-in ``silent_pass``, so a job born silent under
+        :func:`create` stays silent for its ENTIRE remaining lifetime
+        -- including :meth:`Trex.stop`/:meth:`kill`/:meth:`close`'s
+        ``destroy()`` -- unless something re-enables tracing.
+        :meth:`~pyte.job.Job.quiet` won't do that any more (it now
+        restores whatever it found, by design -- see the module
+        docstring), so this calls :meth:`~pyte.job.Job.tracing` (True)
+        explicitly at the end, mirroring
+        ``trex_result_extract()``'s closing
+        ``tapi_job_set_tracing(TRUE)`` so later lifecycle calls stay
+        logged, same as the C. Runs in a ``finally`` so it still
+        happens if a drain raises.
         """
         filters = _rpt.BatchFilters()
-        for name, f in self._summary.items():
-            filters.summary[name] = [m.data for m in f.drain()]
-        if self._m_traff_dur is not None:
-            cl_f, srv_f = self._m_traff_dur
-            cl_vals = [m.data for m in cl_f.drain()]
-            srv_vals = [m.data for m in srv_f.drain()]
-            filters.m_traff_dur = list(zip(cl_vals, srv_vals))
-        for name, (cl_f, srv_f) in self._opt.items():
-            cl_vals = [m.data for m in cl_f.drain()]
-            srv_vals = [m.data for m in srv_f.drain()]
-            filters.opt_counters[name] = list(zip(cl_vals, srv_vals))
-        for name, port_filters in self._port_stat.items():
-            per_port = [[m.data for m in pf.drain()]
-                       for pf in port_filters]
-            filters.port_stat[name] = list(zip(*per_port))
-        for name, f in self._port_time.items():
-            filters.port_time[name] = [m.data for m in f.drain()]
-        for name, f in self._global.items():
-            filters.global_stats[name] = [m.data for m in f.drain()]
+        try:
+            for name, f in self._summary.items():
+                filters.summary[name] = [m.data for m in f.drain()]
+            if self._m_traff_dur is not None:
+                cl_f, srv_f = self._m_traff_dur
+                cl_vals = [m.data for m in cl_f.drain()]
+                srv_vals = [m.data for m in srv_f.drain()]
+                filters.m_traff_dur = list(zip(cl_vals, srv_vals))
+            for name, (cl_f, srv_f) in self._opt.items():
+                cl_vals = [m.data for m in cl_f.drain()]
+                srv_vals = [m.data for m in srv_f.drain()]
+                filters.opt_counters[name] = list(zip(cl_vals, srv_vals))
+            for name, port_filters in self._port_stat.items():
+                per_port = [[m.data for m in pf.drain()]
+                           for pf in port_filters]
+                filters.port_stat[name] = list(zip(*per_port))
+            for name, f in self._port_time.items():
+                filters.port_time[name] = [m.data for m in f.drain()]
+            for name, f in self._global.items():
+                filters.global_stats[name] = [m.data for m in f.drain()]
+        finally:
+            self.job.tracing(True)
         return _rpt.build_report(filters)
 
     def close(self) -> None:

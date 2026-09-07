@@ -123,15 +123,18 @@ pyte_rpc_set_silent_pass(rcf_rpc_server *rpcs, int on)
      * and tapi_job_attach_filter() bake the ambient rpcs->silent_pass
      * into the new job/channel/filter object at creation time
      * (tapi_job.c:tapi_job_create_named, tapi_job_attach_filter). Every
-     * later call that uses that object (job_receive*, job_filter_
-     * add_regexp on an existing filter, job_poll/send/clear...)
-     * re-asserts the CAPTURED value into rpcs->silent_pass for the
-     * duration of its own RPC, overwriting whatever the caller set --
-     * so toggling this around one of those later calls is a no-op.
-     * Set it only around job/filter creation to silence that creation
-     * call AND, as a side effect, every future receive on the filters
-     * created under it; job_start/wait/stop/kill/destroy never consult
-     * any object's silent_pass, so they stay logged regardless. */
+     * later call that uses that object -- job_receive*, job_filter_
+     * add_regexp on an existing filter, job_poll/send/clear..., AND
+     * ALSO rpc_job_start/wait/stop/kill/destroy (rpc_job.c:118,171,212,
+     * each doing "rpcs->silent_pass = tapi_job_get_silent_pass(job)"
+     * around its own call) -- re-asserts the object's own baked-in
+     * silent_pass into rpcs->silent_pass for the duration of its own
+     * RPC, overwriting whatever the caller set here.  So toggling THIS
+     * function around any of those later calls is a no-op: every one
+     * of them, lifecycle calls included, logs according to whatever
+     * tapi_job_set_tracing() last set on the job, not the ambient
+     * silent_pass.  Set it only around job/filter creation, which is
+     * the one place it actually determines that baked-in value. */
     rpcs->silent_pass = on ? true : false;
 }
 
@@ -1440,27 +1443,6 @@ pyte_job_set_tracing(tapi_job_t *job, int trace)
      * inside is reachable for a NULL job — but the Python facade now
      * guards tracing() against NULL after destroy(), so this is safe.) */
     tapi_job_set_tracing(job, trace ? true : false);
-}
-
-/*
- * tapi_job_get_silent_pass() is declared only in tapi_job_internal.h,
- * which TE's meson build does not install (lib/tapi_job/meson.build
- * lists only tapi_job.h, tapi_job_factory_{cfg,rpc}.h and
- * tapi_job_opt.h under `headers`) -- so pyte_shim.h, built against the
- * installed include tree, cannot see its prototype.  It is nonetheless
- * an ordinary exported symbol in libtapi_job.so (confirmed with
- * `nm -D`), so its prototype is redeclared here instead of pulling in
- * the internal header.
- */
-extern bool tapi_job_get_silent_pass(const tapi_job_t *job);
-
-int
-pyte_job_get_tracing(tapi_job_t *job)
-{
-    /* tapi_job_set_tracing() writes !trace to the job and to every
-     * channel and filter (tapi_job.c:1627-1650); the job's own flag is
-     * the one to save and restore. */
-    return tapi_job_get_silent_pass(job) ? 0 : 1;
 }
 
 te_errno

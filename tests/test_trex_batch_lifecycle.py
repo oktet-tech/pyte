@@ -145,6 +145,8 @@ class _FakeJob:
         self.stdout = _FakeChannel()
         self.stderr = _FakeChannel()
         self.quiet_calls: list[str] = []
+        self.tracing_calls: list[bool] = []
+        self._tracing = True
         self._wait_exc = None
         self._wait_result = _FakeJobStatus(True)
 
@@ -171,6 +173,10 @@ class _FakeJob:
 
     def destroy(self, timeout=10.0):
         self.destroyed = True
+
+    def tracing(self, enable):
+        self.tracing_calls.append(enable)
+        self._tracing = enable
 
     @contextlib.contextmanager
     def quiet(self):
@@ -463,6 +469,35 @@ def test_report_does_not_open_its_own_quiet_or_silent_pass_window():
     assert pco._job.quiet_calls == []
     # ...nor a NEW RpcServer.silent_pass() window.
     assert pco.silent_pass_calls == silent_pass_before
+
+
+def test_report_re_enables_tracing_for_later_teardown_rpcs():
+    """Fix round 1, item 2: rpc_job_start/wait/stop/kill/destroy
+    (te/lib/tapi_job/rpc_job.c:118,171,212) all reassert the job's own
+    baked-in silent_pass around their own call. A Trex job born silent
+    under create()'s pco.silent_pass() window would therefore stay
+    silent for stop()/kill()/close()'s destroy() forever, now that
+    Job.quiet() restores what it finds instead of forcing tracing back
+    on -- so report() must explicitly re-enable tracing once its
+    (already-silent) drain is done, mirroring trex_result_extract()'s
+    closing tapi_job_set_tracing(TRUE) (nap-trex-stats.c:694)."""
+    pco = _FakePco()
+    opts = _batch_opts()
+
+    with batch.create(pco, opts) as trex:
+        # Simulate the job having been born silent under create()'s
+        # pco.silent_pass() window (the real Job.create() would have
+        # seeded this from the ambient rpcs->silent_pass).
+        pco._job._tracing = False
+
+        trex._summary["total_tx"].feed("12.34 M")
+        trex.report()
+
+    # report() re-enabled tracing -- close()'s stop()/destroy() (run
+    # by create()'s context-manager teardown above) stay logged, not
+    # silenced for the rest of the job's life.
+    assert pco._job.tracing_calls == [True]
+    assert pco._job._tracing is True
 
 
 def test_bind_pci_only_for_pcibdf_endpoints(monkeypatch):

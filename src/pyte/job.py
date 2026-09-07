@@ -488,6 +488,16 @@ class Job:
         self._stderr: Channel | None = None
         self._stdin: InputChannel | None = None
         self._filters: list[Filter] = []
+        #: Mirrors tapi_job_t's own silent_pass flag (inverted: True
+        #: means tracing is ON). A Job is never aliased -- create() is
+        #: the only constructor and always mints a fresh C handle for
+        #: exactly one Job -- and TE writes job->silent_pass in only
+        #: two places: tapi_job_create_named() (baked from the ambient
+        #: rpcs->silent_pass at creation, seeded by create() below) and
+        #: tapi_job_set_tracing() (whose only caller here is
+        #: tracing()). So this attribute can track the real field
+        #: without a getter into TE.
+        self._tracing = True
 
     def _handle(self):
         """The live C handle; raises after destroy().
@@ -530,12 +540,18 @@ class Job:
         fac = ffi.new("tapi_job_factory_t **")
         check(lib.pyte_job_factory_rpc(server._handle(), fac),
               f"job_factory_rpc_create({server.name})")
+        # tapi_job_create_named() bakes the RPC server's CURRENT ambient
+        # silent_pass into the new job (tapi_job.c:430) -- read it here,
+        # right before the call that bakes it, so the Job's own
+        # _tracing attribute starts in sync with the real C field.
+        ambient_silent_pass = lib.pyte_rpc_get_silent_pass(server._handle())
         out = ffi.new("tapi_job_t **")
         rc = lib.pyte_job_create(fac[0], _enc(program), argv, envp, out)
         if rc != 0:
             lib.pyte_job_factory_destroy(fac[0])
             check(rc, f"job_create({program})")
         job = cls(fac[0], out[0], program)
+        job._tracing = not ambient_silent_pass
         if stdin:
             try:
                 _ = job.stdin
@@ -726,12 +742,17 @@ class Job:
             return               # idempotence; a NULL handle would crash in C
         lib = _shim_lib()
         lib.pyte_job_set_tracing(self._h, 1 if enable else 0)
+        self._tracing = enable
 
     def tracing_enabled(self) -> bool:
-        """Whether per-call RPC logging is currently on for this job."""
-        h = self._handle()
-        lib = _shim_lib()
-        return bool(lib.pyte_job_get_tracing(h))
+        """Whether per-call RPC logging is currently on for this job.
+
+        Tracked in Python (see ``_tracing`` in __init__) rather than
+        read back from the shim: no getter into tapi_job_t's internal
+        silent_pass field is needed since nothing but this class ever
+        writes it.
+        """
+        return self._tracing
 
     @contextmanager
     def quiet(self):

@@ -178,7 +178,6 @@ te_errno pyte_job_send(tapi_job_channel_t *channel, const char *data,
 te_errno pyte_job_poll(tapi_job_channel_t **channels, unsigned int n,
                        int timeout_ms);
 void pyte_job_set_tracing(tapi_job_t *job, int trace);
-int pyte_job_get_tracing(tapi_job_t *job);
 
 /* tapi_job wrappers (command-line prefixes, e.g. accel launchers) */
 typedef struct tapi_job_wrapper_t tapi_job_wrapper_t;

@@ -46,8 +46,13 @@ class FakeLib:
         self.destroy_rc = 0
         self.factory_destroy_rc = 0
         self.in_channel_rc = 0
-        #: job handle -> current tracing state (1 = on, 0 = off)
+        #: job handle -> current tracing state (1 = on, 0 = off), as
+        #: last sent to pyte_job_set_tracing (write-only from the real
+        #: shim's point of view; Job itself now tracks the state).
         self.tracing = {}
+        #: rcf_rpc_server.silent_pass Job.create() reads via
+        #: pyte_rpc_get_silent_pass() to seed a new job's tracing state.
+        self.rpc_silent_pass = 0
 
     def pyte_job_wrapper_add(self, job_h, tool, argv, prio, out):
         self.calls.append(("wrapper_add", job_h, bytes(tool),
@@ -92,8 +97,13 @@ class FakeLib:
         self.tracing[job_h] = trace
         self.calls.append(("set_tracing", job_h, trace))
 
-    def pyte_job_get_tracing(self, job_h):
-        return self.tracing.get(job_h, 1)
+    def pyte_rpc_get_silent_pass(self, srv_h):
+        """Ambient silent_pass Job.create() reads to seed job._tracing.
+
+        Not appended to self.calls: it's not a job/tracing call, and
+        no existing test asserts on it.
+        """
+        return self.rpc_silent_pass
 
     def pyte_job_destroy(self, job_h, timeout_ms):
         self.calls.append(("destroy", job_h, timeout_ms))
@@ -600,6 +610,32 @@ def test_filter_detached_from_all_channels_is_dead(monkeypatch):
 # Job.tracing() / Job.quiet()
 # ---------------------------------------------------------------------------
 
+def test_create_seeds_tracing_off_under_ambient_silent_pass(monkeypatch):
+    """tapi_job_create_named() bakes the RPC server's ambient
+    silent_pass into the new job (tapi_job.c:430); Job.create() reads
+    that same ambient value via pyte_rpc_get_silent_pass() to seed its
+    own _tracing attribute in sync, with no getter into TE needed."""
+    lib = _fake_shim(monkeypatch)
+    lib.rpc_silent_pass = 1             # e.g. inside pco.silent_pass()
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
+
+    job = Job.create(server, "cat", [])
+
+    assert job.tracing_enabled() is False
+
+
+def test_create_seeds_tracing_on_when_ambient_is_not_silent(monkeypatch):
+    lib = _fake_shim(monkeypatch)
+    lib.rpc_silent_pass = 0
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
+
+    job = Job.create(server, "cat", [])
+
+    assert job.tracing_enabled() is True
+
+
 def test_tracing_calls_shim(monkeypatch):
     lib = _fake_shim(monkeypatch)
     job = _fake_job(handle="job-h")
@@ -677,10 +713,11 @@ def test_quiet_restores_the_state_it_found(monkeypatch):
     a quiet() block must not turn its tracing on."""
     lib = _fake_shim(monkeypatch)
     job = _fake_job(handle="job-h")
-    lib.tracing["job-h"] = 0            # created silent
+    job._tracing = False                # as if created under silent_pass
     with job.quiet():
         pass
     assert lib.tracing["job-h"] == 0
+    assert job.tracing_enabled() is False
 
 
 def test_nested_quiet_does_not_unsilence_the_outer_block(monkeypatch):
