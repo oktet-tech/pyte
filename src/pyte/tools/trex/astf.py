@@ -44,6 +44,25 @@ WAIT_MARGIN = 30.0
 _SI_STEPS = ((1e9, "G"), (1e6, "M"), (1e3, "K"), (1.0, ""))
 
 
+def _op_detail(name: str, args: tuple) -> str:
+    """Argument detail for an op's VERB line, or "" when it has none.
+
+    Only arguments that are both small and diagnostic are rendered: a
+    multiplier, a timeout, a group count. The stats ops take nothing
+    worth printing, and an op that carried a profile source or a
+    counter dict would turn one log line into a page.
+    """
+    if name == "start":
+        return " ".join(
+            f"{key}={value}" for key, value in
+            zip(("mult", "duration", "nc", "latency_pps"), args))
+    if name == "wait_on_traffic" and args:
+        return f"timeout={args[0]}"
+    if name == "get_tg_stats" and args:
+        return f"{len(args[0])} template group(s)"
+    return ""
+
+
 def _rate(value: float, unit: str) -> str:
     """``value`` in ``unit``, scaled to the largest prefix that fits.
 
@@ -72,6 +91,22 @@ class Client:
         self._tg_names: list[str] | None = None
 
     def _call(self, fn, *args, timeout=None):
+        """Ship one op-function, translating remote failures to TrexError.
+
+        Every shipped op is announced at VERB under a fixed ``astf op:``
+        prefix, so the whole group is one filter away. Only the methods
+        that change state open a step bracket, which left the stats
+        polls -- the bulk of the traffic in a run -- invisible: a
+        bring-up failure gave a traceback and no record of which call
+        was in flight. VERB sits below RING, so this is silent at the
+        normal level and there for whoever raises it.
+
+        The VERB line and the TrexError below both name ``fn.__name__``,
+        so the last op announced is exactly the one the failure names.
+        """
+        log.verb(" ".join(
+            x for x in (f"astf op: {fn.__name__}",
+                        _op_detail(fn.__name__, args)) if x))
         try:
             return self._rem.call(fn, self._cli, *args, timeout=timeout)
         except RemotePythonError as exc:
@@ -330,7 +365,12 @@ def session(pco: "RpcServer", opts: ServerOpts,
                         except Exception:   # noqa: BLE001 teardown
                             pass
                     try:
-                        rem.call(_ops.disconnect, cli)
+                        # Through the client rather than rem.call, so
+                        # the last op of a session is announced like
+                        # every other one -- a teardown that hangs is
+                        # otherwise indistinguishable from a body that
+                        # never returned.
+                        client._call(_ops.disconnect)
                     except Exception:       # noqa: BLE001 teardown
                         pass
             finally:

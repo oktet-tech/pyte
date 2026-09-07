@@ -45,6 +45,29 @@ def _streams(streams) -> list[Stream]:
     return list(streams)
 
 
+def _op_detail(name: str, args: tuple) -> str:
+    """Argument detail for an op's VERB line, or "" when it has none.
+
+    Only arguments that are both small and diagnostic are rendered: a
+    port list, a multiplier, a timeout, a stream count. The stream
+    specs themselves carry a base64 packet each, so add_streams is
+    logged by count alone.
+    """
+    if name in ("reset", "get_stats", "stop") and args:
+        return f"ports={args[0]}"
+    if name == "get_pgid_stats" and args:
+        return f"pg_ids={args[0]}"
+    if name == "wait_on_traffic" and args:
+        return f"timeout={args[0]}"
+    if name == "add_streams" and len(args) == 2:
+        return f"port={args[0]} {len(args[1])} stream(s)"
+    if name == "start":
+        return " ".join(
+            f"{key}={value}" for key, value in
+            zip(("ports", "mult", "duration", "force"), args))
+    return ""
+
+
 class Client:
     """Engine-side handle to a connected, agent-local STL client."""
 
@@ -59,7 +82,17 @@ class Client:
         *timeout* bounds the pyte.remote round trip; None leaves it at
         the session default, which is right for the short control ops
         but never for a wait (see :meth:`wait_on_traffic`).
+
+        Every shipped op is announced at VERB under a fixed ``stl op:``
+        prefix, so the whole group is one filter away. Only the methods
+        that change state open a step bracket, which left the stats
+        polls invisible; VERB sits below RING, so the line is silent at
+        the normal level and there for whoever raises it. It names
+        ``fn.__name__``, exactly as the TrexError below does.
         """
+        log.verb(" ".join(
+            x for x in (f"stl op: {fn.__name__}",
+                        _op_detail(fn.__name__, args)) if x))
         try:
             return self._rem.call(fn, self._cli, *args, timeout=timeout)
         except RemotePythonError as exc:
@@ -218,7 +251,10 @@ def session(pco: "RpcServer", opts: ServerOpts,
                     yield client
                 finally:
                     try:
-                        rem.call(_ops.disconnect, cli)
+                        # Through the client rather than rem.call, so
+                        # the last op of a session is announced like
+                        # every other one.
+                        client._call(_ops.disconnect)
                     except Exception:   # noqa: BLE001  best-effort teardown
                         pass
             finally:

@@ -187,3 +187,49 @@ def test_log_summary_logs_the_server_side_counters_too(fake_shim):
     # reading it here reported a flat zero on a live run
     # whose server had accepted 62 UDP flows.
     assert "udp accepted 5" in rings
+
+
+def test_every_shipped_op_is_announced_at_verb(fake_shim):
+    # Half the API opens no step bracket, so before this line a run
+    # left no record of the stats polls at all -- and a bring-up
+    # failure gave a traceback with no way to tell which call was in
+    # flight.
+    rem = FakeRemote(results={"get_stats": {"global": {}},
+                              "get_traffic_stats": {"client": {},
+                                                    "server": {}}})
+    c = _client(rem)
+    c.get_global()
+    c.get_traffic()
+    c.clear_stats()
+    verbs = fake_shim.texts(FakeShimLib.TE_LL_VERB)
+    assert "astf op: get_stats" in verbs
+    assert "astf op: get_traffic_stats" in verbs
+    assert "astf op: clear_stats" in verbs
+
+
+def test_the_verb_line_names_the_op_the_error_names(fake_shim):
+    rem = FakeRemote(raises={"stop": "no context"})
+    with pytest.raises(TrexError) as e:
+        _client(rem).stop()
+    verbs = fake_shim.texts(FakeShimLib.TE_LL_VERB)
+    assert verbs[-1] == "astf op: stop"
+    assert str(e.value).startswith("stop failed:")
+
+
+def test_verb_detail_is_small_and_only_where_it_helps(fake_shim):
+    rem = FakeRemote(results={"get_tg_names": ["a", "b", "c"],
+                              "get_tg_stats": {}})
+    c = _client(rem)
+    c.start(mult=2.0, duration=30.0, latency_pps=100)
+    c.wait_on_traffic(timeout=5.0)
+    c.get_template_stats()
+    verbs = fake_shim.texts(FakeShimLib.TE_LL_VERB)
+    assert ("astf op: start mult=2.0 duration=30.0 nc=False "
+            "latency_pps=100") in verbs
+    assert "astf op: wait_on_traffic timeout=5.0" in verbs
+    # The group names go over the wire; only their count goes in
+    # the log, which is what a reader needs from them.
+    assert "astf op: get_tg_stats 3 template group(s)" in verbs
+    # A stats reply is a counter dict; rendering one would turn a
+    # line into a page.
+    assert "astf op: get_tg_names" in verbs

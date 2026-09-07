@@ -236,3 +236,32 @@ def test_session_teardown_failure_does_not_mask_the_body_error(
             raise boom
     assert info.value is boom                 # identity, not just message
     assert info.value.cleanup_errors          # destroy failure attached
+
+
+def test_every_shipped_op_is_announced_at_verb(fake_shim):
+    # get_stats/get_pgid_stats open no step bracket, so a run left no
+    # record of them; VERB is below RING, so the line is invisible at
+    # the normal level and there when someone raises it.
+    from pyte.testing import FakeShimLib
+    c, _ = _client()
+    c.get_stats(ports=[0])
+    c.stop()
+    verbs = fake_shim.texts(FakeShimLib.TE_LL_VERB)
+    assert "stl op: get_stats ports=[0]" in verbs
+    assert "stl op: stop ports=[0, 1]" in verbs
+
+
+def test_verb_detail_stays_small(fake_shim):
+    from pyte.testing import FakeShimLib
+    c, _ = _client()
+    c.add_streams(Stream(packet=PktBuilder(Ether() / IP() / UDP()),
+                         mode=TXCont(pps=1000), name="s1"), ports=[0])
+    c.start(ports=[0], mult="10gbps", duration=5)
+    c.wait_on_traffic(timeout=7)
+    verbs = fake_shim.texts(FakeShimLib.TE_LL_VERB)
+    # The specs carry a base64 packet each, so only their count goes
+    # into the line.
+    assert "stl op: add_streams port=0 1 stream(s)" in verbs
+    assert ("stl op: start ports=[0] mult=10gbps duration=5 "
+            "force=False") in verbs
+    assert "stl op: wait_on_traffic timeout=7" in verbs
