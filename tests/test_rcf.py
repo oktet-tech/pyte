@@ -113,3 +113,52 @@ def test_grow_loop_propagates_other_errors():
 
     with pytest.raises(ValueError, match="RCF error"):
         _grow_loop(call)
+
+
+# -- DynamicAgent.__exit__ ---------------------------------------------------
+#
+# Same cleanup_all policy as Job.__exit__/RpcServer.__exit__: a failing
+# remove() during unwind must never replace the body's exception, and
+# with no body exception the teardown failure is the only failure there
+# is to report.
+
+def _raiser(exc):
+    def go():
+        raise exc
+    return go
+
+
+def test_dynamic_agent_ctx_mgr_preserves_body_exc_when_remove_fails(
+        monkeypatch):
+    """__exit__ already receives the body's exception as its second
+    argument, so a failing remove() must not replace it: the body's
+    exception keeps its identity and the remove() failure is attached
+    as a cleanup_errors entry instead."""
+    from pyte.rcf import DynamicAgent
+
+    agent = DynamicAgent("Agt_X")
+    monkeypatch.setattr(agent, "remove",
+                        _raiser(RuntimeError("remove failed")))
+    boom = RuntimeError("BODY BOOM")
+
+    with pytest.raises(RuntimeError) as info:
+        with agent:
+            raise boom
+
+    assert info.value is boom
+    assert len(boom.cleanup_errors) == 1
+
+
+def test_dynamic_agent_ctx_mgr_raises_remove_failure_on_clean_exit(
+        monkeypatch):
+    """With no body exception to preserve, a teardown failure must
+    still surface -- it is the only failure there is to report."""
+    from pyte.rcf import DynamicAgent
+
+    agent = DynamicAgent("Agt_X")
+    monkeypatch.setattr(agent, "remove",
+                        _raiser(RuntimeError("remove failed")))
+
+    with pytest.raises(RuntimeError, match="remove failed"):
+        with agent:
+            pass

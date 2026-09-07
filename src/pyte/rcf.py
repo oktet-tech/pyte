@@ -29,6 +29,7 @@ import random
 import tempfile
 from dataclasses import dataclass
 
+from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
 from pyte.errors import RcfError, check
 from pyte._util import enc as _enc
@@ -253,16 +254,8 @@ class DynamicAgent(RcfAgent):
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.remove()
-        else:
-            try:
-                self.remove()
-            except Exception as e:
-                import pyte.log as _log
-                _log.error(
-                    f"rcf.remove failed during exception unwind: {e}")
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        cleanup_all(self.remove, primary=exc)
         return False
 
     def __repr__(self):
