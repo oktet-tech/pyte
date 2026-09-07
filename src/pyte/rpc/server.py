@@ -67,20 +67,30 @@ class RpcServer:
         return cls(out[0], ta, name)
 
     def destroy(self) -> None:
-        """Destroy the RPC server; idempotent.
+        """Destroy the RPC server; idempotent and retryable when owned.
 
         Env-provided PCOs are owned by tapi_env (tapi_env_free destroys
         them), so the wrapper must not call pyte_rpc_server_destroy for
-        them.  It DOES clear the handle either way: tapi_env_free will
-        invalidate that pointer, and a wrapper the caller believes is
-        dead must not keep handing it to C.
+        them.  That path clears the handle unconditionally: no call is
+        made, and tapi_env_free will invalidate the pointer regardless,
+        so a wrapper the caller believes is dead must not keep handing
+        it to C.
+
+        The owned path only clears the handle after
+        pyte_rpc_server_destroy() succeeds: rcf_rpc.c returns early
+        (without freeing the server) when the underlying
+        cfg_del_instance_fmt() call fails, so a failure here leaves the
+        C server live and the handle must stay usable for a retry.
         """
-        h, self._h = self._h, None
-        if h is None or not self._owned:
+        if self._h is None:
+            return
+        if not self._owned:
+            self._h = None
             return
         lib = _shim_lib()
-        check(lib.pyte_rpc_server_destroy(h),
+        check(lib.pyte_rpc_server_destroy(self._h),
               f"rpc_server_destroy({self.name})", RpcError)
+        self._h = None
 
     def __enter__(self):
         return self

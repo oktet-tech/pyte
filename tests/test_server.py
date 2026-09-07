@@ -352,10 +352,11 @@ class _LifecycleLib:
 
     def __init__(self):
         self.calls = []
+        self.destroy_rc = 0
 
     def pyte_rpc_server_destroy(self, h):
         self.calls.append(("destroy", h))
-        return 0
+        return self.destroy_rc
 
     def pyte_rpc_getpid(self, h, out):
         self.calls.append(("getpid", h))
@@ -422,3 +423,25 @@ def test_destroy_is_idempotent(monkeypatch):
     srv.destroy()
     srv.destroy()
     assert len([c for c in lib.calls if c[0] == "destroy"]) == 1
+
+
+def test_owned_destroy_retries_after_failure(monkeypatch):
+    """A failing pyte_rpc_server_destroy() means rcf_rpc.c returned
+    early (its cfg_del_instance_fmt() call failed) without freeing the
+    server: the handle must stay usable so a later destroy() call can
+    retry and actually free it, instead of leaking the C server."""
+    from pyte.errors import RpcError
+    lib = _fake_lifecycle_shim(monkeypatch)
+    lib.destroy_rc = 12
+    srv = RpcServer(object(), "Agt", "pco")
+
+    with pytest.raises(RpcError):
+        srv.destroy()
+    assert srv._h is not None, "must stay live: the C server was not freed"
+    lib.calls.clear()
+
+    lib.destroy_rc = 0
+    srv.destroy()   # retry succeeds
+
+    assert len([c for c in lib.calls if c[0] == "destroy"]) == 1
+    assert srv._h is None

@@ -218,23 +218,25 @@ def test_destroy_logs_swallowed_stop_failure(monkeypatch):
 
 # -- Csap.__del__ (finalizer) --------------------------------------------
 
-def test_del_warns_and_destroys_a_live_csap(monkeypatch):
+def test_del_warns_but_does_not_touch_the_shim(monkeypatch):
     """A Csap dropped without destroy()/a context manager leaks the
-    agent-side CSAP for the whole run; __del__ must free it and warn
-    (like Packet's) so the leak is visible instead of silent."""
+    agent-side CSAP for the whole run; __del__ must warn so the leak
+    is visible.  It must NOT call into the shim: destroy() is
+    RPC-backed (a possible receive-stop plus pyte_csap_destroy over
+    RCF) and GC can fire mid-request, so this is warn-only -- unlike
+    Packet.free(), which is a local, synchronous, non-RPC free."""
     lib = _fake_shim(monkeypatch)
     c = _bare_csap()
 
-    with pytest.warns(ResourceWarning, match="not destroyed"):
+    with pytest.warns(ResourceWarning, match="never destroyed"):
         c.__del__()
 
-    assert [x for x in lib.calls if x[0] == "csap_destroy"]
-    assert c._handle is None
+    assert lib.calls == []
+    assert c._handle == 7, "must not free anything from __del__"
 
 
 def test_del_is_a_noop_after_destroy(monkeypatch, recwarn):
-    """__del__ on an already-destroyed Csap must not warn or touch the
-    shim again -- idempotent, like Packet.__del__."""
+    """__del__ on an already-destroyed Csap must not warn."""
     lib = _fake_shim(monkeypatch)
     c = _bare_csap()
     c.destroy()

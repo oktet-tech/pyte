@@ -306,24 +306,25 @@ class Csap:
         self._handle = None
 
     def __del__(self):
-        """Free the agent-side CSAP if it was never destroy()ed.
+        """Warn if the CSAP was never destroy()ed; never frees it.
 
         A Csap not used as a context manager (or explicitly
         destroy()ed) had no owner and no finalizer: the agent-side
-        CSAP leaked for the whole run.  Mirrors Packet.__del__ --
-        warn (the leak would otherwise be silent) and try to clean up
-        anyway; exceptions here must not propagate out of GC.
+        CSAP leaked for the whole run.  Warn-only, unlike
+        Packet.__del__: destroy() is RPC-backed (a receive-stop plus
+        pyte_csap_destroy over RCF), and this codebase forbids
+        reaching into the shim from a GC-time callback for exactly
+        that reason (see mi.Logger and remote.py -- GC can fire
+        mid-request and a nested call would corrupt the agent
+        session).  Packet.free() is not comparable: it is a local,
+        synchronous ASN free with no RPC involved.
         """
         if self._handle is None:
             return
         warnings.warn(
-            f"Csap {self.stack_id!r} on {self.ta!r} was not destroyed "
-            "(missing destroy() or a context manager); destroying it "
-            "now", ResourceWarning)
-        try:
-            self.destroy()
-        except Exception:  # noqa: BLE001  never raise out of __del__
-            pass
+            f"Csap {self.stack_id!r} on {self.ta!r} was never "
+            "destroyed (missing destroy() or a context manager); the "
+            "agent-side CSAP has leaked", ResourceWarning)
 
     def __enter__(self) -> "Csap":
         return self

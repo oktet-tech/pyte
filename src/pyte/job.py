@@ -751,41 +751,52 @@ class Job:
     def destroy(self, timeout: float = DEFAULT_TIMEOUT) -> None:
         """Destroy the job (terminating it if needed) and its factory.
 
-        Idempotent and retryable: the job side and the factory side
-        are attempted independently, so a destroy() that raised out
-        of the job destroy still destroys the factory in the same
-        call (it has no other owner and would otherwise leak with no
-        way to retry it), and a later destroy() call retries only
-        whichever side is still pending.
+        The job side and the factory side are attempted independently
+        and combined with cleanup_all(), because the two free
+        differently on the TE side:
 
-        Channel, Filter and InputChannel objects created from this
-        job are invalidated before the job-destroy call is made, not
-        after it reports success: TE frees them together with the job
-        whether or not tapi_job_destroy() reports success, so a retry
-        must never hand the (possibly already-freed) pointers back to
-        C — they raise RuntimeError instead.
+        - tapi_job_destroy() returns EARLY, without freeing anything,
+          when the underlying stop fails: the job, its channels and
+          its filters all stay live in C.  So the handle and every
+          Channel/Filter/InputChannel wrapper are only invalidated
+          after check() succeeds -- a failed destroy() leaves them
+          all usable, and a later destroy() call retries the job side
+          again.
+        - tapi_job_factory_destroy() is void and frees its argument
+          unconditionally, with no error path at all: whatever
+          check() reports, the C object is already gone.  So
+          self._factory is cleared BEFORE the call and is never
+          attempted again, on success or failure.
+
+        A destroy() that raised out of the job side still destroys
+        the factory in the same call: it has no other owner and would
+        otherwise leak.
         """
         lib = _shim_lib()
 
         def _destroy_job_once() -> None:
             if self._h is None:
                 return
-            h, self._h = self._h, None
+            check(lib.pyte_job_destroy(self._h, _ms(timeout)),
+                  f"job.destroy({self.program})")
+            # Success only: tapi_job.c frees the job together with its
+            # channels and filters here; a failure returns before
+            # freeing anything, so invalidating earlier would hand a
+            # retry stale pointers for objects TE still considers live.
+            self._h = None
             for child in (self._stdout, self._stderr, self._stdin,
                           *self._filters):
                 if child is not None:
                     child._h = None
             self._stdout = self._stderr = self._stdin = None
             self._filters.clear()
-            check(lib.pyte_job_destroy(h, _ms(timeout)),
-                  f"job.destroy({self.program})")
 
         def _destroy_factory_once() -> None:
             if self._factory is None:
                 return
-            check(lib.pyte_job_factory_destroy(self._factory),
+            factory, self._factory = self._factory, None
+            check(lib.pyte_job_factory_destroy(factory),
                   "job_factory_destroy")
-            self._factory = None
 
         cleanup_all(_destroy_job_once, _destroy_factory_once)
 

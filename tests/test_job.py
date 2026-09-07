@@ -449,8 +449,10 @@ def test_destroy_remains_idempotent(monkeypatch):
 def test_destroy_still_destroys_factory_when_job_destroy_raises(
         monkeypatch):
     """A failing tapi_job_destroy() must not skip the factory destroy:
-    the factory has no other owner, so stopping partway leaked it with
-    no way to retry."""
+    the factory has no other owner, so stopping partway leaked it.
+    Unlike the job, the factory's native free is unconditional (no
+    error path at all), so it is gone after this one attempt either
+    way -- it must not leak here regardless of the job's outcome."""
     from pyte.errors import TeError
     lib = _fake_shim(monkeypatch)
     lib.destroy_rc = 12   # job destroy itself fails
@@ -462,15 +464,19 @@ def test_destroy_still_destroys_factory_when_job_destroy_raises(
     assert ("destroy", "job-h", 10000) in lib.calls
     assert ("factory_destroy", "fac-h") in lib.calls
     assert job._factory is None, "factory must not leak"
-    assert job._h is None, "job side must not be retried: TE already " \
-        "freed it regardless of the reported rc"
+    assert job._h == "job-h", (
+        "tapi_job_destroy() returning an error means tapi_job.c "
+        "returned early WITHOUT freeing the job: the handle must "
+        "stay live so a retry can complete it")
 
 
-def test_destroy_invalidates_children_even_when_job_destroy_raises(
+def test_destroy_keeps_children_live_when_job_destroy_raises(
         monkeypatch):
-    """TE frees channels/filters with the job whether or not the call
-    reports success, so a retry must never hand those pointers back to
-    C -- invalidation cannot wait for a successful check()."""
+    """A failed tapi_job_destroy() means TE did NOT free the job, its
+    channels or its filters (tapi_job.c returns early before any of
+    that), so clearing the Python wrappers on failure would make a
+    live C job unreachable and a retry impossible.  A later destroy()
+    call must be able to finish the job side."""
     lib = _fake_shim(monkeypatch)
     lib.destroy_rc = 12
     job = Job("fac-h", "job-h", "prog")
@@ -481,30 +487,41 @@ def test_destroy_invalidates_children_even_when_job_destroy_raises(
     with pytest.raises(TeError):
         job.destroy()
 
+    assert job._h == "job-h"
+    assert job._stdout is out
+    assert out._h == "out-h"
+    assert flt._h == "flt-h"
+    assert flt._handle() == "flt-h"   # still usable: not invalidated
+    lib.calls.clear()
+
+    lib.destroy_rc = 0   # let the retry succeed
+    job.destroy()
+
+    assert ("destroy", "job-h", 10000) in lib.calls
+    assert job._h is None
     with pytest.raises(RuntimeError, match="destroyed"):
         flt.receive()
-    assert job._stdout is None
 
 
-def test_destroy_retries_only_the_factory_after_a_partial_failure(
-        monkeypatch):
-    """Once the job side is destroyed (successfully or not), a second
-    destroy() call must not repeat tapi_job_destroy() -- it retries
-    only the factory destroy that is still pending."""
+def test_destroy_never_retries_the_factory_after_a_failure(monkeypatch):
+    """tapi_job_factory_destroy() frees its argument unconditionally
+    (void, no C error path at all), so a reported failure still means
+    the pointer is already gone: a later destroy() call must not call
+    it again."""
     lib = _fake_shim(monkeypatch)
-    lib.factory_destroy_rc = 12   # factory destroy fails first time
+    lib.factory_destroy_rc = 12   # factory destroy "fails" once
     job = Job("fac-h", "job-h", "prog")
 
     from pyte.errors import TeError
     with pytest.raises(TeError, match="job_factory_destroy"):
         job.destroy()
+    assert job._factory is None, (
+        "cleared before the call: the native free already happened")
     lib.calls.clear()
 
-    lib.factory_destroy_rc = 0    # now let the retry succeed
-    job.destroy()   # no exception: factory retried, job not repeated
+    job.destroy()   # idempotent: no second factory_destroy call
 
-    assert lib.calls == [("factory_destroy", "fac-h")]
-    assert job._factory is None
+    assert lib.calls == []
 
 
 def test_destroy_attaches_factory_failure_to_job_failure(monkeypatch):
