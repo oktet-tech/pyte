@@ -545,8 +545,13 @@ def _emit_class(node: Node, root_oid: str, root_params: list[str],
 class Target:
     """One generation target: a CM file, a root OID, an output module."""
 
-    cm_file: str   # e.g. "cm_sys.yml"
-    root_oid: str  # e.g. "/agent/sys"
+    #: CM files to parse, in include order.  A subtree can be split
+    #: across several: TE moved the interface IRQ nodes out of
+    #: cm_base.yml into cm_if_irq.yml ("You need to include cm_base.yml
+    #: first to use this"), and sourcing only the first file silently
+    #: DELETES the missing nodes from the generated module.
+    cm_files: tuple[str, ...]   # e.g. ("cm_sys.yml",)
+    root_oid: str               # e.g. "/agent/sys"
     module: str    # e.g. "sys" -> gen/sys.py
     include: tuple[str, ...] | None = None  # root emits ONLY these
     #                                       # direct children (else all)
@@ -557,6 +562,16 @@ class Target:
     #: (all/default/<ifname>, conf_sys_tree.c) -- without the override
     #: every knob under it would compose an OID that never exists.
     force_collection: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        # A bare string is iterable, so cm_files="cm_sys.yml" would walk
+        # it character by character and fail far away with KeyError: 'c'.
+        if isinstance(self.cm_files, str):
+            raise TypeError(
+                "Target.cm_files must be a tuple of file names, not the "
+                f"bare string {self.cm_files!r} -- did you mean "
+                f"({self.cm_files!r},)?")
+        self.cm_files = tuple(self.cm_files)
 
 
 # The /agent root mixes agent-wide scalars with large separate subtrees
@@ -571,17 +586,18 @@ AGENT_MEMBERS = (
 )
 
 TARGETS = [
-    Target("cm_sys.yml", "/agent/sys", "sys",
+    Target(("cm_sys.yml",), "/agent/sys", "sys",
            force_collection={
                "/agent/sys/net/ipv4/conf": "ifname",
                "/agent/sys/net/ipv4/neigh": "ifname",
                "/agent/sys/net/ipv6/conf": "ifname",
                "/agent/sys/net/ipv6/neigh": "ifname",
            }),
-    Target("cm_base.yml", "/agent/interface", "interface"),
-    Target("cm_base.yml", "/agent", "agent", include=AGENT_MEMBERS),
-    Target("cm_pci.yml", "/agent/hardware/pci", "pci"),
-    Target("cm_module.yml", "/agent/module", "module"),
+    Target(("cm_base.yml", "cm_if_irq.yml"), "/agent/interface",
+           "interface"),
+    Target(("cm_base.yml",), "/agent", "agent", include=AGENT_MEMBERS),
+    Target(("cm_pci.yml",), "/agent/hardware/pci", "pci"),
+    Target(("cm_module.yml",), "/agent/module", "module"),
 ]
 
 
@@ -627,7 +643,7 @@ def generate_from(files: dict[str, str],
     """
     out: dict[str, str] = {}
     for t in targets:
-        entries = parse_cm(files[t.cm_file])
+        entries = [e for f in t.cm_files for e in parse_cm(files[f])]
         for e in entries:
             key = t.force_collection.get(e.oid)
             if key:
@@ -643,8 +659,8 @@ def generate(targets: list[Target] | None = None) -> dict[str, str]:
     """Emit modules from the real CM source (see cm_dir())."""
     targets = targets or TARGETS
     cm = cm_dir()
-    files = {t.cm_file: (cm / t.cm_file).read_text()
-             for t in {x.cm_file: x for x in targets}.values()}
+    files = {f: (cm / f).read_text()
+             for t in targets for f in t.cm_files}
     return generate_from(files, targets)
 
 

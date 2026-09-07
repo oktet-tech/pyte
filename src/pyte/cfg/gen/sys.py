@@ -71,6 +71,7 @@ class NetIpv4(CfgObject):
     ipfrag_max_dist = IntKnob("ipfrag_max_dist", cvt_name="INT32")
     ipfrag_high_thresh = IntKnob("ipfrag_high_thresh", cvt_name="INT32")
     tcp_timestamps = IntKnob("tcp_timestamps", cvt_name="INT32")
+    tcp_tw_reuse = IntKnob("tcp_tw_reuse", cvt_name="INT32")
     tcp_syncookies = IntKnob("tcp_syncookies", cvt_name="INT32")
     tcp_max_syn_backlog = IntKnob("tcp_max_syn_backlog", cvt_name="INT32")
     tcp_keepalive_time = IntKnob("tcp_keepalive_time", cvt_name="INT32")

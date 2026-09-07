@@ -625,7 +625,7 @@ def test_generate_from_text_map_emits_modules():
 """,
     }
     out = _gen.generate_from(files, [
-        _gen.Target("cm_sys.yml", "/agent/sys", "sys")])
+        _gen.Target(("cm_sys.yml",), "/agent/sys", "sys")])
     assert "sys" in out
     assert "class Sys(CfgObject):" in out["sys"]
     assert 'console_loglevel = IntKnob("console_loglevel", cvt_name="INT32")' \
@@ -662,7 +662,7 @@ def test_reserved_leaf_emits_renamed_knob():
 """
     out = _gen.generate_from(
         {"cm.yml": yaml_text},
-        [_gen.Target("cm.yml", "/agent/interface", "interface")])
+        [_gen.Target(("cm.yml",), "/agent/interface", "interface")])
     src = out["interface"]
     assert 'name_ = StrKnob("name", access="read_only")' in src
     assert '\n    name = StrKnob' not in src
@@ -698,7 +698,7 @@ def test_duplicate_attr_names_raise():
     with pytest.raises(ValueError, match="file_max"):
         _gen.generate_from(
             {"cm.yml": yaml_text},
-            [_gen.Target("cm.yml", "/agent/sys", "sys")])
+            [_gen.Target(("cm.yml",), "/agent/sys", "sys")])
 
 
 def test_duplicate_class_names_raise():
@@ -722,7 +722,7 @@ def test_duplicate_class_names_raise():
     with pytest.raises(ValueError, match="FooBar"):
         _gen.generate_from(
             {"cm.yml": yaml_text},
-            [_gen.Target("cm.yml", "/agent", "agent")])
+            [_gen.Target(("cm.yml",), "/agent", "agent")])
 
 
 # -- force_collection: CM entries whose name: is missing although the
@@ -763,7 +763,7 @@ def test_force_collection_emits_collection_not_subobject():
     """
     out = _gen.generate_from(
         {"cm_sys.yml": _CONF_LIKE_YAML},
-        [_gen.Target("cm_sys.yml", "/agent/sys", "sys",
+        [_gen.Target(("cm_sys.yml",), "/agent/sys", "sys",
                      force_collection={
                          "/agent/sys/net/ipv4/conf": "ifname"})])
     src = out["sys"]
@@ -779,7 +779,7 @@ def test_force_collection_emits_collection_not_subobject():
 def test_force_collection_only_touches_listed_oids():
     out = _gen.generate_from(
         {"cm_sys.yml": _CONF_LIKE_YAML},
-        [_gen.Target("cm_sys.yml", "/agent/sys", "sys")])
+        [_gen.Target(("cm_sys.yml",), "/agent/sys", "sys")])
     src = out["sys"]
     # without the override the old (broken) SubObject shape is kept
     assert 'conf = SubObject("conf", NetIpv4Conf)' in src
@@ -963,15 +963,15 @@ def test_include_unknown_member_raises():
 def test_include_via_target_and_generate_from():
     files = {"cm_x.yml": _MIXED_YAML}
     out = _gen.generate_from(files, [
-        _gen.Target("cm_x.yml", "/agent/x", "x", include=("a",))])
+        _gen.Target(("cm_x.yml",), "/agent/x", "x", include=("a",))])
     assert 'a = IntKnob("a", cvt_name="INT32")' in out["x"]
     assert "b = StrKnob" not in out["x"]
 
 
 def test_target_has_optional_include_field():
-    t = _gen.Target("f.yml", "/agent/x", "x")
+    t = _gen.Target(("f.yml",), "/agent/x", "x")
     assert t.include is None
-    t2 = _gen.Target("f.yml", "/agent/x", "x", include=("a",))
+    t2 = _gen.Target(("f.yml",), "/agent/x", "x", include=("a",))
     assert t2.include == ("a",)
 
 
@@ -1090,7 +1090,7 @@ def test_member_lines_wrap_at_79():
 """
     out = _gen.generate_from(
         {"cm.yml": yaml_text},
-        [_gen.Target("cm.yml", "/agent/averylongsegmentnameindeed", "m")])
+        [_gen.Target(("cm.yml",), "/agent/averylongsegmentnameindeed", "m")])
     for line in out["m"].splitlines():
         assert len(line) <= 79, line
 
@@ -1129,5 +1129,66 @@ def test_generator_emits_collection_access():
       access: read_write
 """
     out = _gen.generate_from(
-        {"cm.yml": yaml_text}, [_gen.Target("cm.yml", "/agent/sys", "sys")])
+        {"cm.yml": yaml_text}, [_gen.Target(("cm.yml",), "/agent/sys", "sys")])
     assert 'irq = Collection("irq", Irq, access="read_only")' in out["sys"]
+
+
+# -- split CM files: a subtree may live in more than one cm_*.yml ------
+
+_SPLIT_BASE = """---
+- register:
+    - oid: "/agent/interface"
+      access: read_only
+      type: none
+      name: ifname
+      d: |
+         Network interface.
+    - oid: "/agent/interface/mtu"
+      type: int32
+      access: read_write
+      d: |
+         MTU.
+"""
+
+_SPLIT_EXTRA = """---
+- register:
+    - oid: "/agent/interface/irq"
+      access: read_only
+      type: none
+      name: name
+      d: |
+         Interrupt info.
+    - oid: "/agent/interface/irq/smp_affinity"
+      access: read_write
+      type: string
+      d: |
+         Affinity list.
+"""
+
+
+def test_target_merges_entries_across_cm_files():
+    """TE split /agent/interface/irq out of cm_base.yml into
+    cm_if_irq.yml.  Sourcing only the first file does not fail -- it
+    silently DELETES the nodes the second file registers."""
+    out = _gen.generate_from(
+        {"base.yml": _SPLIT_BASE, "extra.yml": _SPLIT_EXTRA},
+        [_gen.Target(("base.yml", "extra.yml"), "/agent/interface",
+                     "interface")])
+    assert 'mtu = IntKnob("mtu", cvt_name="INT32")' in out["interface"]
+    assert "class Irq(CfgObject):" in out["interface"]
+    assert 'irq = Collection("irq", Irq' in out["interface"]
+    assert 'smp_affinity = StrKnob("smp_affinity")' in out["interface"]
+
+
+def test_dropping_the_second_cm_file_loses_its_nodes():
+    """The failure mode above, pinned: this is what regenerating with an
+    incomplete Target does, and it is silent."""
+    out = _gen.generate_from(
+        {"base.yml": _SPLIT_BASE, "extra.yml": _SPLIT_EXTRA},
+        [_gen.Target(("base.yml",), "/agent/interface", "interface")])
+    assert "class Irq(CfgObject):" not in out["interface"]
+
+
+def test_target_rejects_a_bare_string_cm_files():
+    with pytest.raises(TypeError, match="must be a tuple of file names"):
+        _gen.Target("cm_base.yml", "/agent/interface", "interface")

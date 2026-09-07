@@ -310,7 +310,7 @@ class Irq(CfgObject):
     """Network interface interrupt information"""
     name_ = StrKnob("name", access="read_only")
     cpu = Collection("cpu", IrqCpu, access="read_only")
-    smp_affinity = IntKnob("smp_affinity", cvt_name="UINT64")
+    smp_affinity = StrKnob("smp_affinity")
 
 
 class Interface(CfgObject):
@@ -323,6 +323,8 @@ class Interface(CfgObject):
     mcast_link_addr = Collection("mcast_link_addr", McastLinkAddr)
     link_addr = AddrKnob("link_addr")
     bcast_link_addr = AddrKnob("bcast_link_addr")
+    min_mtu = IntKnob("min_mtu", cvt_name="UINT16", access="read_only")
+    max_mtu = IntKnob("max_mtu", cvt_name="UINT16", access="read_only")
     mtu = IntKnob("mtu", cvt_name="INT32")
     ip4_ttl = IntKnob("ip4_ttl", cvt_name="INT32")
     status = IntKnob("status", cvt_name="INT32")
