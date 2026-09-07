@@ -24,6 +24,7 @@ Generated from the in-code docstrings.
    pyte.test
    pyte.tester
    pyte.testing
+   pyte.testsinfo
    pyte.tools
    pyte.trc
    pyte.util
