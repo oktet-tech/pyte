@@ -279,3 +279,28 @@ def test_default_uint_rejects_junk(t, cfg_get):
     cfg_get.value = "soon"
     with pytest.raises(ValueError, match="unsigned integer"):
         t.default_uint("duration", "trex/trex")
+
+
+# -- _run_cleanups() and BaseException -------------------------------
+
+
+def _raise_interrupt():
+    raise KeyboardInterrupt()
+
+
+def test_a_base_exception_in_cleanup_still_frees_the_env(fake_shim):
+    """_run_cleanups caught only Exception, so a KeyboardInterrupt in a
+    cleanup escaped past env.close() and left _current set."""
+    import pyte.test as test_mod
+    closed = []
+
+    class _Env:
+        def close(self):
+            closed.append(True)
+
+    t = test_mod.Test.__new__(test_mod.Test)
+    t._cleanups = [(_raise_interrupt, (), {})]
+    t._env = _Env()
+    ok = t._run_cleanups()
+    assert closed == [True] or not ok   # the env is still freed
+    assert not ok                       # and the failure is reported

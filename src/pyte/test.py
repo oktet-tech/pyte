@@ -140,7 +140,11 @@ class Test:
         for fn, args, kwargs in reversed(self._cleanups):
             try:
                 fn(*args, **kwargs)
-            except Exception:
+            except BaseException:  # noqa: BLE001
+                # BaseException, not Exception: this runs inside
+                # start()'s finally, so an interrupt (or a SystemExit
+                # from a cleanup) escaping here would skip env.close()
+                # and leave _current pointing at a dead test.
                 log.error("cleanup failed:\n" + traceback.format_exc())
                 ok = False
         return ok

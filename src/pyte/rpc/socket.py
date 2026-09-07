@@ -228,6 +228,14 @@ class RpcSocket:
         return f"<RpcSocket fd={self.fd} on {self.server!r}>"
 
     def close(self) -> None:
+        """Close the descriptor on the agent; idempotent.
+
+        The fd is marked closed BEFORE the result is checked, so a
+        failed close is not retried.  That is deliberate: retrying a
+        close on a descriptor TE may already have released risks
+        closing an unrelated fd the agent has since reused, which is
+        worse than leaking one that the agent's own exit reclaims.
+        """
         ffi, lib = _shim()
         if self.fd < 0:
             return

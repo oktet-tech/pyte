@@ -225,3 +225,36 @@ def test_mk_addr_returns_owning_storage():
 
     ss = sockmod._mk_addr(Ffi(), Lib(), ("192.0.2.1", 80))
     assert ss is sentinel
+
+
+def test_failed_close_does_not_retry_the_fd(monkeypatch):
+    """Documented decision: a close that failed is NOT retried, because
+    the agent may have reused the descriptor number since."""
+
+    class _RaisingServer:
+        """FakeServer, but _check_call reports the close as failed.
+
+        Raises a plain RuntimeError rather than an RpcError: building
+        one calls TeError.__init__, which reaches the shim, and this
+        file's FakeLib has no te_errno accessors.  The assertion here
+        is about retry semantics, not the exception type.
+        """
+
+        _h = "srv-h"
+
+        def _handle(self):
+            return self._h
+
+        def _check_call(self, rc, value, ok, where):
+            raise RuntimeError(f"close refused: {where}")
+
+    lib = _fake_shim(monkeypatch)
+    closes = []
+    lib.pyte_rpc_close = lambda h, fd, out: (closes.append(fd), 0)[1]
+
+    sock = RpcSocket(_RaisingServer(), 5)
+    with pytest.raises(RuntimeError, match="close refused"):
+        sock.close()
+    assert sock.fd == -1            # marked closed despite the failure
+    sock.close()                    # second call is a no-op...
+    assert closes == [5]            # ...not a retry
