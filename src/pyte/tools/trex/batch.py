@@ -116,6 +116,7 @@ from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools import _tool
 from pyte.tools.trex import _batch_filters as _flt
 from pyte.tools.trex import _batch_report as _rpt
+from pyte.tools.trex._config import PYTHONWARNINGS as _PYTHONWARNINGS
 
 if TYPE_CHECKING:
     from pyte.job import Filter, Job, JobStatus
@@ -411,9 +412,16 @@ def _shell_cmd(trex_exec: str, argv: list[str]) -> str:
     shim, so the working directory is set the same way
     :func:`pyte.tools.trex.stl.session` does it -- via a ``/bin/sh -c``
     wrapper (see ``ServerOpts.shell_command``).
+
+    A batch run launches the same vendor scripts as an interactive
+    one, so it leads with the same
+    :data:`~pyte.tools.trex._config.PYTHONWARNINGS` export (this
+    function does not go through ``ServerOpts``, which is why the
+    export appears twice).
     """
     workdir = os.path.dirname(trex_exec)
-    return (f"cd {shlex.quote(workdir)} && exec "
+    return (f"export PYTHONWARNINGS={_PYTHONWARNINGS}; "
+            f"cd {shlex.quote(workdir)} && exec "
             + " ".join(shlex.quote(a) for a in argv))
 
 

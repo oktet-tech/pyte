@@ -27,6 +27,22 @@ import os
 import shlex
 from dataclasses import dataclass, field
 
+#: PYTHONWARNINGS for the TRex process.  TRex 3.06 ships Python
+#: scripts (dpdk_setup_ports.py and friends) that use "\d" in plain
+#: string literals; under a modern interpreter each one raises a
+#: SyntaxWarning on stderr, which the server job logs at WARN -- nine
+#: per bring-up, so hundreds over a run.  The vendor tree cannot be
+#: fixed here.
+#:
+#: The blanket category filter is deliberate, do not narrow it to the
+#: message: warnings._setoption re.escape()s the message field, so it
+#: is a literal prefix and not a regex, and CPython reworded this very
+#: warning in 3.14 -- both "ignore:invalid escape sequence:
+#: SyntaxWarning" and its regex-looking cousin were measured to miss
+#: there.  The option is valid and inert on every Python 3, so it also
+#: needs no interpreter version check.
+PYTHONWARNINGS = "ignore::SyntaxWarning"
+
 
 @dataclass(frozen=True)
 class ServerOpts:
@@ -117,13 +133,21 @@ class ServerOpts:
         Every interpolated path is shell-quoted: this string is
         executed by ``sh -c``, so a space or metacharacter in the
         install path must not split the command.
+
+        The :data:`PYTHONWARNINGS` export leads, before the ``cd``: an
+        assignment prefix on ``exec`` (a special builtin) has
+        surprising persistence semantics, and putting the ``export``
+        between the ``cd`` and the ``exec`` would break the ``&&``
+        guard -- ``cd d && export V=x; exec p`` runs ``p`` even when
+        the ``cd`` failed.
         """
         software = " --software" if self.software else ""
         astf = " --astf" if self.astf else ""
         tso = " --tso-disable" if self.tso_disable else ""
         lro = " --lro-disable" if self.lro_disable else ""
         so = "".join(f" {flag}" for flag in self.so)
-        return (f"cd {shlex.quote(self.workdir)} && "
+        return (f"export PYTHONWARNINGS={PYTHONWARNINGS}; "
+                f"cd {shlex.quote(self.workdir)} && "
                 f"exec {shlex.quote(self.trex_exec)} "
                 f"-i --cfg {shlex.quote(cfg_path)} "
                 f"-c {self.cores}{software}{astf}{tso}{lro}{so}")

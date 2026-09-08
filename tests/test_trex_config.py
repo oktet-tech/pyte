@@ -42,6 +42,7 @@ def test_shell_command_derives_workdir():
     opts = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
                       ports=["0000:04:00.0"], cores=4)
     assert opts.shell_command("/tmp/x.yaml") == (
+        "export PYTHONWARNINGS=ignore::SyntaxWarning; "
         "cd /usr/local/trex && exec /usr/local/trex/t-rex-64 "
         "-i --cfg /tmp/x.yaml -c 4")
 
@@ -83,6 +84,7 @@ def test_software_shell_command_adds_flag():
         port_macs=[("aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"),
                    ("aa:bb:cc:dd:ee:02", "aa:bb:cc:dd:ee:01")])
     assert opts.shell_command("/tmp/x.yaml") == (
+        "export PYTHONWARNINGS=ignore::SyntaxWarning; "
         "cd /home/kostik/trex && exec /home/kostik/trex/t-rex-64 "
         "-i --cfg /tmp/x.yaml -c 1 --software")
 
@@ -160,3 +162,35 @@ def test_cfg_yaml_macs_parse_as_strings():
     info = doc[0]["port_info"][0]
     assert info["src_mac"] == "00:11:22:33:44:55"
     assert isinstance(info["src_mac"], str)
+
+
+def test_shell_command_silences_trex_syntax_warnings():
+    """TRex 3.06's own Python scripts raise SyntaxWarnings that reach
+    the log at WARN through the server job's stderr; the launch line
+    filters the whole category out."""
+    opts = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                      ports=["0000:04:00.0"])
+    cmd = opts.shell_command("/tmp/x.yaml")
+    assert cmd.startswith("export PYTHONWARNINGS=ignore::SyntaxWarning; ")
+
+
+def test_shell_command_export_does_not_break_the_cd_guard():
+    """`cd d && export V=x; exec p` would run p even when the cd
+    failed -- the export leads instead, so `cd && exec` stays intact
+    and TRex never starts outside its install directory."""
+    opts = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                      ports=["0000:04:00.0"])
+    cmd = opts.shell_command("/tmp/x.yaml")
+    export, _, rest = cmd.partition("; ")
+    assert export.startswith("export PYTHONWARNINGS=")
+    assert rest.startswith("cd /usr/local/trex && exec ")
+    assert ";" not in rest
+
+
+def test_batch_shell_command_silences_them_too():
+    """The batch driver builds its own launch line (it does not go
+    through ServerOpts), so it needs the same export."""
+    from pyte.tools.trex.batch import _shell_cmd
+    cmd = _shell_cmd("/usr/local/trex/t-rex-64", ["t-rex-64", "-f", "x"])
+    assert cmd.startswith("export PYTHONWARNINGS=ignore::SyntaxWarning; ")
+    assert "; cd /usr/local/trex && exec " in cmd
