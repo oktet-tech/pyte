@@ -19,7 +19,7 @@ import pytest
 from pyte import log, test
 from pyte._cleanup import cleanup_all
 from pyte._params import Params
-from pyte.errors import TestFail
+from pyte.errors import RemotePythonError, TestFail
 from pyte.testing import FakeShimLib
 
 
@@ -325,3 +325,100 @@ def test_a_base_exception_from_env_close_still_exits_cleanly(
     assert test._current is None
     err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
     assert any("env close failed" in txt for txt in err_logs)
+
+
+# -- agent-side tracebacks in the failure report ---------------------
+#
+# pyte.remote keeps the agent-side traceback out of the exception
+# message (it would otherwise be copied into every verdict and
+# artifact that quotes the message), so each report site has to
+# recover it from the exception chain -- exactly once.
+
+#: Held in a constant, not inlined at the raise: a literal there is
+#: echoed by traceback.format_exc() as the failing source line, which
+#: would make a "logged once" assertion pass for the wrong reason.
+AGENT_TB = "Traceback (agent):\n  op(); RuntimeError: boom"
+
+
+def _raise_remote():
+    raise RemotePythonError("remote RuntimeError: boom",
+                            remote_traceback=AGENT_TB)
+
+
+def _errors(lib, needle):
+    return [t for t in lib.texts(FakeShimLib.TE_LL_ERROR) if needle in t]
+
+
+def test_unhandled_exception_reports_the_remote_traceback_once(
+        lib, monkeypatch):
+    """The wrapped-and-escaping shape: the TRex client raises
+    TrexError(f"... {exc}") from a RemotePythonError."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start():
+            try:
+                _raise_remote()
+            except RemotePythonError as exc:
+                raise RuntimeError(f"start failed: {exc}") from exc
+    assert ei.value.code == 1
+    logged = _errors(lib, "Unhandled exception")
+    assert len(logged) == 1
+    assert logged[0].count(AGENT_TB) == 1
+
+
+def test_test_failed_reports_the_remote_traceback(lib, monkeypatch):
+    """A suite that catches the failure and calls t.fail() with a
+    one-line message: this handler is then the only report, so the
+    agent-side frames must reach it."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            try:
+                _raise_remote()
+            except RemotePythonError as exc:
+                t.fail(f"traffic failed: {exc}")
+    assert ei.value.code == 1
+    logged = _errors(lib, "Test failed:")
+    assert len(logged) == 1
+    # The message the suite chose stays one line; the frames follow.
+    assert logged[0].splitlines()[0] == (
+        "Test failed: traffic failed: remote RuntimeError: boom")
+    assert logged[0].count(AGENT_TB) == 1
+
+
+def test_a_plain_test_failure_gains_no_traceback(lib, monkeypatch):
+    """Nothing from pyte.remote in the chain: the verdict-side log is
+    exactly what it was before."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit):
+        with test.start() as t:
+            t.fail("plain failure")
+    assert _errors(lib, "Test failed:") == ["Test failed: plain failure"]
+
+
+def test_cleanup_failure_reports_the_remote_traceback(lib, monkeypatch):
+    """A cleanup that talks to the agent fails the same way."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.cleanup(_raise_remote)
+    assert ei.value.code == 1
+    logged = _errors(lib, "cleanup failed")
+    assert len(logged) == 1
+    assert logged[0].count(AGENT_TB) == 1
+
+
+def test_env_close_failure_reports_the_remote_traceback(lib, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+
+    class _Env:
+        def close(self):
+            _raise_remote()
+
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t._env = _Env()
+    assert ei.value.code == 1
+    logged = _errors(lib, "env close failed")
+    assert len(logged) == 1
+    assert logged[0].count(AGENT_TB) == 1

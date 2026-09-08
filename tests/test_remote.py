@@ -118,6 +118,22 @@ def test_remote_error_reraised():
     assert "Trace" in ei.value.remote_traceback
 
 
+def test_remote_error_message_is_one_line():
+    """The traceback belongs in the attribute only: the message is
+    quoted by every wrapper on the way out (and lands in verdicts and
+    artifacts), so a multi-line one is copied several times per
+    failure."""
+    tb = "Traceback (most recent call last):\n  op()\nKeyError: 'k'"
+    s = FakeSession()
+    s.replies.append({"id": 1, "ok": False, "type": "KeyError",
+                      "msg": "'k'", "traceback": tb})
+    with pytest.raises(RemotePythonError) as ei:
+        s.call(outer, 1)
+    assert str(ei.value) == "remote KeyError: 'k'"
+    assert "\n" not in str(ei.value)
+    assert ei.value.remote_traceback == tb
+
+
 def test_id_mismatch_is_protocol_error():
     s = FakeSession()
     s.replies.append({"id": 99, "ok": True, "value": 1})

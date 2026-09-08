@@ -8,7 +8,6 @@ import os
 import random
 import signal
 import sys
-import traceback
 from contextlib import contextmanager
 from typing import Callable
 
@@ -17,6 +16,8 @@ from pyte._util import shim_lib as _shim_lib
 from pyte._params import Params, parse_argv
 from pyte.errors import TestFail, TestSkip
 from pyte._util import enc as _enc
+from pyte._util import format_exc_chain as _format_exc_chain
+from pyte._util import format_remote_tracebacks as _remote_detail
 
 EXIT_SIGINT = 0x2
 EXIT_SIGUSR2 = 0x4
@@ -145,7 +146,7 @@ class Test:
                 # start()'s finally, so an interrupt (or a SystemExit
                 # from a cleanup) escaping here would skip env.close()
                 # and leave _current pointing at a dead test.
-                log.error("cleanup failed:\n" + traceback.format_exc())
+                log.error("cleanup failed:\n" + _format_exc_chain())
                 ok = False
         return ok
 
@@ -262,7 +263,14 @@ def start(name: str | None = None):
             log.error(f"Test skipped, but cleanup also failed:{detail}")
         result = EXIT_SKIP
     except TestFail as e:
-        log.error(f"Test failed: {e}{_cleanup_detail(e)}")
+        # _remote_detail: a test that catches a remote failure and
+        # calls t.fail() with a one-line message is the common shape,
+        # and this handler is then the only report of it -- without
+        # the appended frames the agent-side traceback reaches no log
+        # at all.  Empty whenever nothing in the chain came from
+        # pyte.remote, which is the usual case.
+        log.error(f"Test failed: {e}{_cleanup_detail(e)}"
+                  f"{_remote_detail(e)}")
         result = 1
     except SystemExit as e:
         # sys.exit() can itself unwind through a `with` block whose
@@ -280,7 +288,7 @@ def start(name: str | None = None):
             log.error(f"SystemExit(code={e.code!r}), but cleanup also "
                       f"failed:{detail}")
     except Exception:
-        log.error("Unhandled exception:\n" + traceback.format_exc())
+        log.error("Unhandled exception:\n" + _format_exc_chain())
         result = 1
     finally:
         if not t._run_cleanups() and result == 0:
@@ -289,7 +297,7 @@ def start(name: str | None = None):
             try:
                 t._env.close()
             except BaseException:  # noqa: BLE001  interrupt-safe teardown
-                log.error("env close failed:\n" + traceback.format_exc())
+                log.error("env close failed:\n" + _format_exc_chain())
                 if result == 0:
                     result = 1
             t._env = None

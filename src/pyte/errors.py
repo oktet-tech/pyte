@@ -198,6 +198,13 @@ class RemotePythonError(TeError):
     Message-only (no te_errno behind it), like TrcError's string
     path; ``remote_traceback`` carries the agent-side traceback when
     the failure was a remote exception.
+
+    The traceback is in that attribute and NOT in the message, which
+    stays a single line: callers wrap the message into their own
+    (``raise TrexError(f"... {exc}") from exc``), so a multi-line one
+    would be copied into every verdict and artifact along the way.
+    :func:`pyte._util.remote_tracebacks` recovers the frames from an
+    exception chain where the failure is finally reported.
     """
 
     def __init__(self, msg: str, remote_traceback: str = ""):

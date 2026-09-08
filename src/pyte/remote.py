@@ -283,9 +283,12 @@ class RemotePython:
                 f"protocol error: response id {resp.get('id')!r}, "
                 f"expected {self._last_id}")
         if not resp["ok"]:
+            # One-line message, traceback in the attribute only: the
+            # message is quoted by every wrapper on the way out (and
+            # ends up in verdicts and artifacts), while the frames are
+            # printed once, by whoever reports the failure.
             raise RemotePythonError(
-                f"remote {resp['type']}: {resp['msg']}\n"
-                f"{resp['traceback']}",
+                f"remote {resp['type']}: {resp['msg']}",
                 remote_traceback=resp["traceback"])
         return self._decode(resp["value"])
 
