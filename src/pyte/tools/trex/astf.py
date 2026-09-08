@@ -19,11 +19,13 @@ from __future__ import annotations
 import os
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator
 
 from pyte import log
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
+from pyte.process import Process
 from pyte.tools.trex import _agent
 from pyte.tools.trex import _astf_ops as _ops
 from pyte.tools.trex import _astf_stats as _stats
@@ -296,6 +298,200 @@ class Client:
         for tmpl in self.get_template_stats():
             log.ring(f"template {tmpl.name}: {tmpl.counters}")
         log.step_pop("summary logged")
+
+
+@dataclass(frozen=True)
+class ServerInfo:
+    """Everything needed to reach a running TRex, and nothing live.
+
+    Deliberately all strings, ints and None: a prologue publishes these
+    to the Configurator and a later test reads them back in a process
+    that never saw :func:`start_server`. Anything holding a live handle
+    could not make that crossing.
+    """
+
+    ta: str
+    process: str
+    cfg_path: str
+    workdir: str
+    sync_port: int
+    async_port: int
+    nports: int
+    tmp_dir: str | None = None
+
+
+def _write_cfg_on_agent(pco: "RpcServer", opts: ServerOpts,
+                        tmp_dir: str | None) -> str:
+    """Write the platform cfg YAML on the agent, return its path."""
+    from pyte import remote
+    from pyte.tools.trex import _ops as _stl_ops
+    with remote.python(pco) as rem:
+        return rem.call(_stl_ops.write_cfg, opts.cfg_yaml(), tmp_dir)
+
+
+def _wait_sync_port(pco: "RpcServer", opts: ServerOpts,
+                    timeout: float) -> None:
+    """Block until an ASTF client can connect, or raise TrexError.
+
+    Readiness is a successful connect, not a banner in stdout: an
+    /agent/process entry's filters are log-only, so there is no stream
+    to match on. This is the same check :func:`session` makes, and it
+    has to hold before any test is allowed to attach.
+    """
+    from pyte import remote
+    with remote.python(pco) as rem:
+        try:
+            cli = rem.call(
+                _ops.bootstrap,
+                os.path.join(opts.workdir, TREX_ASTF_PYLIB),
+                "127.0.0.1", opts.sync_port, opts.async_port, timeout,
+                timeout=timeout + WAIT_MARGIN)
+        except RemotePythonError as exc:
+            raise TrexError(
+                f"TRex ASTF server did not come up on {pco.ta}: "
+                f"{exc}") from exc
+        try:
+            rem.call(_ops.disconnect, cli)
+        except Exception:           # noqa: BLE001  probe teardown
+            pass
+
+
+def start_server(pco: "RpcServer", opts: ServerOpts,
+                 name: str = "trex",
+                 connect_timeout: float = CONNECT_TIMEOUT) -> ServerInfo:
+    """Start a TRex the Configurator owns, and wait for it to answer.
+
+    Not a context manager, unlike :func:`session`: the prologue that
+    calls this and the epilogue that calls :func:`stop_server` are
+    separate Tester processes, so no Python scope can span the
+    server's life. The pairing is held by the Configurator entry
+    instead, which is the whole point -- see :class:`ServerInfo`.
+
+    The process runs the TRex binary directly rather than behind
+    ``sh -c``: ``/agent/process`` models workdir and env natively,
+    which is all session()'s shell wrapper supplies, and a wrapper
+    would make status and kill act on the shell instead of on TRex.
+    """
+    log.step_push(f"TRex ASTF: bring up on {pco.ta} as process {name!r}")
+    tmp_dir = _agent.tmp_dir(pco.ta)
+    cfg_path = _write_cfg_on_agent(pco, opts, tmp_dir)
+    log.ring(f"trex cfg: {cfg_path}")
+    info = ServerInfo(ta=pco.ta, process=name, cfg_path=cfg_path,
+                      workdir=opts.workdir, sync_port=opts.sync_port,
+                      async_port=opts.async_port,
+                      nports=len(opts.ports), tmp_dir=tmp_dir)
+    Process.create(pco.ta, name, opts.trex_exec,
+                   args=opts.argv(cfg_path), env=opts.env(),
+                   workdir=opts.workdir).start()
+    try:
+        _wait_sync_port(pco, opts, connect_timeout)
+    except BaseException as exc:
+        # A server that never answered is not one an epilogue will be
+        # asked to clean up, so it is cleaned up here instead.
+        #
+        # primary= is load-bearing: without it a teardown failure is
+        # raised in place of the exception being unwound, and the
+        # answer to "why did TRex not come up" is replaced by a
+        # complaint about the cleanup that followed.
+        cleanup_all(lambda: stop_server(info, pco), primary=exc)
+        log.step_pop(f"TRex ASTF bring-up failed on {pco.ta}")
+        raise
+    log.step_pop(f"TRex ASTF ready on {pco.ta}")
+    return info
+
+
+def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
+    """Stop the process and remove the config it was started with.
+
+    The order is load-bearing, and is the one session()'s teardown
+    keeps for the same reason: TRex reopens its config while shutting
+    down, so the process has to be gone before the file is.
+
+    ``pco`` is needed only to remove the cfg file; omit it to leave the
+    file in place. Every step is attempted even when an earlier one
+    failed, because a process left running is what breaks the *next*
+    session.
+    """
+    from pyte import remote
+    from pyte.tools.trex import _ops as _stl_ops
+    proc = Process(info.ta, info.process)
+
+    def _stop() -> None:
+        if proc.exists:
+            proc.stop()
+            proc.destroy()
+
+    def _remove_cfg() -> None:
+        if pco is None:
+            return
+        with remote.python(pco) as rem:
+            rem.call(_stl_ops.remove_file, info.cfg_path)
+
+    cleanup_all(_stop, _remove_cfg)
+
+
+@contextmanager
+def attach(pco: "RpcServer", info: ServerInfo,
+           connect_timeout: float = CONNECT_TIMEOUT) -> Iterator["Client"]:
+    """Connect a client to an already-running TRex.
+
+    A context manager, unlike :func:`start_server`, because this does
+    live inside one test: the client is opened and closed within it,
+    while the server it talks to outlives every test in the session.
+
+    The server's liveness is checked before connecting, so that a
+    server which died in an earlier iteration is reported as exactly
+    that, with its exit status, rather than as a connect timeout that
+    says nothing about why.
+    """
+    from pyte import remote
+    proc = Process(info.ta, info.process)
+    if not proc.exists:
+        raise TrexError(
+            f"no TRex process {info.process!r} on {info.ta}: the "
+            f"session prologue did not bring one up")
+    if not proc.running:
+        kind, value = proc.exit_status
+        raise TrexError(
+            f"the session's TRex on {info.ta} is not running "
+            f"(exit_status type {kind}, value {value}): it died in an "
+            f"earlier iteration")
+    log.step_push(f"TRex ASTF: attach on {info.ta}")
+    popped = False
+    with remote.python(pco) as rem:
+        try:
+            cli = rem.call(
+                _ops.bootstrap,
+                os.path.join(info.workdir, TREX_ASTF_PYLIB),
+                "127.0.0.1", info.sync_port, info.async_port,
+                connect_timeout, timeout=connect_timeout + WAIT_MARGIN)
+        except RemotePythonError as exc:
+            log.step_pop(f"TRex ASTF attach failed on {info.ta}")
+            raise TrexError(
+                f"could not attach to the TRex on {info.ta}: "
+                f"{exc}") from exc
+        client = Client(rem, cli, list(range(info.nports)),
+                        tmp_dir=info.tmp_dir)
+        try:
+            # Takes the ports by force and clears whatever the previous
+            # iteration left loaded, so each test starts from an owned
+            # and empty state on a server it did not start itself.
+            client.reset()
+            log.step_pop(f"TRex ASTF attached on {info.ta}")
+            popped = True
+            yield client
+        finally:
+            if client._profile is not None:
+                try:
+                    rem.call(_ops.remove_file, client._profile)
+                except Exception:   # noqa: BLE001  teardown
+                    pass
+            try:
+                client._call(_ops.disconnect)
+            except Exception:       # noqa: BLE001  teardown
+                pass
+            if not popped:
+                log.step_pop(f"TRex ASTF attach failed on {info.ta}")
 
 
 @contextmanager

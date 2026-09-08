@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex.astf Client unit tests (fake remote, no agent)."""
+import dataclasses
+import types
+
 import pytest
 
 from pyte.errors import RemotePythonError, TrexError
 from pyte.testing import FakeShimLib
 from pyte.tools.trex import _agent, astf
+from pyte.tools.trex._config import ServerOpts
 
 
 class FakeRemote:
@@ -321,3 +325,193 @@ def test_verb_detail_is_small_and_only_where_it_helps(fake_shim):
     # A stats reply is a counter dict; rendering one would turn a
     # line into a page.
     assert "astf op: get_tg_names" in verbs
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped server: start_server / stop_server / attach
+# ---------------------------------------------------------------------------
+
+
+class _FakeProcess:
+    """Records what start_server asked the Configurator for.
+
+    State lives on the class, not the instance: the real Process holds
+    none and reads the tree on every property, so stop_server() acting
+    through a freshly constructed handle must see what start_server()
+    did. A per-instance fake would hide exactly that.
+    """
+
+    state: dict = {}
+
+    def __init__(self, ta=None, name=None):
+        self.ta = ta
+        self.name = name
+
+    @classmethod
+    def reset(cls):
+        cls.state = {"exists": False, "running": False,
+                     "exit_status": (2, 0), "created": None}
+
+    @property
+    def exists(self):
+        return self.state["exists"]
+
+    @property
+    def running(self):
+        return self.state["running"]
+
+    @property
+    def exit_status(self):
+        return self.state["exit_status"]
+
+    @classmethod
+    def create(cls, ta, name, exe, args=(), env=None, workdir=None):
+        cls.state["exists"] = True
+        cls.state["created"] = dict(
+            ta=ta, name=name, exe=exe, args=list(args),
+            env=dict(env or {}), workdir=workdir, started=False)
+        return cls(ta, name)
+
+    def start(self):
+        self.state["created"]["started"] = True
+        self.state["running"] = True
+
+    def stop(self):
+        self.state["running"] = False
+
+    def destroy(self):
+        self.state["exists"] = False
+
+
+@pytest.fixture
+def server_fakes(monkeypatch):
+    _FakeProcess.reset()
+    monkeypatch.setattr(astf, "Process", _FakeProcess)
+    monkeypatch.setattr(astf, "_write_cfg_on_agent",
+                        lambda pco, opts, tmp_dir: "/tmp/trex.yaml")
+    monkeypatch.setattr(astf, "_wait_sync_port", lambda *a, **k: None)
+    monkeypatch.setattr(astf._agent, "tmp_dir", lambda ta: "/tmp/agt")
+    return _FakeProcess
+
+
+def _server_opts():
+    return ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                      ports=["0000:04:00.0", "0000:04:00.1"],
+                      cores=4, astf=True)
+
+
+def test_server_info_is_frozen():
+    """It crosses a process boundary as Configurator values; a mutable
+    handle would invite treating it as a live object."""
+    info = astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/c.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2, tmp_dir="/tmp")
+    with pytest.raises(Exception):
+        info.ta = "TST2"
+
+
+def test_server_info_holds_only_publishable_values():
+    info = astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/c.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2, tmp_dir=None)
+    for field in dataclasses.fields(info):
+        assert isinstance(getattr(info, field.name),
+                          (str, int, type(None)))
+
+
+def test_start_server_creates_configures_and_starts(server_fakes):
+    opts = _server_opts()
+    info = astf.start_server(types.SimpleNamespace(ta="TST1"), opts)
+    created = server_fakes.state["created"]
+    assert created["exe"] == "/usr/local/trex/t-rex-64"
+    assert created["args"] == opts.argv("/tmp/trex.yaml")
+    assert created["env"] == opts.env()
+    assert created["workdir"] == "/usr/local/trex"
+    assert created["started"] is True
+    assert info == astf.ServerInfo(
+        ta="TST1", process="trex", cfg_path="/tmp/trex.yaml",
+        workdir="/usr/local/trex", sync_port=opts.sync_port,
+        async_port=opts.async_port, nports=2, tmp_dir="/tmp/agt")
+
+
+def test_start_server_launches_trex_not_a_shell(server_fakes):
+    """/agent/process models workdir and env natively, so session()'s
+    sh -c wrapper has no purpose here -- and wrapping would make status
+    and kill act on the shell rather than on TRex."""
+    astf.start_server(types.SimpleNamespace(ta="TST1"), _server_opts())
+    created = server_fakes.state["created"]
+    assert created["exe"].endswith("t-rex-64")
+    assert not created["exe"].endswith("sh")
+    assert created["args"][0] == "-i"
+
+
+def test_start_server_cleans_up_when_it_never_answers(server_fakes,
+                                                      monkeypatch):
+    """A server that never came up is not one an epilogue will be asked
+    to clean up, so bring-up must not leak the entry."""
+    def _boom(*a, **k):
+        raise TrexError("did not come up")
+
+    monkeypatch.setattr(astf, "_wait_sync_port", _boom)
+    with pytest.raises(TrexError, match="did not come up"):
+        astf.start_server(types.SimpleNamespace(ta="TST1"),
+                          _server_opts())
+    assert server_fakes.state["exists"] is False
+
+
+def test_stop_server_stops_then_destroys(server_fakes):
+    info = astf.start_server(types.SimpleNamespace(ta="TST1"),
+                             _server_opts())
+    astf.stop_server(info)
+    assert server_fakes.state["running"] is False
+    assert server_fakes.state["exists"] is False
+
+
+def test_attach_refuses_when_no_prologue_ran(monkeypatch):
+    _FakeProcess.reset()
+    monkeypatch.setattr(astf, "Process", _FakeProcess)
+    info = astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/c.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2)
+    with pytest.raises(TrexError, match="prologue did not bring one up"):
+        with astf.attach(types.SimpleNamespace(ta="TST1"), info):
+            pass
+
+
+def test_attach_reports_a_server_that_died_with_its_exit_status(
+        monkeypatch):
+    """The failure mode a session-lived server introduces: one crash
+    poisons every remaining iteration, and each must say so rather than
+    produce its own connect-timeout mystery."""
+    _FakeProcess.reset()
+    _FakeProcess.state.update(exists=True, running=False,
+                              exit_status=(1, 9))
+    monkeypatch.setattr(astf, "Process", _FakeProcess)
+    info = astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/c.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2)
+    with pytest.raises(TrexError, match="type 1, value 9"):
+        with astf.attach(types.SimpleNamespace(ta="TST1"), info):
+            pass
+
+
+def test_bringup_failure_survives_a_failing_cleanup(server_fakes,
+                                                    monkeypatch):
+    """The diagnosis must outlive the diagnostic: a teardown that also
+    fails must not replace the answer to "why did TRex not come up".
+    stop_server() here fails on the cfg removal, which needs a real
+    remote session the fakes do not provide."""
+    def _boom(*a, **k):
+        raise TrexError("did not come up")
+
+    monkeypatch.setattr(astf, "_wait_sync_port", _boom)
+    with pytest.raises(TrexError, match="did not come up"):
+        astf.start_server(types.SimpleNamespace(ta="TST1"),
+                          _server_opts())
+    # ...and the entry is still gone, so nothing is leaked for an
+    # epilogue that will never be told about it.
+    assert server_fakes.state["exists"] is False
