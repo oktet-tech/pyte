@@ -16,6 +16,7 @@ Generated from the in-code docstrings.
    pyte.log
    pyte.mi
    pyte.net
+   pyte.process
    pyte.rcf
    pyte.remote
    pyte.rpc
