@@ -194,3 +194,55 @@ def test_batch_shell_command_silences_them_too():
     cmd = _shell_cmd("/usr/local/trex/t-rex-64", ["t-rex-64", "-f", "x"])
     assert cmd.startswith("export PYTHONWARNINGS=ignore::SyntaxWarning; ")
     assert "; cd /usr/local/trex && exec " in cmd
+
+
+def test_env_carries_pythonwarnings():
+    """TRex 3.06 ships scripts with invalid escape sequences; the
+    filter is a launch property, not a shell detail, so both launch
+    paths take it from here."""
+    opts = ServerOpts(trex_exec="/x/t-rex-64", ports=["0000:04:00.0"])
+    assert opts.env() == {"PYTHONWARNINGS": "ignore::SyntaxWarning"}
+
+
+def test_argv_excludes_argv0():
+    """argv() is the arguments only: a Configurator-launched process
+    carries the binary in /agent/process/exe:, not in arg:1."""
+    opts = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                      ports=["0000:04:00.0"])
+    assert "/usr/local/trex/t-rex-64" not in opts.argv("/tmp/x.yaml")
+
+
+def test_argv_leads_with_the_fixed_options():
+    opts = ServerOpts(trex_exec="/x/t-rex-64", ports=["0000:04:00.0"],
+                      cores=4)
+    assert opts.argv("/tmp/x.yaml") == ["-i", "--cfg", "/tmp/x.yaml",
+                                        "-c", "4"]
+
+
+def test_argv_carries_every_flag_in_shell_command_order():
+    opts = ServerOpts(
+        trex_exec="/x/t-rex-64", ports=["trex0", "trex1"], cores=2,
+        software=True, astf=True, tso_disable=True, lro_disable=True,
+        so=("--mlx5-so",),
+        port_macs=[("aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"),
+                   ("aa:bb:cc:dd:ee:02", "aa:bb:cc:dd:ee:01")])
+    assert opts.argv("/tmp/x.yaml") == [
+        "-i", "--cfg", "/tmp/x.yaml", "-c", "2",
+        "--software", "--astf", "--tso-disable", "--lro-disable",
+        "--mlx5-so"]
+
+
+def test_argv_and_env_agree_with_shell_command():
+    """The property that keeps the two launch paths from drifting: a
+    process started from argv()/env() runs the same TRex as one
+    started from shell_command()."""
+    opts = ServerOpts(
+        trex_exec="/usr/local/trex/t-rex-64",
+        ports=["0000:04:00.0", "0000:04:00.1"], cores=4, astf=True,
+        tso_disable=True, lro_disable=True, so=("--mlx5-so",))
+    cmd = opts.shell_command("/tmp/x.yaml")
+    for key, value in opts.env().items():
+        assert f"export {key}={value};" in cmd
+    # The argument list appears in order, after the binary.
+    tail = cmd.split("/usr/local/trex/t-rex-64 ", 1)[1]
+    assert tail == " ".join(opts.argv("/tmp/x.yaml"))

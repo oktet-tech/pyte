@@ -127,6 +127,38 @@ class ServerOpts:
             text += self.cfg_extra
         return text
 
+    def env(self) -> dict[str, str]:
+        """Environment the TRex process needs beyond the agent's own.
+
+        A mapping rather than a baked-in shell export, because a
+        Configurator-launched process sets it through
+        ``/agent/process/env:`` instead -- see
+        :func:`pyte.tools.trex.astf.start_server`.
+        """
+        return {"PYTHONWARNINGS": PYTHONWARNINGS}
+
+    def argv(self, cfg_path: str) -> list[str]:
+        """Arguments for the TRex binary, excluding argv[0].
+
+        The single source of the option order. :meth:`shell_command`
+        renders this list, and a Configurator-launched process
+        installs it as ``/agent/process/arg:`` instances. A launch
+        path that built its own list could drift from the other, and
+        the drift would only show up as TRex behaving differently
+        under one of them.
+        """
+        args = ["-i", "--cfg", cfg_path, "-c", str(self.cores)]
+        if self.software:
+            args.append("--software")
+        if self.astf:
+            args.append("--astf")
+        if self.tso_disable:
+            args.append("--tso-disable")
+        if self.lro_disable:
+            args.append("--lro-disable")
+        args.extend(self.so)
+        return args
+
     def shell_command(self, cfg_path: str) -> str:
         """Inner command for ``sh -c`` that runs TRex from its workdir.
 
@@ -134,20 +166,16 @@ class ServerOpts:
         executed by ``sh -c``, so a space or metacharacter in the
         install path must not split the command.
 
-        The :data:`PYTHONWARNINGS` export leads, before the ``cd``: an
-        assignment prefix on ``exec`` (a special builtin) has
-        surprising persistence semantics, and putting the ``export``
-        between the ``cd`` and the ``exec`` would break the ``&&``
-        guard -- ``cd d && export V=x; exec p`` runs ``p`` even when
-        the ``cd`` failed.
+        The :meth:`env` exports lead, before the ``cd``: an assignment
+        prefix on ``exec`` (a special builtin) has surprising
+        persistence semantics, and putting the ``export`` between the
+        ``cd`` and the ``exec`` would break the ``&&`` guard --
+        ``cd d && export V=x; exec p`` runs ``p`` even when the ``cd``
+        failed.
         """
-        software = " --software" if self.software else ""
-        astf = " --astf" if self.astf else ""
-        tso = " --tso-disable" if self.tso_disable else ""
-        lro = " --lro-disable" if self.lro_disable else ""
-        so = "".join(f" {flag}" for flag in self.so)
-        return (f"export PYTHONWARNINGS={PYTHONWARNINGS}; "
+        exports = " ".join(f"export {key}={shlex.quote(value)};"
+                           for key, value in self.env().items())
+        args = " ".join(shlex.quote(arg) for arg in self.argv(cfg_path))
+        return (f"{exports} "
                 f"cd {shlex.quote(self.workdir)} && "
-                f"exec {shlex.quote(self.trex_exec)} "
-                f"-i --cfg {shlex.quote(cfg_path)} "
-                f"-c {self.cores}{software}{astf}{tso}{lro}{so}")
+                f"exec {shlex.quote(self.trex_exec)} {args}")
