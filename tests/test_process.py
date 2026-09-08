@@ -43,6 +43,27 @@ def fake_cfg(monkeypatch):
     return fake
 
 
+def test_create_matches_the_models_access_modes(fake_cfg):
+    """cm_process.yml makes exe and workdir read_write, so they exist
+    with the parent and must be set -- adding one returns CS-EEXIST on
+    a live Configurator. arg and env are read_create and must be
+    added. A fake that accepted either would hide the difference, so
+    the operation itself is asserted, not just the value."""
+    process.Process.create(
+        "TST1", "trex", "/usr/local/trex/t-rex-64",
+        args=["-i"], env={"K": "v"}, workdir="/usr/local/trex")
+    base = "/agent:TST1/process:trex"
+    ops = {(op, oid) for op, oid, _ in fake_cfg.calls}
+    assert ("add", base) in ops
+    assert ("set", f"{base}/exe:") in ops
+    assert ("set", f"{base}/workdir:") in ops
+    assert ("add", f"{base}/arg:1") in ops
+    assert ("add", f"{base}/env:K") in ops
+    # ...and emphatically not the other way round.
+    assert ("add", f"{base}/exe:") not in ops
+    assert ("add", f"{base}/workdir:") not in ops
+
+
 def test_create_installs_exe_args_env_and_workdir(fake_cfg):
     process.Process.create(
         "TST1", "trex", "/usr/local/trex/t-rex-64",

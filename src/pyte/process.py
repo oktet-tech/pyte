@@ -55,16 +55,23 @@ class Process:
         Nothing here starts the process: cm_process.yml forbids
         reconfiguring a running one, so every knob is written first
         and :meth:`start` comes after.
+
+        The mix of set and add follows the model's access modes, and
+        getting it wrong fails at run time rather than here: ``exe``
+        and ``workdir`` are ``read_write``, so they come into being
+        with the parent instance and adding one returns CS-EEXIST,
+        while ``arg`` and ``env`` are ``read_create`` and have to be
+        added.
         """
         self = cls(ta, name)
         cfg.add(self.oid)
-        cfg.add(f"{self.oid}/exe:", exe)
+        cfg.set(f"{self.oid}/exe:", exe)
         for order, arg in enumerate(args, start=1):
             cfg.add(f"{self.oid}/arg:{order}", arg)
         for key, value in (env or {}).items():
             cfg.add(f"{self.oid}/env:{key}", value)
         if workdir is not None:
-            cfg.add(f"{self.oid}/workdir:", workdir)
+            cfg.set(f"{self.oid}/workdir:", workdir)
         return self
 
     def start(self) -> None:
