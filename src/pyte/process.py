@@ -79,12 +79,27 @@ class Process:
         cfg.set(f"{self.oid}/status:", 1)
 
     def stop(self) -> None:
-        """Stop the process."""
+        """Stop the process.
+
+        The agent sends SIGTERM, then SIGKILL after a short grace
+        period, to the whole process group by default (see the
+        model's ``stop_group``), so a program started through a
+        wrapper script goes down with the wrapper.
+        """
         cfg.set(f"{self.oid}/status:", 0)
 
     def destroy(self) -> None:
-        """Remove the entry and everything under it."""
-        cfg.delete(self.oid, children=True)
+        """Remove the entry and everything under it.
+
+        The parent instance alone is deleted: its ``arg``, ``env`` and
+        ``option`` children go with it on the agent, and the
+        ``read_write`` leaves (``exe``, ``status``, ``workdir``...)
+        cannot be deleted on their own at all. Asking for the children
+        too made the Configurator log an ERROR for every such leaf
+        before deleting the parent anyway. This is what the C TAPI's
+        tapi_cfg_ps_del() does as well.
+        """
+        cfg.delete(self.oid)
 
     def kill(self, signal: str, group: bool = False) -> None:
         """Send ``signal`` to the process, or to its process group."""

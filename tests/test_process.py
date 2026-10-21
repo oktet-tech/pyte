@@ -122,11 +122,16 @@ def test_running_reads_through_to_the_agent(fake_cfg):
         fake_cfg.calls
 
 
-def test_destroy_removes_the_subtree(fake_cfg):
-    proc = process.Process.create("TST1", "p", "/bin/true")
+def test_destroy_deletes_the_parent_instance_only(fake_cfg):
+    """The children go with the parent. Deleting them one by one would
+    include the read_write leaves (exe, status, workdir), which the
+    Configurator refuses with an ERROR line each and the C API then
+    ignores, so the log of every teardown carried a page of errors
+    that meant nothing."""
+    proc = process.Process.create("TST1", "p", "/bin/true", args=["x"])
     proc.destroy()
     assert not fake_cfg.exists("/agent:TST1/process:p")
-    assert ("delete", "/agent:TST1/process:p", True) in fake_cfg.calls
+    assert ("delete", "/agent:TST1/process:p", False) in fake_cfg.calls
 
 
 def test_exists_tracks_the_entry(fake_cfg):
