@@ -141,6 +141,29 @@ def test_stats_fed_one_character_at_a_time():
     assert [s.port for s in got] == [0, 1, 0, 1]
 
 
+def test_parser_numbers_the_blocks_of_each_port():
+    # testpmd prints one block per port every --stats-period seconds:
+    # the n-th block of a port covers n periods, however many of them
+    # one read happens to see.
+    got = StatsParser().feed(_data())
+    assert [(s.port, s.seq) for s in got] == [(0, 0), (1, 0), (0, 1),
+                                               (1, 1)]
+
+
+def test_block_numbers_do_not_depend_on_the_reads():
+    text = _data() + _data()
+    p = StatsParser()
+    got = p.feed(text[:_port1_start()]) + p.feed(text[_port1_start():])
+    assert [s.seq for s in got if s.port == 0] == [0, 1, 2, 3]
+    assert [s.seq for s in got if s.port == 1] == [0, 1, 2, 3]
+
+
+def test_stats_reports_the_seq_of_the_latest_block(fake_pco_with_stdout):
+    with testpmd.run(fake_pco_with_stdout,
+                     Opts(allow=("a", "b"), lcores=(1,))) as h:
+        assert {p: st.seq for p, st in h.stats().items()} == {0: 1, 1: 1}
+
+
 # ---------------------------------------------------------------------------
 # run() handle with fakes (pure Python, no shim); copied from test_fio.py
 # ---------------------------------------------------------------------------

@@ -173,7 +173,13 @@ _STATS_FIELDS = (
 
 @dataclass(frozen=True)
 class PortStats:
-    """One port's counters from a periodic testpmd statistics dump."""
+    """One port's counters from a periodic testpmd statistics dump.
+
+    ``seq`` numbers the port's blocks from 0 in the order testpmd
+    printed them: block ``seq`` was printed ``seq`` stats periods
+    after the first, which dates the counters better than the time a
+    reader happened to see them.
+    """
 
     port: int
     rx_packets: int
@@ -185,18 +191,22 @@ class PortStats:
     tx_errors: int
     rx_pps: int
     tx_pps: int
+    seq: int = 0
 
 
 class StatsParser:
     """Incremental parser of ``--stats-period`` output.
 
     Feed arbitrary chunks of testpmd stdout; complete blocks (header
-    through the closing ``####`` line) are returned in order, a trailing
-    partial block stays buffered until the rest arrives.
+    through the closing ``####`` line) are returned in order, each with
+    its port's block number in ``seq``, and a trailing partial block
+    stays buffered until the rest arrives.
     """
 
     def __init__(self) -> None:
         self._buf = ""
+        #: port -> number of blocks seen so far
+        self._seq: dict[int, int] = {}
 
     def feed(self, text: str) -> list[PortStats]:
         self._buf += text
@@ -213,15 +223,18 @@ class StatsParser:
                 return out
             body = self._buf[head.end():close.start()]
             self._buf = self._buf[close.end():]
-            out.append(self._parse(int(head.group(1)), body))
+            port = int(head.group(1))
+            seq = self._seq.get(port, 0)
+            self._seq[port] = seq + 1
+            out.append(self._parse(port, body, seq))
 
     @staticmethod
-    def _parse(port: int, body: str) -> PortStats:
+    def _parse(port: int, body: str, seq: int) -> PortStats:
         vals = {}
         for name, pattern in _STATS_FIELDS:
             m = re.search(pattern, body)
             vals[name] = int(m.group(1)) if m else 0
-        return PortStats(port=port, **vals)
+        return PortStats(port=port, seq=seq, **vals)
 
 
 def program_path(ta: str) -> str:
