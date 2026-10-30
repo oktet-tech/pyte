@@ -65,6 +65,8 @@ class FakeCfgState:
 
 @pytest.fixture()
 def fake_cfg(monkeypatch):
+    # what enable_vfs() grabbed is module state: none from other tests
+    monkeypatch.setattr(sriov, "_grabbed", {})
     return FakeCfgState(monkeypatch)
 
 
@@ -176,6 +178,58 @@ def test_disable_vfs_zeroes_and_syncs(fake_cfg):
     sriov.disable_vfs(PF)
     assert fake_cfg.store[f"{PF}/sriov:/num_vfs:"] == 0
     assert fake_cfg.syncs == ["/agent:A/hardware:"]
+
+
+def _rsrc(i):
+    return f"/agent:A/rsrc:pci_fn:15b3:1018:{i}"
+
+
+def test_release_vfs_releases_every_grabbed_vf_of_the_pf(fake_cfg):
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2)
+    sriov.release_vfs(PF)
+    assert [fake_cfg.store[_rsrc(i)] for i in range(2)] == ["", ""]
+
+
+def test_release_vfs_finds_the_vfs_another_process_grabbed(fake_cfg,
+                                                           monkeypatch):
+    # The prologue grabs, the epilogue (a process of its own, with
+    # nothing recorded) releases: the PF's sriov:/vf entries say what.
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2)
+    monkeypatch.setattr(sriov, "_grabbed", {})
+    sriov.release_vfs(PF)
+    assert [fake_cfg.store[_rsrc(i)] for i in range(2)] == ["", ""]
+
+
+def test_release_vfs_releases_what_it_grabbed_once_the_pf_lists_none(
+        fake_cfg):
+    _enable_hook(fake_cfg, 1)
+    sriov.enable_vfs(PF, 1)
+    del fake_cfg.store[f"{PF}/sriov:/vf:0"]
+    sriov.release_vfs(PF)
+    assert fake_cfg.store[_rsrc(0)] == ""
+
+
+def test_release_vfs_skips_vfs_nobody_holds(fake_cfg):
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2, grab=False)
+    sriov.grab_fn(_fn(1))
+    sriov.release_vfs(PF)
+    assert _rsrc(0) not in fake_cfg.store
+    assert fake_cfg.store[_rsrc(1)] == ""
+    sriov.release_vfs(PF)               # nothing held any more: no-op
+
+
+def test_disable_vfs_releases_the_vfs_before_removing_them(fake_cfg):
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2)
+    seen = []
+    fake_cfg.on_set[f"{PF}/sriov:/num_vfs:"] = lambda v: seen.append(
+        [fake_cfg.store[_rsrc(i)] for i in range(2)])
+    sriov.disable_vfs(PF)
+    assert seen == [["", ""]]
+    assert fake_cfg.store[f"{PF}/sriov:/num_vfs:"] == 0
 
 
 def test_bind_sets_driver_and_syncs(fake_cfg):

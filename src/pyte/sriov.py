@@ -17,6 +17,8 @@ from pyte.errors import CfgError, RpcError, SriovError
 _SIDES = {"dut": 1, "peer": 2}
 #: What ip(8) prints when the PF driver lacks a VF knob (EOPNOTSUPP).
 _NOT_SUPPORTED = "Operation not supported"
+#: PF device OID -> the VF function OIDs enable_vfs() grabbed on it.
+_grabbed: dict[str, list[str]] = {}
 
 
 def bdf(pci_oid: str) -> str:
@@ -75,7 +77,8 @@ def enable_vfs(pci_oid: str, n: int, grab: bool = True) -> list[str]:
     The ``sriov:/vf:<index>`` leaves hold vendor/device/instance
     OIDs; the instance value is the device OID.  VFs come back in
     index order and, if ``grab`` is set, are grabbed as resources so
-    a test may bind their driver.
+    a test may bind their driver; :func:`release_vfs` (and
+    :func:`disable_vfs`) release them.
 
     :raises SriovError: fewer than ``n`` VFs appeared in the tree.
     """
@@ -92,12 +95,40 @@ def enable_vfs(pci_oid: str, n: int, grab: bool = True) -> list[str]:
         fn_oid = entry.value
         if grab:
             grab_fn(fn_oid)
+            held = _grabbed.setdefault(pci_oid, [])
+            if fn_oid not in held:
+                held.append(fn_oid)
         vfs.append(cfg.get(fn_oid))
     return vfs
 
 
+def _held(fn_oid: str) -> bool:
+    """Whether the rsrc of :func:`grab_fn` points at ``fn_oid``."""
+    agent, name = _fn_rsrc(fn_oid)
+    try:
+        return cfg.get(f"/agent:{agent}/rsrc:{name}") == fn_oid
+    except CfgError:
+        return False    # never grabbed: no such rsrc
+
+
+def release_vfs(pci_oid: str) -> None:
+    """Release every grabbed VF of the PF.
+
+    The VFs are those the PF lists now (``sriov:/vf:*``), so a
+    process that did not grab them (an epilogue after the prologue)
+    releases them too, plus those :func:`enable_vfs` grabbed in this
+    process.  A VF nobody holds is left alone.
+    """
+    fns = [entry.value for entry in Device(pci_oid).sriov.vf]
+    fns += [f for f in _grabbed.pop(pci_oid, []) if f not in fns]
+    for fn_oid in fns:
+        if _held(fn_oid):
+            release_fn(fn_oid)
+
+
 def disable_vfs(pci_oid: str) -> None:
-    """Remove all VFs of the PF."""
+    """Release the VFs of the PF (:func:`release_vfs`), remove them."""
+    release_vfs(pci_oid)
     Device(pci_oid).sriov.num_vfs = 0
     cfg.synchronize(_hardware(pci_oid))
 
