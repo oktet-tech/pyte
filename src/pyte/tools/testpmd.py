@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
-"""pyte.tools.testpmd — build dpdk-testpmd command lines.
+"""pyte.tools.testpmd: run dpdk-testpmd and read its live statistics.
 
-First slice: the Opts dataclass plus the EAL/application argv builder and
-the ``--cmdline-file`` text builder. testpmd is started with
-``--disable-device-start`` and a command file that configures the ports,
-starts them and begins forwarding.
+Opts builds the EAL/application argv and the ``--cmdline-file`` text.
+testpmd is started with ``--disable-device-start`` and a command file
+that configures the ports, starts them and begins forwarding. run()
+uploads that file to the agent's tmp_dir, launches dpdk-testpmd from
+the agent directory and yields a Testpmd handle whose stats() returns
+the latest ``--stats-period`` counters per port without blocking.
 
 argv layout (each optional part omitted when unset):
     --allow=<bdf>... -n <mem_channels> --file-prefix <prefix> <extra_eal>
@@ -18,9 +20,24 @@ argv layout (each optional part omitted when unset):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import signal
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
-from pyte.tools._tool import opt, opt_eq, switch
+from pyte import cfg
+from pyte.errors import TestpmdError
+from pyte.tools._tool import ToolHandle, launch, opt, opt_eq, running, switch
+
+if TYPE_CHECKING:
+    from pyte.rpc import RpcServer
+
+#: --mbuf-size run() passes when Opts.mbuf_size is None
+DEFAULT_MBUF_SIZE = 2176
+#: wait_ports_started() poll interval, seconds
+_POLL_INTERVAL = 0.5
 
 
 @dataclass(frozen=True)
@@ -185,3 +202,100 @@ class StatsParser:
             m = re.search(pattern, body)
             vals[name] = int(m.group(1)) if m else 0
         return PortStats(port=port, **vals)
+
+
+def program_path(ta: str) -> str:
+    """dpdk-testpmd installed in the agent directory of *ta*."""
+    return cfg.get(f"/agent:{ta}/dir:") + "/dpdk-testpmd"
+
+
+def cmdline_path(ta: str, file_prefix: str) -> str:
+    """Where run() puts the ``--cmdline-file`` on *ta*."""
+    return (cfg.get(f"/agent:{ta}/tmp_dir:")
+            + f"/{file_prefix}_testpmd_commands")
+
+
+class Testpmd(ToolHandle):
+    """A running dpdk-testpmd job (from run()).
+
+    testpmd forwards until stopped, so there is no report to wait()
+    for: stats() reads whatever ``--stats-period`` output has arrived
+    so far and returns at once.
+    """
+
+    tool = "testpmd"
+    error_cls = TestpmdError
+    default_timeout = 60.0
+
+    def __init__(self, job, stdout_filter, opts: Opts):
+        super().__init__(job, stdout_filter)
+        self._opts = opts
+        self._parser = StatsParser()
+        self._stats: dict[int, PortStats] = {}
+
+    def stats(self) -> dict[int, PortStats]:
+        """Latest PortStats per port seen so far; never blocks.
+
+        Drains the queued stdout messages and keeps the newest block
+        of each port, so ports stay in the result between calls even
+        when nothing new arrived.  Empty until the first block.
+        """
+        for msg in self._stdout_filter.drain():
+            for st in self._parser.feed(msg.data):
+                self._stats[st.port] = st
+        return dict(self._stats)
+
+    def wait_ports_started(self, timeout: float) -> None:
+        """Wait until every port in opts.allow has printed statistics.
+
+        A port's first stats block means testpmd has started it and
+        is forwarding.  Raises TestpmdError after *timeout* seconds.
+        """
+        want = set(range(len(self._opts.allow)))
+        deadline = time.monotonic() + timeout
+        while True:
+            missing = want - set(self.stats())
+            if not missing:
+                return
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TestpmdError(
+                    f"testpmd ports {sorted(missing)} printed no "
+                    f"statistics within {timeout} s")
+            time.sleep(min(_POLL_INTERVAL, left))
+
+    def _stop_for_close(self) -> None:
+        """SIGINT first (testpmd stops forwarding and closes the
+        ports), SIGKILL after Job.stop's default timeout."""
+        self._job.stop(signal=signal.SIGINT)
+
+
+@contextmanager
+def run(pco: RpcServer, opts: Opts, *,
+        nports: int | None = None) -> Iterator[Testpmd]:
+    """Start dpdk-testpmd on *pco*; yields Testpmd; close() on exit.
+
+    *nports* (default: one per opts.allow entry) sizes the command
+    file and the default mbuf pool.  The command file is written to
+    cmdline_path(); unset mbuf_size / total_num_mbufs get
+    DEFAULT_MBUF_SIZE / total_num_mbufs_default().
+    """
+    nports = nports or len(opts.allow)
+    path = cmdline_path(pco.ta, opts.file_prefix)
+    pco.file_put(path, opts.cmdline_text(nports).encode())
+    opts = replace(
+        opts, cmdline_file=path,
+        total_num_mbufs=(total_num_mbufs_default(nports, opts)
+                         if opts.total_num_mbufs is None
+                         else opts.total_num_mbufs),
+        mbuf_size=(DEFAULT_MBUF_SIZE if opts.mbuf_size is None
+                   else opts.mbuf_size))
+
+    def _setup(job):
+        flt = job.stdout.attach_filter(name="testpmd-out", readable=True)
+        job.stderr.log(level="WARN")
+        return flt
+
+    job, flt = launch(pco, program_path(pco.ta), opts.argv(), setup=_setup)
+    with running(Testpmd(job, flt, opts)) as h:
+        yield h
