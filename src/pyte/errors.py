@@ -114,6 +114,10 @@ class IperfError(ToolError):
     """iperf/iperf3 failed or its output cannot be parsed."""
 
 
+class TestpmdError(ToolError):
+    """dpdk-testpmd failed or its output cannot be parsed."""
+
+
 class TrexError(ToolError):
     """TRex (STL) failed or its output cannot be parsed."""
 
