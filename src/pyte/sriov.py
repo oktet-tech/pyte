@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pyte import cfg
 from pyte.cfg.gen.pci import Device
-from pyte.errors import RpcError, SriovError
+from pyte.errors import CfgError, RpcError, SriovError
 
 _SIDES = {"dut": 1, "peer": 2}
 
@@ -52,7 +52,11 @@ def grab_fn(fn_oid: str) -> None:
     No-op if the resource already points at it.
     """
     agent, name = _fn_rsrc(fn_oid)
-    if cfg.get(f"/agent:{agent}/rsrc:{name}") == fn_oid:
+    try:
+        current = cfg.get(f"/agent:{agent}/rsrc:{name}")
+    except CfgError:
+        current = None  # no such rsrc yet: the first grab
+    if current == fn_oid:
         return
     cfg.grab_rsrc(agent, name, fn_oid)
 

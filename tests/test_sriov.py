@@ -5,7 +5,7 @@ import pytest
 
 from pyte import cfg, sriov
 from pyte.cfg import _engine
-from pyte.errors import RpcError, SriovError
+from pyte.errors import CfgError, RpcError, SriovError
 from pyte.testing import fake_shim  # noqa: F401
 
 PF = "/agent:A/hardware:/pci:/device:0000:03:00.0"
@@ -32,7 +32,9 @@ class FakeCfgState:
         monkeypatch.setattr(_engine, "_cvt_int", lambda n: _CVT[n])
 
     def get(self, oid, sync=False):
-        return self.store.get(oid)
+        if oid not in self.store:
+            raise CfgError(0x1234, f"get {oid}")
+        return self.store[oid]
 
     def set(self, oid, value, cvt=None):
         self.store[oid] = value
@@ -40,6 +42,8 @@ class FakeCfgState:
             self.on_set[oid](value)
 
     def add(self, oid, value=None):
+        if oid in self.store:
+            raise CfgError(0x1234, f"add {oid}: exists")
         self.adds.append((oid, value))
         self.store[oid] = value
 
@@ -145,6 +149,15 @@ def test_grab_fn_is_idempotent(fake_cfg):
     sriov.grab_fn(_fn(0))
     assert fake_cfg.adds == [
         ("/agent:A/rsrc:pci_fn:15b3:1018:0", _fn(0))]
+
+
+def test_grab_fn_after_release_repoints(fake_cfg):
+    rsrc = "/agent:A/rsrc:pci_fn:15b3:1018:0"
+    sriov.grab_fn(_fn(0))
+    sriov.release_fn(_fn(0))
+    sriov.grab_fn(_fn(0))
+    assert fake_cfg.store[rsrc] == _fn(0)
+    assert len(fake_cfg.adds) == 1
 
 
 def test_release_fn_empties_rsrc(fake_cfg):
