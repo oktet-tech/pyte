@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 from pyte import cfg
 from pyte.errors import TestpmdError
-from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools._tool import ToolHandle, launch, opt, opt_eq, running, switch
 
 if TYPE_CHECKING:
@@ -241,7 +240,8 @@ class Testpmd(ToolHandle):
 
     testpmd forwards until stopped, so there is no report to wait()
     for: stats() reads whatever ``--stats-period`` output has arrived
-    so far and returns at once.
+    so far and returns at once, and alive() (ToolHandle's) tells
+    whether the forwarder is still there.
     """
 
     tool = "testpmd"
@@ -254,23 +254,6 @@ class Testpmd(ToolHandle):
         self._nports = nports
         self._parser = StatsParser()
         self._stats: dict[int, PortStats] = {}
-        #: the job's exit status, once alive() has seen it exit
-        self._exit_status = None
-
-    def alive(self) -> bool:
-        """True while dpdk-testpmd is still running; never blocks.
-
-        A forwarder that dies mid-run otherwise only shows up as
-        counters that stop moving.  False once the job has exited or
-        the handle was closed.
-        """
-        if self._exit_status is not None or self._job_destroyed:
-            return False
-        try:
-            self._exit_status = self._job.wait(timeout=0)
-        except TeTimeoutError:
-            return True
-        return False
 
     def stats(self) -> dict[int, PortStats]:
         """Latest PortStats per port seen so far; never blocks.
@@ -302,7 +285,7 @@ class Testpmd(ToolHandle):
                 return
             if not self.alive():
                 raise TestpmdError(
-                    f"testpmd exited ({self._exit_status}) before ports "
+                    f"testpmd exited ({self.exit_status}) before ports "
                     f"{sorted(missing)} printed statistics")
             left = deadline - time.monotonic()
             if left <= 0:

@@ -515,3 +515,44 @@ def test_running_still_raises_a_close_failure_on_a_clean_block():
     with pytest.raises(RuntimeError, match="close failed"):
         with _tool.running(_FailingCloseHandle()):
             pass
+
+
+# -- alive(): a non-blocking liveness check for run-until-stopped tools
+
+
+class _RunningJob(FakeJob):
+    """wait(timeout=0) raises TimeoutError until ``exited`` is set."""
+
+    def __init__(self, status=BAD):
+        super().__init__(status=status)
+        self.exited = False
+
+    def wait(self, timeout=None):
+        self.events.append(("wait", timeout))
+        if not self.exited:
+            raise _timeout()
+        return self.status
+
+
+def _timeout():
+    from pyte.errors import TimeoutError as TeTimeoutError
+    return TeTimeoutError(0, "still running")
+
+
+def test_alive_while_running_then_false_with_the_exit_status():
+    job = _RunningJob()
+    h = Demo(job, FakeFilter())
+    assert h.alive() is True and h.exit_status is None
+    job.exited = True
+    assert h.alive() is False
+    assert h.exit_status == BAD
+    assert h.alive() is False           # the status is kept: no wait
+    assert job.events == [("wait", 0), ("wait", 0)]
+
+
+def test_alive_is_false_once_closed_without_waiting():
+    job = _RunningJob()
+    h = Demo(job, FakeFilter())
+    h.close()
+    assert h.alive() is False and h.exit_status is None
+    assert ("wait", 0) not in job.events

@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 
 from pyte._cleanup import cleanup_all
+from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.errors import ToolError
 
 #: Sentinel: "use the class's default_timeout" (None now means forever).
@@ -176,6 +177,10 @@ class ToolHandle:
     the chosen error policy, :meth:`wait_silent`, :meth:`close`, and
     :meth:`mi_report` that no longer demands a prior wait().
 
+    :meth:`alive` tells, without blocking, whether the job still runs,
+    for tools that run until stopped (servers, generators,
+    forwarders).
+
     Everything is deliberately override-friendly — a tool with
     specifics redefines the single hook that differs instead of
     forking the lifecycle:
@@ -219,6 +224,7 @@ class ToolHandle:
         self._stopped = False
         self._job_destroyed = False
         self._after_close_done = False
+        self._exit_status = None
 
     # -- hooks (override per tool) --------------------------------------
     def _parse(self, raw):
@@ -313,6 +319,27 @@ class ToolHandle:
             self._check_status(status, raw)
         self._report = report
         return report
+
+    def alive(self) -> bool:
+        """True while the tool's job is still running; never blocks.
+
+        A tool that dies mid-run otherwise only shows as output that
+        stops.  False once the job has exited (:attr:`exit_status`
+        then holds how) or the handle was closed.
+        """
+        if (self._exit_status is not None or self._closed
+                or self._job_destroyed):
+            return False
+        try:
+            self._exit_status = self._job.wait(timeout=0)
+        except TeTimeoutError:
+            return True
+        return False
+
+    @property
+    def exit_status(self):
+        """How the job ended, once :meth:`alive` saw it; else None."""
+        return self._exit_status
 
     def wait_silent(self,
                     timeout: float | _NoTimeout | None = _USE_DEFAULT,
