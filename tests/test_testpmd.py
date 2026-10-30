@@ -181,7 +181,7 @@ class _FakeChannel:
 
     def attach_filter(self, name=None, readable=True, log_level=None,
                       regex=None, group=0):
-        self.attach_calls.append((name, readable))
+        self.attach_calls.append((name, readable, log_level))
         return self._filter
 
     def log(self, level=None):
@@ -336,7 +336,11 @@ def test_run_defaults_mbufs_wires_filters_and_stops_with_sigint(fake_pco):
     assert argv[argv.index("--mbuf-size") + 1] == "2176"
     assert argv[argv.index("--total-num-mbufs") + 1] == str(
         total_num_mbufs_default(1, o))
-    assert job.stdout.attach_calls == [("testpmd-out", True)]
+    # the readable filter feeds stats(); the second one puts every
+    # line testpmd prints (a port that fails to start, a PMD error)
+    # in the TE log
+    assert job.stdout.attach_calls == [("testpmd-out", True, None),
+                                       ("testpmd-log", False, "RING")]
     assert job.stderr.log_levels == ["WARN"]
     assert job.stop_signal == signal.SIGINT and job.destroyed
 

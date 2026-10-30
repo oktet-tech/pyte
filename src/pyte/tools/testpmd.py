@@ -326,7 +326,8 @@ def run(pco: RpcServer, opts: Opts, *,
     the command file and the default mbuf pool, and is the number of
     ports wait_ports_started() waits for.  The command file is written
     to cmdline_path(); unset mbuf_size / total_num_mbufs get
-    DEFAULT_MBUF_SIZE / total_num_mbufs_default().
+    DEFAULT_MBUF_SIZE / total_num_mbufs_default().  testpmd's stdout
+    goes to the TE log at RING, its stderr at WARN.
     """
     nports = nports or len(opts.allow) + len(opts.vdev)
     path = cmdline_path(pco.ta, opts.file_prefix)
@@ -341,6 +342,11 @@ def run(pco: RpcServer, opts: Opts, *,
 
     def _setup(job):
         flt = job.stdout.attach_filter(name="testpmd-out", readable=True)
+        # The readable filter only feeds stats(); this one puts what
+        # testpmd prints (a port that fails to start, a PMD error) in
+        # the TE log.
+        job.stdout.attach_filter(name="testpmd-log", readable=False,
+                                 log_level="RING")
         job.stderr.log(level="WARN")
         return flt
 
