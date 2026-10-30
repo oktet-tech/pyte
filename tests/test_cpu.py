@@ -8,6 +8,7 @@ from pyte.errors import CfgError
 from pyte.testing import fake_shim  # noqa: F401
 
 _EPERM = 0x7E03
+_EEXIST = 0x7E04
 
 
 class FakeNode:
@@ -18,7 +19,11 @@ class FakeNode:
 
 
 class FakeCfg:
-    """Hardware tree plus rsrc add/delete with busy (EPERM) CPUs."""
+    """Hardware tree plus rsrc add/delete with busy (EPERM) CPUs.
+
+    Adding an rsrc that is already there fails EEXIST, as the
+    Configurator does.
+    """
 
     def __init__(self, nodes=2, cores=2, threads=2):
         self.oids = [
@@ -38,7 +43,12 @@ class FakeCfg:
     def get(self, oid, sync=False):
         return self.values[oid]
 
+    def exists(self, oid):
+        return oid in self.added
+
     def add(self, oid, value=None):
+        if oid in self.added:
+            raise CfgError(_EEXIST, f"cfg add {oid}")
         if value in self.busy:
             raise CfgError(_EPERM, f"cfg add {oid}")
         self.added[oid] = value
@@ -52,6 +62,7 @@ class FakeCfg:
 @pytest.fixture()
 def fake_cfg(monkeypatch, fake_shim):  # noqa: F811
     fake_shim.PYTE_EPERM = _EPERM
+    fake_shim.PYTE_EEXIST = _EEXIST
     fc = FakeCfg()
     monkeypatch.setattr(cpu, "cfg", fc)
     return fc
@@ -97,6 +108,39 @@ def test_grab_busy_is_cpu_error(fake_cfg):
     fake_cfg.busy.add(c.oid("A"))
     with pytest.raises(cpu.CpuError, match="busy"):
         cpu.grab("A", c)
+
+
+def test_fake_refuses_a_second_add(fake_cfg):
+    fake_cfg.add("/agent:A/rsrc:x", "v")
+    with pytest.raises(CfgError):
+        fake_cfg.add("/agent:A/rsrc:x", "v")
+
+
+def test_grab_of_a_thread_this_test_holds_is_busy(fake_cfg, monkeypatch):
+    # tapi_cfg_cpu_grab_by_id() checks for the rsrc first: a second
+    # lane of the same test must see "busy", not a Configurator error.
+    c = cpu.CpuId(0, 0, 0, 0)
+    cpu.grab("A", c)
+    added = []
+    monkeypatch.setattr(fake_cfg, "add",
+                        lambda oid, value=None: added.append(oid))
+    with pytest.raises(cpu.CpuError, match="busy"):
+        cpu.grab("A", c)
+    assert added == []
+
+
+def test_grab_failing_eexist_is_busy(fake_cfg, monkeypatch):
+    def exists_late(oid, value=None):
+        raise CfgError(_EEXIST, f"cfg add {oid}")
+    monkeypatch.setattr(fake_cfg, "add", exists_late)
+    with pytest.raises(cpu.CpuError, match="busy"):
+        cpu.grab("A", cpu.CpuId(0, 0, 0, 0))
+
+
+def test_grab_n_skips_threads_this_test_holds(fake_cfg):
+    first = cpu.grab_n("A", 1, node=0)
+    second = cpu.grab_n("A", 1, node=0)
+    assert first != second and {c.node for c in first + second} == {0}
 
 
 def test_grab_other_error_propagates(fake_cfg, monkeypatch):

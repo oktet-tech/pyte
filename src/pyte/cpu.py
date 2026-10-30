@@ -67,14 +67,23 @@ def pci_numa_node(pci_oid: str) -> int | None:
 
 
 def grab(ta: str, cpu: CpuId) -> None:
-    """Grab ``cpu``; CpuError("busy") if somebody else holds it."""
+    """Grab ``cpu``; CpuError("busy") if anybody holds it already.
+
+    As tapi_cfg_cpu_grab_by_id(): a thread this test holds (the rsrc
+    is in the tree, or adding it fails EEXIST) is as busy as one
+    another TE instance holds (the agent refuses the add with EPERM).
+    """
+    oid = f"/agent:{ta}/rsrc:{cpu.rsrc_name}"
+    where = f"grab {cpu.rsrc_name} on {ta}"
+    if cfg.exists(oid):
+        raise CpuError("busy", where)
     try:
-        cfg.add(f"/agent:{ta}/rsrc:{cpu.rsrc_name}", cpu.oid(ta))
+        cfg.add(oid, cpu.oid(ta))
     except CfgError as exc:
         lib = shim_lib()
-        if exc.code == lib.pyte_rc_error(lib.PYTE_EPERM):
-            raise CpuError("busy", f"grab {cpu.rsrc_name} on {ta}") \
-                from exc
+        if exc.code in (lib.pyte_rc_error(lib.PYTE_EPERM),
+                        lib.pyte_rc_error(lib.PYTE_EEXIST)):
+            raise CpuError("busy", where) from exc
         raise
 
 
