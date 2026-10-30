@@ -64,6 +64,16 @@ def test_params_contains():
     assert "b" not in p
 
 
+def test_params_as_dict_lists_every_parameter():
+    """as_dict() lets a caller see every name, e.g. to reject typos."""
+    raw = {"a": "1", "pf_lane": "idle", "c": ""}
+    p = Params(raw)
+    d = p.as_dict()
+    assert d == raw
+    d["a"] = "changed"                  # a copy: Params stays as it was
+    assert p["a"] == "1" and raw["a"] == "1"
+
+
 def test_var_reference_resolved(monkeypatch):
     monkeypatch.setenv("TE_TEST_VAR_env__iut_only", "'net':IUT{}")
     p = parse_argv(["env=VAR.env.iut_only"])

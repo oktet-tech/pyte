@@ -78,6 +78,14 @@ class Params:
     def get(self, name: str, default: str | None = None) -> str | None:
         return self._raw.get(name, default)
 
+    def as_dict(self) -> dict[str, str]:
+        """Every parameter as a new name -> value dict.
+
+        For code that must see all the names rather than look one
+        up, e.g. to reject a parameter nothing reads.
+        """
+        return dict(self._raw)
+
     def int(self, name: str) -> int:
         return int(self[name], 0)
 
