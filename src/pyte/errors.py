@@ -83,6 +83,14 @@ class CpuError(_RcOrMsg, TeError):
     """
 
 
+class SriovError(_RcOrMsg, TeError):
+    """Setting up SR-IOV virtual functions failed (pyte.sriov).
+
+    Message-only: fewer VFs than requested appeared, or an ``ip link``
+    command on the agent failed.
+    """
+
+
 class NetError(_RcOrMsg, TeError):
     """A pyte.net operation did not reach the expected state.
 
