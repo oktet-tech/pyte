@@ -75,6 +75,14 @@ class DpdkError(_RcOrMsg, TeError):
     """
 
 
+class CpuError(_RcOrMsg, TeError):
+    """Grabbing CPU threads failed (pyte.cpu).
+
+    Message-only: a thread already grabbed by someone else, or fewer
+    free threads than requested.
+    """
+
+
 class NetError(_RcOrMsg, TeError):
     """A pyte.net operation did not reach the expected state.
 
