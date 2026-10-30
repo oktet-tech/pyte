@@ -37,20 +37,56 @@ def netdev(pci_oid: str) -> str | None:
     return None
 
 
-def enable_vfs(pci_oid: str, n: int) -> list[str]:
+def _fn_rsrc(fn_oid: str) -> tuple[str, str]:
+    """Agent name and ``pci_fn:...`` rsrc name of a function OID."""
+    parts = fn_oid.split("/")[1:]
+    agent = parts[0].partition(":")[2]
+    names = [p.partition(":")[2] for p in parts[1:]]
+    return agent, ":".join(["pci_fn"] + [n for n in names if n])
+
+
+def grab_fn(fn_oid: str) -> None:
+    """Grab a PCI function as ``/agent:X/rsrc:pci_fn:<v>:<d>:<i>``.
+
+    ``fn_oid`` is the ``.../pci:/vendor:V/device:D/instance:I`` OID.
+    No-op if the resource already points at it.
+    """
+    agent, name = _fn_rsrc(fn_oid)
+    if cfg.get(f"/agent:{agent}/rsrc:{name}") == fn_oid:
+        return
+    cfg.grab_rsrc(agent, name, fn_oid)
+
+
+def release_fn(fn_oid: str) -> None:
+    """Release the resource taken by :func:`grab_fn`."""
+    agent, name = _fn_rsrc(fn_oid)
+    cfg.release_rsrc(agent, name)
+
+
+def enable_vfs(pci_oid: str, n: int, grab: bool = True) -> list[str]:
     """Create ``n`` VFs on the PF and return their device OIDs.
+
+    The ``sriov:/vf:<index>`` leaves hold vendor/device/instance
+    OIDs; the instance value is the device OID.  VFs come back in
+    index order and, if ``grab`` is set, are grabbed as resources so
+    a test may bind their driver.
 
     :raises SriovError: fewer than ``n`` VFs appeared in the tree.
     """
     pf = Device(pci_oid)
     pf.sriov.num_vfs = n
     cfg.synchronize(_hardware(pci_oid))
-    vfs = sorted(
-        (entry.value for entry in pf.sriov.vf),
-        key=lambda oid: bdf(oid))
-    if len(vfs) < n:
+    entries = sorted(pf.sriov.vf, key=lambda e: int(e.name))
+    if len(entries) < n:
         raise SriovError(
-            f"{pci_oid}: asked for {n} VFs, only {len(vfs)} appeared")
+            f"{pci_oid}: asked for {n} VFs, only {len(entries)} "
+            "appeared")
+    vfs = []
+    for entry in entries:
+        fn_oid = entry.value
+        if grab:
+            grab_fn(fn_oid)
+        vfs.append(cfg.get(fn_oid))
     return vfs
 
 

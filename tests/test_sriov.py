@@ -23,8 +23,10 @@ class FakeCfgState:
         self.store = {}
         self.syncs = []
         self.on_set = {}
+        self.adds = []
         monkeypatch.setattr(cfg, "get", self.get)
         monkeypatch.setattr(cfg, "set", self.set)
+        monkeypatch.setattr(cfg, "add", self.add)
         monkeypatch.setattr(cfg, "find", self.find)
         monkeypatch.setattr(cfg, "synchronize", self.synchronize)
         monkeypatch.setattr(_engine, "_cvt_int", lambda n: _CVT[n])
@@ -37,6 +39,10 @@ class FakeCfgState:
         if oid in self.on_set:
             self.on_set[oid](value)
 
+    def add(self, oid, value=None):
+        self.adds.append((oid, value))
+        self.store[oid] = value
+
     def find(self, pattern):
         prefix = pattern.rstrip("*")
         return [FakeNode(o) for o in self.store
@@ -45,11 +51,12 @@ class FakeCfgState:
     def synchronize(self, oid, subtree=True):
         self.syncs.append(oid)
 
-    def add_vfs(self, pf_bdf, n):
-        for i in range(n):
+    def add_vfs(self, pf_bdf, n, reverse=False):
+        for i in reversed(range(n)) if reverse else range(n):
             vf = f"0000:03:00.{i + 2}"
-            self.store[f"{PF}/sriov:/vf:{i}"] = (
-                f"/agent:A/hardware:/pci:/device:{vf}")
+            fn = _fn(i)
+            self.store[f"{PF}/sriov:/vf:{i}"] = fn
+            self.store[fn] = f"/agent:A/hardware:/pci:/device:{vf}"
 
 
 @pytest.fixture()
@@ -90,19 +97,60 @@ def test_netdev_first_entry_or_none(fake_cfg):
     assert sriov.netdev(PF) == "eth1"
 
 
-def test_enable_vfs_returns_vf_oids_in_order(fake_cfg):
+def _fn(i):
+    return f"/agent:A/hardware:/pci:/vendor:15b3/device:1018/instance:{i}"
+
+
+def _enable_hook(fake_cfg, n_made, reverse=False):
     fake_cfg.on_set[f"{PF}/sriov:/num_vfs:"] = (
-        lambda v: fake_cfg.add_vfs("0000:03:00.0", int(v)))
+        lambda v: fake_cfg.add_vfs("0000:03:00.0", n_made, reverse))
+
+
+def test_enable_vfs_returns_device_oids_in_order(fake_cfg):
+    _enable_hook(fake_cfg, 2)
     vfs = sriov.enable_vfs(PF, 2)
     assert [sriov.bdf(v) for v in vfs] == ["0000:03:00.2", "0000:03:00.3"]
     assert fake_cfg.syncs == ["/agent:A/hardware:"]
 
 
+def test_enable_vfs_orders_by_vf_index(fake_cfg):
+    _enable_hook(fake_cfg, 12, reverse=True)
+    vfs = sriov.enable_vfs(PF, 12)
+    assert [sriov.bdf(v) for v in vfs] == [
+        f"0000:03:00.{i + 2}" for i in range(12)]
+
+
+def test_enable_vfs_grabs_each_function(fake_cfg):
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2)
+    assert sorted(fake_cfg.adds) == [
+        (f"/agent:A/rsrc:pci_fn:15b3:1018:{i}", _fn(i))
+        for i in range(2)]
+
+
+def test_enable_vfs_no_grab(fake_cfg):
+    _enable_hook(fake_cfg, 2)
+    sriov.enable_vfs(PF, 2, grab=False)
+    assert fake_cfg.adds == []
+
+
 def test_enable_vfs_short_is_error(fake_cfg):
-    fake_cfg.on_set[f"{PF}/sriov:/num_vfs:"] = (
-        lambda v: fake_cfg.add_vfs("0000:03:00.0", 1))
+    _enable_hook(fake_cfg, 1)
     with pytest.raises(SriovError, match="2 VFs, only 1"):
         sriov.enable_vfs(PF, 2)
+
+
+def test_grab_fn_is_idempotent(fake_cfg):
+    sriov.grab_fn(_fn(0))
+    sriov.grab_fn(_fn(0))
+    assert fake_cfg.adds == [
+        ("/agent:A/rsrc:pci_fn:15b3:1018:0", _fn(0))]
+
+
+def test_release_fn_empties_rsrc(fake_cfg):
+    sriov.grab_fn(_fn(0))
+    sriov.release_fn(_fn(0))
+    assert fake_cfg.store["/agent:A/rsrc:pci_fn:15b3:1018:0"] == ""
 
 
 def test_disable_vfs_zeroes_and_syncs(fake_cfg):
