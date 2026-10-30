@@ -69,15 +69,21 @@ def fake_cfg(monkeypatch):
 
 
 class FakePco:
-    def __init__(self, fail_on=None):
+    """sh() records commands; *fail_on* ones fail printing *output*."""
+
+    def __init__(self, fail_on=(), output="RTNETLINK: no such vf"):
         self.cmds = []
-        self.fail_on = fail_on
+        self.fail_on = (fail_on,) if isinstance(fail_on, str) else fail_on
+        self.output = output
 
     def sh(self, cmd):
         self.cmds.append(cmd)
-        if cmd == self.fail_on:
-            raise RpcError(0x7E03, "sh", output="RTNETLINK: no such vf")
+        if cmd in self.fail_on:
+            raise RpcError(0x7E03, "sh", output=self.output)
         return ""
+
+
+_EOPNOTSUPP = "RTNETLINK answers: Operation not supported\n"
 
 
 @pytest.fixture()
@@ -185,29 +191,65 @@ def test_bind_noop_when_already_bound(fake_cfg):
     assert fake_cfg.syncs == []
 
 
-def test_vf_set_mac_issues_three_commands(fake_pco):
+def test_vf_set_mac_sets_only_the_mac_by_default(fake_pco):
     sriov.vf_set_mac(fake_pco, "eth1", 0, "02:5a:01:00:00:01")
     assert fake_pco.cmds == [
-        "ip link set dev eth1 vf 0 mac 02:5a:01:00:00:01",
-        "ip link set dev eth1 vf 0 trust on",
-        "ip link set dev eth1 vf 0 spoofchk off"]
+        "ip link set dev eth1 vf 0 mac 02:5a:01:00:00:01 2>&1"]
+
+
+def test_vf_set_mac_sets_the_flags_asked_for(fake_pco):
+    sriov.vf_set_mac(fake_pco, "eth1", 0, "02:5a:01:00:00:01",
+                     trust=True, spoofchk=False)
+    assert fake_pco.cmds == [
+        "ip link set dev eth1 vf 0 mac 02:5a:01:00:00:01 2>&1",
+        "ip link set dev eth1 vf 0 trust on 2>&1",
+        "ip link set dev eth1 vf 0 spoofchk off 2>&1"]
 
 
 def test_vf_set_mac_flags_off_and_on(fake_pco):
     sriov.vf_set_mac(fake_pco, "eth1", 3, "02:5a:01:00:03:01",
                      trust=False, spoofchk=True)
     assert fake_pco.cmds[1:] == [
-        "ip link set dev eth1 vf 3 trust off",
-        "ip link set dev eth1 vf 3 spoofchk on"]
+        "ip link set dev eth1 vf 3 trust off 2>&1",
+        "ip link set dev eth1 vf 3 spoofchk on 2>&1"]
+
+
+def test_vf_set_mac_one_flag_alone(fake_pco):
+    sriov.vf_set_mac(fake_pco, "eth1", 0, "02:5a:01:00:00:01",
+                     spoofchk=False)
+    assert fake_pco.cmds[1:] == [
+        "ip link set dev eth1 vf 0 spoofchk off 2>&1"]
 
 
 def test_vf_set_mac_wraps_rpc_error(fake_shim):  # noqa: F811
-    pco = FakePco(fail_on="ip link set dev eth1 vf 0 trust on")
+    pco = FakePco(fail_on="ip link set dev eth1 vf 0 trust on 2>&1")
     with pytest.raises(SriovError) as exc:
-        sriov.vf_set_mac(pco, "eth1", 0, "02:5a:01:00:00:01")
+        sriov.vf_set_mac(pco, "eth1", 0, "02:5a:01:00:00:01", trust=True,
+                         spoofchk=False)
     assert "vf 0 trust on" in str(exc.value)
     assert "no such vf" in str(exc.value)
     assert len(pco.cmds) == 2
+
+
+def test_vf_set_mac_logs_and_skips_an_unsupported_flag(
+        fake_shim):  # noqa: F811
+    # sfc EF10 has no ndo_set_vf_trust: "trust on" fails EOPNOTSUPP,
+    # which must not stop the prologue that only wanted the MAC set.
+    pco = FakePco(fail_on="ip link set dev eth1 vf 0 trust on 2>&1",
+                  output=_EOPNOTSUPP)
+    sriov.vf_set_mac(pco, "eth1", 0, "02:5a:01:00:00:01", trust=True,
+                     spoofchk=False)
+    assert pco.cmds[-1] == "ip link set dev eth1 vf 0 spoofchk off 2>&1"
+    (warn,) = fake_shim.texts(fake_shim.TE_LL_WARN)
+    assert "trust on" in warn and "not supported" in warn
+
+
+def test_vf_set_mac_unsupported_mac_still_fails(fake_shim):  # noqa: F811
+    pco = FakePco(fail_on="ip link set dev eth1 vf 0 mac 02:5a:01:00:00:01"
+                          " 2>&1", output=_EOPNOTSUPP)
+    with pytest.raises(SriovError, match="Operation not supported"):
+        sriov.vf_set_mac(pco, "eth1", 0, "02:5a:01:00:00:01", trust=True)
+    assert len(pco.cmds) == 1
 
 
 def test_vf_mac_for_is_distinct_per_side_port_index():

@@ -10,11 +10,13 @@ agent.  Devices are passed around as their PCI OIDs, for example
 """
 from __future__ import annotations
 
-from pyte import cfg
+from pyte import cfg, log
 from pyte.cfg.gen.pci import Device
 from pyte.errors import CfgError, RpcError, SriovError
 
 _SIDES = {"dut": 1, "peer": 2}
+#: What ip(8) prints when the PF driver lacks a VF knob (EOPNOTSUPP).
+_NOT_SUPPORTED = "Operation not supported"
 
 
 def bdf(pci_oid: str) -> str:
@@ -109,22 +111,43 @@ def bind(pci_oid: str, driver: str) -> None:
     cfg.synchronize(_hardware(pci_oid))
 
 
-def vf_set_mac(pco, pf_ifname: str, index: int, mac: str, *,
-               trust: bool = True, spoofchk: bool = False) -> None:
-    """Set the MAC, trust and spoofchk of VF ``index`` of a PF netdev.
+def _ip_link(pco, cmd: str, *, optional: bool = False) -> None:
+    """Run an ``ip link`` command, its stderr in the output.
 
-    :raises SriovError: an ``ip link`` command failed on the agent.
+    *optional*: a knob the PF driver does not implement is logged
+    and skipped instead of failing.
+    """
+    try:
+        pco.sh(f"{cmd} 2>&1")
+    except RpcError as exc:
+        out = getattr(exc, "output", "") or ""
+        if optional and _NOT_SUPPORTED in out:
+            log.warn(f"{cmd!r}: not supported by the PF driver, "
+                     "left as it is")
+            return
+        raise SriovError(f"{cmd!r} failed: {exc} {out}".rstrip()) \
+            from exc
+
+
+def vf_set_mac(pco, pf_ifname: str, index: int, mac: str, *,
+               trust: bool | None = None,
+               spoofchk: bool | None = None) -> None:
+    """Set the MAC of VF ``index`` of a PF netdev, and the flags asked.
+
+    ``trust`` and ``spoofchk`` are left as the driver has them when
+    None.  A flag the PF driver does not implement (sfc EF10 has no
+    ndo_set_vf_trust, so ``trust on`` fails "Operation not supported")
+    is logged and skipped.
+
+    :raises SriovError: setting the MAC failed, or a flag failed for
+        another reason.
     """
     base = f"ip link set dev {pf_ifname} vf {index}"
-    for cmd in (f"{base} mac {mac}",
-                f"{base} trust {'on' if trust else 'off'}",
-                f"{base} spoofchk {'on' if spoofchk else 'off'}"):
-        try:
-            pco.sh(cmd)
-        except RpcError as exc:
-            out = getattr(exc, "output", "")
-            raise SriovError(f"{cmd!r} failed: {exc} {out}".rstrip()) \
-                from exc
+    _ip_link(pco, f"{base} mac {mac}")
+    for knob, value in (("trust", trust), ("spoofchk", spoofchk)):
+        if value is not None:
+            _ip_link(pco, f"{base} {knob} {'on' if value else 'off'}",
+                     optional=True)
 
 
 def vf_mac_for(side: str, port: int, index: int) -> str:
