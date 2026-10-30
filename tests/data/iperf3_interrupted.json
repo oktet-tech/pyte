@@ -1,0 +1,13 @@
+{
+  "start": { "connected": [ { "socket": 5 } ], "test_start": { "protocol": "TCP", "num_streams": 1 } },
+  "intervals": [],
+  "end": {
+    "streams": [
+      { "sender":   { "socket": 5, "bits_per_second": 2100000000.0, "bytes": 9765000000, "seconds": 37.2, "retransmits": 3 },
+        "receiver": { "socket": 5, "bits_per_second": 2099000000.0, "bytes": 9760000000, "seconds": 37.2 } }
+    ],
+    "sum_sent":     { "start": 0, "end": 37.2, "seconds": 37.2, "bytes": 9765000000, "bits_per_second": 2100000000.0, "retransmits": 3 },
+    "sum_received": { "start": 0, "end": 37.2, "seconds": 37.2, "bytes": 9760000000, "bits_per_second": 2099000000.0 }
+  },
+  "error": "interrupt - the client has terminated"
+}

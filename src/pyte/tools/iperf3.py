@@ -24,7 +24,8 @@ report (parsed from iperf3 JSON `end`):
     end.sum_received.{bits_per_second,bytes,seconds}          -> received
     UDP/default: end.sum.* fills both sent and received
     min(end.streams[*].sender.bits_per_second)  -> min_bps_per_stream
-    top-level "error"  -> raise IperfError
+    top-level "error"  -> Report.error when there is an `end`
+                          (an interrupted client), else raise IperfError
 
 MI (iperf3_report_mi_log):
     THROUGHPUT "Per-stream" MIN    min_bps_per_stream  PLAIN
@@ -164,10 +165,16 @@ class Direction:
 
 @dataclass(frozen=True)
 class Report:
-    """Parsed iperf3 report."""
+    """Parsed iperf3 report.
+
+    ``error`` is iperf3's own error text when it printed one next to
+    the summary: a client stopped with SIGINT reports what ran so far
+    and "interrupt - the client has terminated".
+    """
     sent: Direction
     received: Direction
     min_bps_per_stream: float
+    error: str | None = None
 
 
 def _direction(d: dict) -> Direction:
@@ -181,16 +188,17 @@ def _direction(d: dict) -> Direction:
 def _parse_report(obj: dict) -> Report:
     """Parse an iperf3 ``-J`` JSON object into a :class:`Report`.
 
-    Raises :exc:`pyte.errors.IperfError` if iperf3 reported an error or the
-    expected ``end`` summary is missing.
+    An ``error`` next to an ``end`` summary (an interrupted client)
+    goes to Report.error.  Raises :exc:`pyte.errors.IperfError` if
+    iperf3 reported an error and no summary, or the summary is
+    missing or malformed.
     """
     from pyte.errors import IperfError
 
-    err = obj.get("error")
-    if err:
-        raise IperfError(f"iperf3 reported error: {err}")
-
+    err = obj.get("error") or None
     end = obj.get("end")
+    if err and not isinstance(end, dict):
+        raise IperfError(f"iperf3 reported error: {err}")
     if not isinstance(end, dict):
         raise IperfError(f"iperf3 JSON has no 'end' summary: {str(obj)[:200]!r}")
 
@@ -212,7 +220,8 @@ def _parse_report(obj: dict) -> Report:
             bps.append(float(side["bits_per_second"]))
     min_bps = min(bps) if bps else sent.bits_per_second
 
-    return Report(sent=sent, received=received, min_bps_per_stream=min_bps)
+    return Report(sent=sent, received=received, min_bps_per_stream=min_bps,
+                  error=None if err is None else str(err))
 
 
 class Iperf3(_tool.ToolHandle):
@@ -221,9 +230,11 @@ class Iperf3(_tool.ToolHandle):
     Created via :func:`run`. The JSON report arrives on stdout (``-J``);
     both streams are dumped to the TE log (RING) before parsing,
     mirroring the C tapi_performance perf_app_dump_output().  A
-    non-zero exit raises even when the JSON parsed: iperf3 prints a
-    JSON error object on failure and the parse already rejects it, so
-    a parseable non-error report with a bad exit is unusual.
+    non-zero exit raises even when the JSON parsed, unless iperf3
+    itself put an error next to its summary: a client stopped with
+    SIGINT prints both and exits 1, and wait() then returns the
+    report with Report.error set.  A JSON error object without a
+    summary is rejected by the parse.
     """
 
     tool = "iperf3 client"
@@ -233,6 +244,7 @@ class Iperf3(_tool.ToolHandle):
     def __init__(self, job, stdout_filter, stderr_filter):
         super().__init__(job, stdout_filter)
         self._stderr_filter = stderr_filter
+        self._parsed: Report | None = None
 
     def _read_output(self, timeout: float) -> str:
         from pyte import log
@@ -253,7 +265,16 @@ class Iperf3(_tool.ToolHandle):
             raise IperfError(
                 f"cannot parse iperf3 JSON: {exc}; "
                 f"stdout={raw[:200]!r}") from exc
-        return _parse_report(obj)
+        self._parsed = _parse_report(obj)
+        return self._parsed
+
+    def _check_status(self, status, raw) -> None:
+        """Accept iperf3's exit 1 after a summary with an error."""
+        from pyte.job import StatusKind
+        if (status.kind is StatusKind.EXITED and self._parsed is not None
+                and self._parsed.error is not None):
+            return
+        super()._check_status(status, raw)
 
     def _mi(self, logger, rep: Report) -> None:
         """Emit MI artifacts mirroring iperf3_report_mi_log()."""
