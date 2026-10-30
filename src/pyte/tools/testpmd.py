@@ -167,8 +167,8 @@ class StatsParser:
         while True:
             head = re.search(STATS_HEADER_RE, self._buf)
             if head is None:
-                # no header: nothing worth keeping
-                self._buf = ""
+                # keep only the last (possibly partial header) line
+                self._buf = self._buf[self._buf.rfind("\n") + 1:]
                 return out
             close = _STATS_CLOSE_RE.search(self._buf, head.end())
             if close is None:

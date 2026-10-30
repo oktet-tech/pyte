@@ -91,3 +91,19 @@ def test_stats_block_split_across_messages():
     assert p.feed(text[:cut]) == []
     rest = p.feed(text[cut:])
     assert [s.port for s in rest] == [0, 1, 0, 1]
+
+
+def test_stats_every_two_way_split():
+    text = _data()
+    for cut in range(len(text) + 1):
+        p = StatsParser()
+        got = p.feed(text[:cut]) + p.feed(text[cut:])
+        assert [s.port for s in got] == [0, 1, 0, 1], cut
+
+
+def test_stats_fed_one_character_at_a_time():
+    p = StatsParser()
+    got = []
+    for ch in _data():
+        got += p.feed(ch)
+    assert [s.port for s in got] == [0, 1, 0, 1]
