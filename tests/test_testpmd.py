@@ -23,6 +23,31 @@ def test_eal_argv_allow_lcores_prefix():
                             "--file-prefix", "lane0", "--lcores=2,3"]
 
 
+def test_eal_argv_vdev_no_pci_no_huge_mem():
+    o = Opts(vdev=("net_af_xdp0,iface=veth1", "net_af_xdp1,iface=veth3"),
+             no_pci=True, no_huge=True, mem_mb=256, lcores=(0, 1),
+             file_prefix="dut")
+    assert o.eal_argv() == [
+        "--vdev=net_af_xdp0,iface=veth1", "--vdev=net_af_xdp1,iface=veth3",
+        "--no-pci", "-n", "4", "--file-prefix", "dut", "--no-huge",
+        "-m", "256", "--lcores=0,1"]
+
+
+def test_eal_argv_vdev_after_allow_and_flags_off_by_default():
+    o = Opts(allow=("0000:03:00.1",), vdev=("net_null0",), lcores=(2,))
+    assert o.eal_argv() == ["--allow=0000:03:00.1", "--vdev=net_null0",
+                            "-n", "4", "--file-prefix", "testpmd",
+                            "--lcores=2"]
+
+
+def test_eal_argv_lcore_map_replaces_plain_list():
+    o = Opts(allow=("x",), lcores=(5, 6),
+             lcore_map=((0, 0), (1, 1), (2, 0)))
+    a = o.eal_argv()
+    assert a[-1] == "--lcores=0@0,1@1,2@0"
+    assert "--lcores=5,6" not in a
+
+
 def test_app_argv_fixed_knobs_and_passthrough():
     o = Opts(allow=("0000:03:00.1",), lcores=(2, 3), nb_cores=1,
              cmdline_file="/tmp/x", eth_peer=((0, "00:11:22:33:44:55"),),
@@ -186,6 +211,9 @@ class _FakeJob:
         self.stopped = False
         self.stop_signal = None
         self.destroyed = False
+        self.wait_timeouts: list = []
+        #: raised by wait() when set (e.g. TimeoutError: still running)
+        self.wait_exc: Exception | None = None
 
     @property
     def stdout(self) -> _FakeChannel:
@@ -199,6 +227,9 @@ class _FakeJob:
         self.started = True
 
     def wait(self, timeout: float = 10.0) -> _FakeJobStatus:
+        self.wait_timeouts.append(timeout)
+        if self.wait_exc is not None:
+            raise self.wait_exc
         return _FakeJobStatus(self._exit_ok)
 
     def stop(self, timeout: float = 10.0, signal="SIGTERM") -> None:
@@ -358,3 +389,58 @@ def test_wait_ports_started_times_out(fake_cfg, monkeypatch):
             h.wait_ports_started(2)
         assert set(h.stats()) == {0}
     assert clock.now == pytest.approx(2.0)
+
+
+def test_wait_ports_started_counts_vdev_ports(fake_cfg, monkeypatch):
+    job = _FakeJob([_msgs(_data()[:_port1_start()])])
+    clock = _FakeClock()
+    monkeypatch.setattr(testpmd, "time", clock)
+    pco = _FakePco(job)
+    with testpmd.run(pco, Opts(vdev=("v0", "v1"), lcores=(1,))) as h:
+        with pytest.raises(errors.TestpmdError, match=r"\[1\]"):
+            h.wait_ports_started(1)
+        assert set(h.stats()) == {0}
+    (_, text), = pco.file_put_calls
+    assert text == Opts(lcores=(1,)).cmdline_text(2)
+
+
+def test_wait_ports_started_honours_nports(fake_cfg, monkeypatch):
+    job = _FakeJob([_msgs(_data()[:_port1_start()])])
+    monkeypatch.setattr(testpmd, "time", _FakeClock())
+    with testpmd.run(_FakePco(job), Opts(allow=("a", "b"), lcores=(1,)),
+                     nports=1) as h:
+        h.wait_ports_started(1)          # port 0 alone is enough
+        assert set(h.stats()) == {0}
+
+
+def test_alive_while_wait_times_out_then_false_once_exited(fake_pco):
+    job = fake_pco._fake_job
+    with testpmd.run(fake_pco, Opts(allow=("x",), lcores=(1,))) as h:
+        job.wait_exc = errors.TimeoutError(0, "still running")
+        assert h.alive() is True
+        job.wait_exc = None
+        assert h.alive() is False
+        assert job.wait_timeouts == [0, 0]
+
+
+def test_alive_is_false_after_close(fake_pco):
+    job = fake_pco._fake_job
+    with testpmd.run(fake_pco, Opts(allow=("x",), lcores=(1,))) as h:
+        job.wait_exc = errors.TimeoutError(0, "still running")
+    assert h.alive() is False
+    assert job.wait_timeouts == []
+
+
+def test_stats_after_close_returns_cache(fake_pco_with_stdout):
+    job = fake_pco_with_stdout._fake_job
+    with testpmd.run(fake_pco_with_stdout,
+                     Opts(allow=("a", "b"), lcores=(1,))) as h:
+        before = h.stats()
+    assert job.destroyed
+
+    def _drain(timeout=0):
+        raise AssertionError("drained a destroyed job's filter")
+
+    job.stdout._filter.drain = _drain
+    assert h.stats() == before
+    assert before[0].rx_packets == LAST_RX_PACKETS_PORT0

@@ -10,8 +10,9 @@ the agent directory and yields a Testpmd handle whose stats() returns
 the latest ``--stats-period`` counters per port without blocking.
 
 argv layout (each optional part omitted when unset):
-    --allow=<bdf>... -n <mem_channels> --file-prefix <prefix> <extra_eal>
-    --lcores=<c1>,<c2>,...
+    --allow=<bdf>... --vdev=<spec>... [--no-pci] -n <mem_channels>
+    --file-prefix <prefix> [--no-huge] [-m <mem_mb>] <extra_eal>
+    --lcores=<c1>,<c2>,... | --lcores=<lcore>@<cpu>,...
     -- --disable-device-start --nb-cores N --cmdline-file F
     --forward-mode M --rxq N --txq N --rxd N --txd N --burst N
     --stats-period N [--no-lsc-interrupt] [--mbuf-size N]
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from pyte import cfg
 from pyte.errors import TestpmdError
+from pyte.errors import TimeoutError as TeTimeoutError
 from pyte.tools._tool import ToolHandle, launch, opt, opt_eq, running, switch
 
 if TYPE_CHECKING:
@@ -44,8 +46,19 @@ _POLL_INTERVAL = 0.5
 class Opts:
     """dpdk-testpmd options (EAL part, application part, command file)."""
 
-    allow: tuple[str, ...]
-    lcores: tuple[int, ...]
+    allow: tuple[str, ...] = ()
+    lcores: tuple[int, ...] = ()
+    #: DPDK virtual devices (--vdev), e.g. "net_af_xdp0,iface=veth1"
+    vdev: tuple[str, ...] = ()
+    no_pci: bool = False
+    #: --no-huge: run from anonymous memory (rigs without hugepages)
+    no_huge: bool = False
+    #: -m: memory to preallocate, MB (needed with no_huge)
+    mem_mb: int | None = None
+    #: (lcore, cpu) pairs for --lcores=<lcore>@<cpu>; replaces lcores
+    #: when set, so lcore ids stay 0..N even on CPUs shared with
+    #: other instances
+    lcore_map: tuple[tuple[int, int], ...] = ()
     mem_channels: int = 4
     file_prefix: str = "testpmd"
     extra_eal: tuple[str, ...] = ()
@@ -74,10 +87,18 @@ class Opts:
     def eal_argv(self) -> list[str]:
         """EAL arguments (before the ``--`` separator)."""
         argv = [f"--allow={bdf}" for bdf in self.allow]
+        argv += [f"--vdev={spec}" for spec in self.vdev]
+        argv += switch("--no-pci", self.no_pci)
         argv += opt("-n", self.mem_channels)
         argv += opt("--file-prefix", self.file_prefix)
+        argv += switch("--no-huge", self.no_huge)
+        argv += opt("-m", self.mem_mb)
         argv += self.extra_eal
-        argv += opt_eq("--lcores=", ",".join(map(str, self.lcores)))
+        if self.lcore_map:
+            lcores = ",".join(f"{lc}@{c}" for lc, c in self.lcore_map)
+        else:
+            lcores = ",".join(map(str, self.lcores))
+        argv += opt_eq("--lcores=", lcores or None)
         return argv
 
     def app_argv(self) -> list[str]:
@@ -227,31 +248,52 @@ class Testpmd(ToolHandle):
     error_cls = TestpmdError
     default_timeout = 60.0
 
-    def __init__(self, job, stdout_filter, opts: Opts):
+    def __init__(self, job, stdout_filter, opts: Opts, nports: int):
         super().__init__(job, stdout_filter)
         self._opts = opts
+        self._nports = nports
         self._parser = StatsParser()
         self._stats: dict[int, PortStats] = {}
+        self._exited = False
+
+    def alive(self) -> bool:
+        """True while dpdk-testpmd is still running; never blocks.
+
+        A forwarder that dies mid-run otherwise only shows up as
+        counters that stop moving.  False once the job has exited or
+        the handle was closed.
+        """
+        if self._exited or self._job_destroyed:
+            return False
+        try:
+            self._job.wait(timeout=0)
+        except TeTimeoutError:
+            return True
+        self._exited = True
+        return False
 
     def stats(self) -> dict[int, PortStats]:
         """Latest PortStats per port seen so far; never blocks.
 
         Drains the queued stdout messages and keeps the newest block
         of each port, so ports stay in the result between calls even
-        when nothing new arrived.  Empty until the first block.
+        when nothing new arrived.  Empty until the first block.  After
+        close() the job and its filter are gone: the last counters
+        seen are returned as they are.
         """
-        for msg in self._stdout_filter.drain():
-            for st in self._parser.feed(msg.data):
-                self._stats[st.port] = st
+        if not self._job_destroyed:
+            for msg in self._stdout_filter.drain():
+                for st in self._parser.feed(msg.data):
+                    self._stats[st.port] = st
         return dict(self._stats)
 
     def wait_ports_started(self, timeout: float) -> None:
-        """Wait until every port in opts.allow has printed statistics.
+        """Wait until each of the run's ports has printed statistics.
 
         A port's first stats block means testpmd has started it and
         is forwarding.  Raises TestpmdError after *timeout* seconds.
         """
-        want = set(range(len(self._opts.allow)))
+        want = set(range(self._nports))
         deadline = time.monotonic() + timeout
         while True:
             missing = want - set(self.stats())
@@ -275,12 +317,13 @@ def run(pco: RpcServer, opts: Opts, *,
         nports: int | None = None) -> Iterator[Testpmd]:
     """Start dpdk-testpmd on *pco*; yields Testpmd; close() on exit.
 
-    *nports* (default: one per opts.allow entry) sizes the command
-    file and the default mbuf pool.  The command file is written to
-    cmdline_path(); unset mbuf_size / total_num_mbufs get
+    *nports* (default: one per opts.allow and opts.vdev entry) sizes
+    the command file and the default mbuf pool, and is the number of
+    ports wait_ports_started() waits for.  The command file is written
+    to cmdline_path(); unset mbuf_size / total_num_mbufs get
     DEFAULT_MBUF_SIZE / total_num_mbufs_default().
     """
-    nports = nports or len(opts.allow)
+    nports = nports or len(opts.allow) + len(opts.vdev)
     path = cmdline_path(pco.ta, opts.file_prefix)
     pco.file_put(path, opts.cmdline_text(nports).encode())
     opts = replace(
@@ -297,5 +340,5 @@ def run(pco: RpcServer, opts: Opts, *,
         return flt
 
     job, flt = launch(pco, program_path(pco.ta), opts.argv(), setup=_setup)
-    with running(Testpmd(job, flt, opts)) as h:
+    with running(Testpmd(job, flt, opts, nports)) as h:
         yield h
