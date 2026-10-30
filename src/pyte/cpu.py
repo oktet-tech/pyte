@@ -93,17 +93,30 @@ def _grab_on_node(ta: str, threads: list[CpuId], n: int) -> list[CpuId]:
     cores: dict[tuple[int, int], list[CpuId]] = {}
     for t in threads:
         cores.setdefault((t.package, t.core), []).append(t)
-    for core_threads in cores.values():
-        if len(got) == n:
-            break
-        for t in core_threads:
-            try:
-                grab(ta, t)
-            except CpuError:
-                continue
-            got.append(t)
-            break
+    try:
+        for core_threads in cores.values():
+            if len(got) == n:
+                break
+            for t in core_threads:
+                try:
+                    grab(ta, t)
+                except CpuError:
+                    continue
+                got.append(t)
+                break
+    except BaseException:
+        _release_all(ta, got)
+        raise
     return got
+
+
+def _release_all(ta: str, threads: list[CpuId]) -> None:
+    """Release every thread, ignoring individual release failures."""
+    for t in threads:
+        try:
+            release(ta, t)
+        except CfgError:
+            pass
 
 
 def grab_n(ta: str, n: int, *, node: int | None = None,
@@ -124,7 +137,6 @@ def grab_n(ta: str, n: int, *, node: int | None = None,
         got = _grab_on_node(ta, by_node[k], n)
         if len(got) == n:
             return got
-        for t in got:
-            release(ta, t)
+        _release_all(ta, got)
     where = "any node" if node is None else f"node {node}"
     raise CpuError(f"cannot grab {n} free CPU threads on {where}")

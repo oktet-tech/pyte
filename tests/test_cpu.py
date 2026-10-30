@@ -123,3 +123,34 @@ def test_pci_numa_node_empty_is_none(fake_cfg):
     pci = "/agent:A/hardware:/pci:/device:0000:03:00.0"
     fake_cfg.values[pci + "/node:"] = ""
     assert cpu.pci_numa_node(pci) is None
+
+
+def test_grab_n_releases_on_unexpected_error(fake_cfg, monkeypatch):
+    real_add = fake_cfg.add
+    calls = []
+
+    def flaky(oid, value=None):
+        calls.append(oid)
+        if len(calls) == 2:
+            raise CfgError(0x7E99, "cfg add")
+        return real_add(oid, value)
+    monkeypatch.setattr(fake_cfg, "add", flaky)
+    with pytest.raises(CfgError) as exc:
+        cpu.grab_n("A", 2, node=0)
+    assert not isinstance(exc.value, cpu.CpuError)
+    assert not fake_cfg.added
+
+
+def test_rollback_release_is_best_effort(fake_cfg, monkeypatch):
+    real_delete = fake_cfg.delete
+    first = []
+
+    def bad_delete(oid, children=False):
+        if not first:
+            first.append(oid)
+            raise CfgError(0x7E98, "cfg delete")
+        real_delete(oid, children)
+    monkeypatch.setattr(fake_cfg, "delete", bad_delete)
+    with pytest.raises(cpu.CpuError):
+        cpu.grab_n("A", 5, node=0)
+    assert len(fake_cfg.added) == 1
