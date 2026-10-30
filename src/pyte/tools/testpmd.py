@@ -17,6 +17,7 @@ argv layout (each optional part omitted when unset):
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from pyte.tools._tool import opt, opt_eq, switch
@@ -115,3 +116,72 @@ def total_num_mbufs_default(nports: int, opts: Opts) -> int:
     return max(2048, nports * (opts.txq * (opts.txd + opts.burst)
                                + opts.rxq * opts.rxd)
                + 250 * opts.nb_cores)
+
+
+#: Per-port statistics header (same regex as the C TAPI tapi_dpdk.c).
+STATS_HEADER_RE = r"(?m)^[ #]+ NIC statistics for port ([0-9]+) [ #]+$"
+_STATS_CLOSE_RE = re.compile(r"(?m)^[ ]*#+[ ]*$")
+_STATS_FIELDS = (
+    ("rx_packets", r"RX-packets:\s*([0-9]+)"),
+    ("rx_missed", r"RX-missed:\s*([0-9]+)"),
+    ("rx_bytes", r"RX-bytes:\s*([0-9]+)"),
+    ("rx_errors", r"RX-errors:\s*([0-9]+)"),
+    ("tx_packets", r"TX-packets:\s*([0-9]+)"),
+    ("tx_errors", r"TX-errors:\s*([0-9]+)"),
+    ("tx_bytes", r"TX-bytes:\s*([0-9]+)"),
+    ("rx_pps", r"Rx-pps:\s*([0-9]+)"),
+    ("tx_pps", r"Tx-pps:\s*([0-9]+)"),
+)
+
+
+@dataclass(frozen=True)
+class PortStats:
+    """One port's counters from a periodic testpmd statistics dump."""
+
+    port: int
+    rx_packets: int
+    rx_bytes: int
+    rx_missed: int
+    rx_errors: int
+    tx_packets: int
+    tx_bytes: int
+    tx_errors: int
+    rx_pps: int
+    tx_pps: int
+
+
+class StatsParser:
+    """Incremental parser of ``--stats-period`` output.
+
+    Feed arbitrary chunks of testpmd stdout; complete blocks (header
+    through the closing ``####`` line) are returned in order, a trailing
+    partial block stays buffered until the rest arrives.
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def feed(self, text: str) -> list[PortStats]:
+        self._buf += text
+        out = []
+        while True:
+            head = re.search(STATS_HEADER_RE, self._buf)
+            if head is None:
+                # no header: nothing worth keeping
+                self._buf = ""
+                return out
+            close = _STATS_CLOSE_RE.search(self._buf, head.end())
+            if close is None:
+                self._buf = self._buf[head.start():]
+                return out
+            body = self._buf[head.end():close.start()]
+            self._buf = self._buf[close.end():]
+            out.append(self._parse(int(head.group(1)), body))
+
+    @staticmethod
+    def _parse(port: int, body: str) -> PortStats:
+        vals = {}
+        for name, pattern in _STATS_FIELDS:
+            m = re.search(pattern, body)
+            vals[name] = int(m.group(1)) if m else 0
+        return PortStats(port=port, **vals)

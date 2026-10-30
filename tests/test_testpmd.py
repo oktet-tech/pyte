@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.testpmd unit tests (offline: argv and cmdline builders)."""
-from pyte.tools.testpmd import Opts, total_num_mbufs_default
+from pathlib import Path
+
+from pyte.tools.testpmd import (
+    Opts,
+    PortStats,
+    StatsParser,
+    total_num_mbufs_default,
+)
 
 
 def test_eal_argv_allow_lcores_prefix():
@@ -61,3 +68,26 @@ def test_total_num_mbufs_default_scales():
     o = Opts(allow=("x",), lcores=(1,), rxq=4, txq=4, nb_cores=2)
     assert total_num_mbufs_default(2, o) == (
         2 * (4 * (512 + 32) + 4 * 512) + 500)
+
+
+def _data():
+    return (Path(__file__).parent / "data" / "testpmd_stats.txt").read_text()
+
+
+def test_parser_extracts_every_complete_block():
+    got = StatsParser().feed(_data())
+    assert [s.port for s in got] == [0, 1, 0, 1]
+    assert got[2].rx_packets > got[0].rx_packets
+    assert got[0] == PortStats(
+        port=0, rx_packets=123456, rx_bytes=7901184, rx_missed=0,
+        rx_errors=0, tx_packets=123400, tx_bytes=7897600, tx_errors=0,
+        rx_pps=100000, tx_pps=99950)
+
+
+def test_stats_block_split_across_messages():
+    text = _data()
+    cut = text.index("TX-packets")      # inside the first block
+    p = StatsParser()
+    assert p.feed(text[:cut]) == []
+    rest = p.feed(text[cut:])
+    assert [s.port for s in rest] == [0, 1, 0, 1]

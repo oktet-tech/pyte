@@ -1,0 +1,45 @@
+testpmd> 
+  ######################## NIC statistics for port 0  ########################
+  RX-packets: 123456     RX-missed: 0          RX-bytes:  7901184
+  RX-errors: 0
+  RX-nombuf:  0         
+  TX-packets: 123400     TX-errors: 0          TX-bytes:  7897600
+
+  Throughput (since last show)
+  Rx-pps:       100000          Rx-bps:     51200000
+  Tx-pps:        99950          Tx-bps:     51174400
+  ############################################################################
+
+  ######################## NIC statistics for port 1  ########################
+  RX-packets: 124456     RX-missed: 0          RX-bytes:  7965184
+  RX-errors: 0
+  RX-nombuf:  0         
+  TX-packets: 124400     TX-errors: 0          TX-bytes:  7961600
+
+  Throughput (since last show)
+  Rx-pps:       100001          Rx-bps:     51200512
+  Tx-pps:        99951          Tx-bps:     51174912
+  ############################################################################
+
+  ######################## NIC statistics for port 0  ########################
+  RX-packets: 223400     RX-missed: 0          RX-bytes:  14297600
+  RX-errors: 0
+  RX-nombuf:  0         
+  TX-packets: 223344     TX-errors: 0          TX-bytes:  14294016
+
+  Throughput (since last show)
+  Rx-pps:       100010          Rx-bps:     51205120
+  Tx-pps:        99960          Tx-bps:     51179520
+  ############################################################################
+
+  ######################## NIC statistics for port 1  ########################
+  RX-packets: 224400     RX-missed: 0          RX-bytes:  14361600
+  RX-errors: 0
+  RX-nombuf:  0         
+  TX-packets: 224344     TX-errors: 0          TX-bytes:  14358016
+
+  Throughput (since last show)
+  Rx-pps:       100011          Rx-bps:     51205632
+  Tx-pps:        99961          Tx-bps:     51180032
+  ############################################################################
+
