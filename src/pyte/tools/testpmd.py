@@ -254,7 +254,8 @@ class Testpmd(ToolHandle):
         self._nports = nports
         self._parser = StatsParser()
         self._stats: dict[int, PortStats] = {}
-        self._exited = False
+        #: the job's exit status, once alive() has seen it exit
+        self._exit_status = None
 
     def alive(self) -> bool:
         """True while dpdk-testpmd is still running; never blocks.
@@ -263,13 +264,12 @@ class Testpmd(ToolHandle):
         counters that stop moving.  False once the job has exited or
         the handle was closed.
         """
-        if self._exited or self._job_destroyed:
+        if self._exit_status is not None or self._job_destroyed:
             return False
         try:
-            self._job.wait(timeout=0)
+            self._exit_status = self._job.wait(timeout=0)
         except TeTimeoutError:
             return True
-        self._exited = True
         return False
 
     def stats(self) -> dict[int, PortStats]:
@@ -291,7 +291,8 @@ class Testpmd(ToolHandle):
         """Wait until each of the run's ports has printed statistics.
 
         A port's first stats block means testpmd has started it and
-        is forwarding.  Raises TestpmdError after *timeout* seconds.
+        is forwarding.  Raises TestpmdError after *timeout* seconds,
+        or at once when testpmd has exited.
         """
         want = set(range(self._nports))
         deadline = time.monotonic() + timeout
@@ -299,6 +300,10 @@ class Testpmd(ToolHandle):
             missing = want - set(self.stats())
             if not missing:
                 return
+            if not self.alive():
+                raise TestpmdError(
+                    f"testpmd exited ({self._exit_status}) before ports "
+                    f"{sorted(missing)} printed statistics")
             left = deadline - time.monotonic()
             if left <= 0:
                 raise TestpmdError(

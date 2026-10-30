@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.testpmd unit tests (offline: builders, parser, handle)."""
 import signal
+import types
 from pathlib import Path
 
 import pytest
@@ -292,6 +293,11 @@ def _port1_start() -> int:
     return text.rindex("\n", 0, text.index("for port 1")) + 1
 
 
+def _still_running() -> Exception:
+    """What Job.wait(timeout=0) raises while the job runs."""
+    return errors.TimeoutError(0, "still running")
+
+
 class _FakeClock:
     """Stands in for the time module: sleep() advances monotonic()."""
 
@@ -369,6 +375,7 @@ def test_wait_ports_started_polls_until_every_port_reported(
         fake_cfg, monkeypatch):
     port1 = _port1_start()
     job = _FakeJob([[], _msgs(_data()[:port1]), [], _msgs(_data()[port1:])])
+    job.wait_exc = _still_running()
     clock = _FakeClock()
     monkeypatch.setattr(testpmd, "time", clock)
     with testpmd.run(_FakePco(job), Opts(allow=("a", "b"),
@@ -381,6 +388,7 @@ def test_wait_ports_started_polls_until_every_port_reported(
 
 def test_wait_ports_started_times_out(fake_cfg, monkeypatch):
     job = _FakeJob([_msgs(_data()[:_port1_start()])])
+    job.wait_exc = _still_running()
     clock = _FakeClock()
     monkeypatch.setattr(testpmd, "time", clock)
     with testpmd.run(_FakePco(job), Opts(allow=("a", "b"),
@@ -393,6 +401,7 @@ def test_wait_ports_started_times_out(fake_cfg, monkeypatch):
 
 def test_wait_ports_started_counts_vdev_ports(fake_cfg, monkeypatch):
     job = _FakeJob([_msgs(_data()[:_port1_start()])])
+    job.wait_exc = _still_running()
     clock = _FakeClock()
     monkeypatch.setattr(testpmd, "time", clock)
     pco = _FakePco(job)
@@ -444,3 +453,34 @@ def test_stats_after_close_returns_cache(fake_pco_with_stdout):
     job.stdout._filter.drain = _drain
     assert h.stats() == before
     assert before[0].rx_packets == LAST_RX_PACKETS_PORT0
+
+
+def test_wait_ports_started_fails_at_once_when_testpmd_exited(
+        fake_cfg, monkeypatch):
+    # testpmd died before its first statistics block (a port that
+    # does not start, a bad EAL argument): no point waiting it out.
+    job = _FakeJob(exit_ok=False)
+    clock = _FakeClock()
+    monkeypatch.setattr(testpmd, "time", clock)
+    with (testpmd.run(_FakePco(job), Opts(allow=("a",), lcores=(1,)))
+          as h, pytest.raises(errors.TestpmdError,
+                              match=r"exited\(1\).*\[0\]")):
+        h.wait_ports_started(60)
+    assert clock.now == 0 and job.wait_timeouts == [0]
+
+
+def test_wait_ports_started_notices_an_exit_between_polls(
+        fake_cfg, monkeypatch):
+    job = _FakeJob(exit_ok=False)
+    job.wait_exc = _still_running()
+    clock = _FakeClock()
+
+    def sleep(s):
+        clock.sleep(s)
+        job.wait_exc = None             # it exits during the first nap
+    monkeypatch.setattr(testpmd, "time", types.SimpleNamespace(
+        monotonic=clock.monotonic, sleep=sleep))
+    with (testpmd.run(_FakePco(job), Opts(allow=("a",), lcores=(1,)))
+          as h, pytest.raises(errors.TestpmdError, match=r"exited\(1\)")):
+        h.wait_ports_started(60)
+    assert clock.sleeps == [0.5]
