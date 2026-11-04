@@ -88,3 +88,43 @@ def test_var_prefix_must_match_exactly():
 def test_var_reference_missing_raises():
     with pytest.raises(ValueError, match="TE_TEST_VAR_no__such"):
         parse_argv(["env=VAR.no.such"])
+
+
+def test_params_compounds():
+    p = Params(parse_argv(["te_test_id=1", "COMP.link=mtu,speed",
+                           "link_mtu=1500", "link_speed=25G",
+                           "duration=60"]))
+    assert p.compounds() == {"link": {"mtu": "1500", "speed": "25G"}}
+    assert p.compound("link") == {"mtu": "1500", "speed": "25G"}
+    assert p.plain() == {"duration": "60"}
+    assert p["link_mtu"] == "1500"
+
+
+def test_params_no_compounds():
+    p = Params(parse_argv(["te_test_id=1", "a=1"]))
+    assert p.compounds() == {} and p.plain() == {"a": "1"}
+
+
+def test_params_compound_missing():
+    with pytest.raises(KeyError, match="no compound argument 'x'"):
+        Params(parse_argv(["COMP.link=mtu", "link_mtu=1"])).compound("x")
+
+
+def test_params_compound_field_missing():
+    with pytest.raises(ValueError, match="'link'.*'mtu'.*'link_mtu'"):
+        Params(parse_argv(["COMP.link=mtu,speed", "link_speed=25G"]))
+
+
+def test_params_compound_name_with_underscores():
+    p = Params(parse_argv(["COMP.iperf3_tcp_jumbo=dut,pkt_size",
+                           "iperf3_tcp_jumbo_dut=iut_pf0",
+                           "iperf3_tcp_jumbo_pkt_size=9000"]))
+    assert list(p.compounds()) == ["iperf3_tcp_jumbo"]
+    assert p.compound("iperf3_tcp_jumbo")["pkt_size"] == "9000"
+
+
+def test_params_compound_empty_marker_and_te_names():
+    p = Params(parse_argv(["te_test_id=1", "te_test_name=n", "te_rand_seed=3",
+                           "te_other=x", "COMP.x="]))
+    assert p.compounds() == {"x": {}}
+    assert p.plain() == {"te_other": "x"}

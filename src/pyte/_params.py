@@ -7,6 +7,8 @@ import os
 
 _VAR_PREFIX = "VAR."
 _ENV_PREFIX = "TE_TEST_VAR_"
+COMP_PREFIX = "COMP."
+_TE_NAMES = frozenset({"te_test_id", "te_test_name", "te_rand_seed"})
 
 
 def _resolve_var(value: str) -> str:
@@ -58,6 +60,12 @@ class Params:
     the real built-in must use ``builtins.int`` / ``builtins.float`` /
     ``builtins.bool``, or quote the type in annotations
     (e.g. ``"int"`` rather than ``int``).
+
+    When Tester runs with ``<option name="script_compound_args"
+    value="yes"/>`` it also passes one ``COMP.<arg>=<f1>,<f2>,...``
+    marker per compound argument, next to the flattened
+    ``<arg>_<field>`` entries.  Those are exposed by compounds(),
+    compound() and plain(); the raw accessors still see everything.
     """
 
     _TRUE = {"true", "yes", "1", "on"}
@@ -65,6 +73,25 @@ class Params:
 
     def __init__(self, raw: dict[str, str]):
         self._raw = raw
+        self._compounds: dict[str, dict[str, str]] = {}
+        listed: set[str] = set()
+        for key, value in raw.items():
+            if not key.startswith(COMP_PREFIX):
+                continue
+            name = key[len(COMP_PREFIX):]
+            fields: dict[str, str] = {}
+            for field in filter(None, value.split(",")):
+                full = f"{name}_{field}"
+                if full not in raw:
+                    raise ValueError(
+                        f"compound {name!r} lists field {field!r} but "
+                        f"parameter {full!r} is missing")
+                fields[field] = raw[full]
+                listed.add(full)
+            self._compounds[name] = fields
+        self._plain = {k: v for k, v in raw.items()
+                       if not k.startswith(COMP_PREFIX)
+                       and k not in listed and k not in _TE_NAMES}
 
     def __getitem__(self, name: str) -> str:
         try:
@@ -85,6 +112,26 @@ class Params:
         up, e.g. to reject a parameter nothing reads.
         """
         return dict(self._raw)
+
+    def compounds(self) -> dict[str, dict[str, str]]:
+        """Compound arguments as a new name -> {field: value} dict."""
+        return {n: dict(f) for n, f in self._compounds.items()}
+
+    def compound(self, name: str) -> dict[str, str]:
+        """One compound argument as a new field -> value dict."""
+        try:
+            return dict(self._compounds[name])
+        except KeyError:
+            raise KeyError(
+                f"test has no compound argument {name!r}") from None
+
+    def plain(self) -> dict[str, str]:
+        """Parameters that are neither compound markers nor fields.
+
+        The te_test_id, te_test_name and te_rand_seed names are
+        excluded too.
+        """
+        return dict(self._plain)
 
     def int(self, name: str) -> int:
         return int(self[name], 0)
