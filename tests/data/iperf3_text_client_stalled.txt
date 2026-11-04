@@ -1,0 +1,17 @@
+Connecting to host 127.0.0.1, port 5299
+[  5] local 127.0.0.1 port 37370 connected to 127.0.0.1 port 5299
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  15.5 GBytes   133 Gbits/sec    0   1023 KBytes       
+[  5]   1.00-2.01   sec  15.2 GBytes   131 Gbits/sec    0   1023 KBytes       
+[  5]   2.01-3.00   sec  3.00 GBytes  25.8 Gbits/sec    0   1023 KBytes       
+[  5]   3.00-4.01   sec  0.00 Bytes  0.00 bits/sec    0   1023 KBytes       
+[  5]   4.01-5.01   sec  0.00 Bytes  0.00 bits/sec    0   1023 KBytes       
+[  5]   5.01-6.01   sec  0.00 Bytes  0.00 bits/sec    0   1023 KBytes       
+[  5]   6.01-7.00   sec  12.4 GBytes   106 Gbits/sec    0   1023 KBytes       
+[  5]   7.00-8.00   sec  15.3 GBytes   132 Gbits/sec    1   1023 KBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-8.00   sec  61.6 GBytes  66.1 Gbits/sec    1            sender
+[  5]   0.00-8.01   sec  61.6 GBytes  66.1 Gbits/sec                  receiver
+
+iperf Done.

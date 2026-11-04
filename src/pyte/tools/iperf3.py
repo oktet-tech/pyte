@@ -13,11 +13,14 @@ server argv (build_server_args; bind order port, interval):
     iperf3 -s -J  [-p<port>] [-i<interval>]
 
 client argv (build_client_args; bind order below; each omitted when unset):
-    iperf3 -c <host> -J [-B<src_host>] [-p<port>] [-4|-6] [-u]
-    [-b<bandwidth_bits>] [-l<length>] [-n<num_bytes>] [-t<duration>]
+    iperf3 -c <host> [-J | --forceflush] [-B<src_host>] [-p<port>] [-4|-6]
+    [-u] [-b<bandwidth_bits>] [-l<length>] [-n<num_bytes>] [-t<duration>]
     [-i<interval>] [-P<streams>] [-R] [--bidir]
     Flags glue the value on (-p5201); only --bidir is long-form. -u for UDP
-    only (TCP default). -4/-6 select ip version (client).
+    only (TCP default). -4/-6 select ip version (client). -J is the C
+    TAPI's; --forceflush in its place is pyte only (Opts.json=False, text
+    mode below): iperf3 block-buffers text into a pipe, so without it the
+    interval lines reach the agent only when the client exits.
 
 report (parsed from iperf3 JSON `end`):
     end.sum_sent.{bits_per_second,bytes,seconds,retransmits}  -> sent
@@ -26,6 +29,27 @@ report (parsed from iperf3 JSON `end`):
     min(end.streams[*].sender.bits_per_second)  -> min_bps_per_stream
     top-level "error"  -> Report.error when there is an `end`
                           (an interrupted client), else raise IperfError
+
+text mode (Opts.json=False; pyte only, the C TAPI always passes -J):
+    -J prints nothing until the end, so a client that has to show
+    progress while it runs prints text, flushed per line.  Written
+    against iperf 3.18 output.  Its summary block feeds the same
+    Report:
+    [SUM] (or the one stream with -P 1) "sender" row   -> sent
+    [SUM] (or the one stream with -P 1) "receiver" row -> received
+        Transfer -> bytes (K/M/G/TBytes: powers of 1024),
+        Bitrate -> bits_per_second (K/M/G/Tbits/sec: powers of 1000),
+        interval end - start -> seconds, TCP sender Retr -> retransmits
+    --bidir: the [TX-C] rows, as end.sum_sent/sum_received in JSON
+    min(numbered-stream "sender" rows' Bitrate) -> min_bps_per_stream
+    "iperf3: error - ..." / "iperf3: interrupt - ..." (stderr)
+        -> Report.error after a summary, else raise IperfError
+
+progress (text mode; Iperf3.progress()):
+    numbered-stream interval lines "[  5]  0.00-1.00 sec 11.8 GBytes ..."
+    (any role tag) -> (lines that moved data, sum of their Transfer in
+    bytes); "0.00 Bytes" lines (a blocked stream), the [SUM] lines and
+    the sender/receiver summary rows do not count
 
 MI (iperf3_report_mi_log):
     THROUGHPUT "Per-stream" MIN    min_bps_per_stream  PLAIN
@@ -39,6 +63,7 @@ Deliberate deviations (vs the C TAPI):
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -88,6 +113,12 @@ class Opts:
         ``-R`` server sends, client receives.
     dual:
         ``--bidir`` bidirectional.
+    json:
+        Client only: ``-J`` JSON output (default).  False runs the
+        client in text mode with ``--forceflush`` in place of ``-J``:
+        interval reports arrive while it runs
+        (:meth:`Iperf3.progress`) and :meth:`Iperf3.wait` parses the
+        text summary into the same :class:`Report`.
     """
     host: str | None = None
     src_host: str | None = None
@@ -102,6 +133,7 @@ class Opts:
     streams: int | None = None
     reverse: bool = False
     dual: bool = False
+    json: bool = True
 
     def __post_init__(self) -> None:
         if self.protocol not in _VALID_PROTOCOLS:
@@ -126,7 +158,8 @@ class Opts:
         """
         if not self.host:
             raise ValueError("Opts.host is required for the client")
-        argv = ["-c", self.host, "-J"]
+        # Text into a pipe is block-buffered: flush each interval line.
+        argv = ["-c", self.host, "-J" if self.json else "--forceflush"]
         if self.src_host:
             argv.append(f"-B{self.src_host}")
         if self.port is not None:
@@ -224,6 +257,92 @@ def _parse_report(obj: dict) -> Report:
                   error=None if err is None else str(err))
 
 
+#: Byte sizes as iperf3 prints them ("11.8 GBytes"): powers of 1024.
+_BYTE_UNITS = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30,
+               "T": 1 << 40}
+#: Bit rates ("101 Gbits/sec"): powers of 1000.
+_BIT_UNITS = {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
+
+#: A numbered-stream report line and its Transfer; read alike by the
+#: agent's PCRE2 multiline filter and by Python re.  [SUM] lines do
+#: not match (``\d+`` stream id); the per-stream sender/receiver
+#: summary rows do and progress() drops them by their last word.
+#: Matching to the end of the line keeps a line cut between two
+#: reads in the filter until the rest arrives.
+_INTERVAL_REGEX = (
+    r"^\[[ \t]*\d+\](?:\[[TR]X-[CS]\])?[ \t]+[\d.]+-[\d.]+[ \t]+sec"
+    r"[ \t]+([\d.]+)[ \t]+([KMGT]?)Bytes([^\n]*)$")
+_INTERVAL_RE = re.compile(_INTERVAL_REGEX, re.MULTILINE)
+
+_SUMMARY_RE = re.compile(
+    r"^\[[ \t]*(?P<id>\d+|SUM)\](?:\[(?P<role>[TR]X-[CS])\])?"
+    r"[ \t]+(?P<start>[\d.]+)-(?P<end>[\d.]+)[ \t]+sec"
+    r"[ \t]+(?P<size>[\d.]+)[ \t]+(?P<size_unit>[KMGT]?)Bytes"
+    r"[ \t]+(?P<rate>[\d.]+)[ \t]+(?P<rate_unit>[KMGT]?)bits/sec"
+    r"(?P<extra>[^\n]*?)[ \t]+(?P<side>sender|receiver)[ \t]*$",
+    re.MULTILINE)
+
+_TEXT_ERROR_RE = re.compile(
+    r"^iperf3: ((?:error|interrupt) - [^\n]*)$", re.MULTILINE)
+
+
+def _bytes(size: str, unit: str) -> int:
+    return round(float(size) * _BYTE_UNITS[unit])
+
+
+def _bps(row: re.Match) -> float:
+    return float(row["rate"]) * _BIT_UNITS[row["rate_unit"]]
+
+
+def _text_direction(row: re.Match) -> Direction:
+    # TCP sender rows print Retr after the bitrate; UDP rows print
+    # jitter and loss there, receiver rows nothing.
+    extra = row["extra"].split()
+    retr = int(extra[0]) if len(extra) == 1 and extra[0].isdigit() else None
+    return Direction(
+        bits_per_second=_bps(row),
+        bytes=_bytes(row["size"], row["size_unit"]),
+        seconds=float(row["end"]) - float(row["start"]),
+        retransmits=retr)
+
+
+def _parse_text_report(text: str) -> Report:
+    """Parse iperf3 client text output (no ``-J``) into a :class:`Report`.
+
+    *text* is the client's stdout followed by its stderr, where
+    iperf3 prints its error line.  The summary block gives sent and
+    received: the [SUM] sender/receiver rows, or the stream's own
+    with one stream (``-P 1`` prints no [SUM]); with ``--bidir`` the
+    [TX-C] rows.  An error line next to a summary (an interrupted
+    client) goes to Report.error.  Raises
+    :exc:`pyte.errors.IperfError` on an error without a summary, or
+    when there is no summary at all.
+    """
+    m_err = _TEXT_ERROR_RE.search(text)
+    err = m_err.group(1).strip() if m_err else None
+    rows = list(_SUMMARY_RE.finditer(text))
+    if not rows:
+        if err:
+            raise IperfError(f"iperf3 reported error: {err}")
+        raise IperfError(
+            f"iperf3 text output has no summary: {text[:200]!r}")
+
+    forward = [r for r in rows if r["role"] in (None, "TX-C")]
+    total = [r for r in forward if r["id"] == "SUM"] or forward
+    sides = {r["side"]: r for r in total}
+    if len({r["id"] for r in total}) != 1 or len(sides) != 2:
+        raise IperfError(
+            "iperf3 text summary has no single sender/receiver pair: "
+            f"{[r.group(0) for r in total]!r}")
+
+    sent = _text_direction(sides["sender"])
+    received = _text_direction(sides["receiver"])
+    bps = [_bps(r) for r in rows if r["id"] != "SUM" and r["side"] == "sender"]
+    return Report(sent=sent, received=received,
+                  min_bps_per_stream=min(bps) if bps else sent.bits_per_second,
+                  error=err)
+
+
 class Iperf3(_tool.ToolHandle):
     """Lifecycle manager for a running iperf3 *client* job.
 
@@ -235,16 +354,56 @@ class Iperf3(_tool.ToolHandle):
     SIGINT prints both and exits 1, and wait() then returns the
     report with Report.error set.  A JSON error object without a
     summary is rejected by the parse.
+
+    In text mode (``Opts(json=False)``) run() also hands in
+    *intervals*, a grep filter over the interval report lines:
+    :meth:`progress` counts them while the client runs, and wait()
+    parses the text summary (stdout, then the error line from
+    stderr) into the same Report, with the same exit-status rules.
     """
 
     tool = "iperf3 client"
     error_cls = IperfError
     default_timeout = 60.0
 
-    def __init__(self, job, stdout_filter, stderr_filter):
+    def __init__(self, job, stdout_filter, stderr_filter, intervals=None):
         super().__init__(job, stdout_filter)
         self._stderr_filter = stderr_filter
+        self._intervals = intervals
+        self._text = intervals is not None
+        self._n_intervals = 0
+        self._interval_bytes = 0
         self._parsed: Report | None = None
+
+    def progress(self) -> tuple[int, int]:
+        """(intervals that moved data, their bytes) so far; never blocks.
+
+        Drains the interval lines queued since the last call and adds
+        them to the totals: one line per stream per ``-i`` interval
+        (both directions with ``--bidir``), bytes summed from their
+        Transfer column.  A line with a zero Transfer does not count:
+        a blocked stream (link down, peer stopped) keeps printing
+        "0.00 Bytes" lines every interval, and counting them would
+        make a stalled client look alive.  [SUM] lines and the end
+        summary do not count either.  After close() the job and its
+        filter are gone: the last totals are returned as they are.
+        Needs text mode: raises RuntimeError for a ``-J`` client,
+        which prints nothing until it ends.
+        """
+        if not self._text:
+            raise RuntimeError(
+                "iperf3 progress() needs Opts(json=False): with -J the "
+                "client prints nothing until it ends")
+        if not self._job_destroyed:
+            for msg in self._intervals.drain():
+                for m in _INTERVAL_RE.finditer(msg.data):
+                    if m.group(3).rstrip().endswith(("sender", "receiver")):
+                        continue
+                    moved = _bytes(m.group(1), m.group(2))
+                    if moved > 0:
+                        self._n_intervals += 1
+                        self._interval_bytes += moved
+        return self._n_intervals, self._interval_bytes
 
     def _read_output(self, timeout: float) -> str:
         from pyte import log
@@ -252,9 +411,14 @@ class Iperf3(_tool.ToolHandle):
         err = self._stderr_filter.read_all(timeout=timeout)
         log.ring(f"iperf3 client stdout:\n{out}")
         log.ring(f"iperf3 client stderr:\n{err}")
+        if self._text and err:
+            return f"{out}\n{err}"     # the error line is on stderr
         return out
 
     def _parse(self, raw: str) -> Report:
+        if self._text:
+            self._parsed = _parse_text_report(raw)
+            return self._parsed
         # iperf3 may print diagnostics before the JSON: strip the prefix.
         json_start = raw.find("{")
         if json_start > 0:
@@ -315,14 +479,18 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 def run(pco: "RpcServer", opts: Opts):
     """Context manager: run an iperf3 *client*; yield an :class:`Iperf3`."""
     def _setup(job):
-        # Capture stdout (the -J JSON, fed to the parser) and stderr;
-        # both are dumped to the TE log by wait() to mirror
-        # perf_app_dump_output().
+        # Capture stdout (the -J JSON or the text summary, fed to the
+        # parser) and stderr; both are dumped to the TE log by wait()
+        # to mirror perf_app_dump_output().  Text mode also greps the
+        # interval lines for progress().
         out = job.stdout.attach_filter(name="iperf3_stdout", readable=True)
         err = job.stderr.attach_filter(name="iperf3_stderr", readable=True)
-        return out, err
+        intervals = (None if opts.json else
+                     job.stdout.grep(_INTERVAL_REGEX,
+                                     name="iperf3_intervals"))
+        return out, err, intervals
 
-    job, (out, err) = _tool.launch(pco, "iperf3", opts.client_argv(),
-                                   setup=_setup)
-    with _tool.running(Iperf3(job, out, err)) as c:
+    job, (out, err, intervals) = _tool.launch(
+        pco, "iperf3", opts.client_argv(), setup=_setup)
+    with _tool.running(Iperf3(job, out, err, intervals=intervals)) as c:
         yield c

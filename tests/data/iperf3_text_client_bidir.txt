@@ -1,0 +1,42 @@
+Connecting to host 127.0.0.1, port 5299
+[  5] local 127.0.0.1 port 47030 connected to 127.0.0.1 port 5299
+[  7] local 127.0.0.1 port 47032 connected to 127.0.0.1 port 5299
+[  9] local 127.0.0.1 port 47042 connected to 127.0.0.1 port 5299
+[ 11] local 127.0.0.1 port 47052 connected to 127.0.0.1 port 5299
+[ ID][Role] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5][TX-C]   0.00-1.00   sec  5.25 GBytes  45.0 Gbits/sec    0    639 KBytes       
+[  7][TX-C]   0.00-1.00   sec  4.84 GBytes  41.5 Gbits/sec    0   1023 KBytes       
+[SUM][TX-C]   0.00-1.00   sec  10.1 GBytes  86.5 Gbits/sec    0             
+[  9][RX-C]   0.00-1.00   sec  4.54 GBytes  39.0 Gbits/sec                  
+[ 11][RX-C]   0.00-1.00   sec  6.36 GBytes  54.6 Gbits/sec                  
+[SUM][RX-C]   0.00-1.00   sec  10.9 GBytes  93.6 Gbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5][TX-C]   1.00-2.00   sec  4.59 GBytes  39.4 Gbits/sec    0    639 KBytes       
+[  7][TX-C]   1.00-2.00   sec  4.02 GBytes  34.5 Gbits/sec    0   1023 KBytes       
+[SUM][TX-C]   1.00-2.00   sec  8.61 GBytes  74.0 Gbits/sec    0             
+[  9][RX-C]   1.00-2.00   sec  5.63 GBytes  48.3 Gbits/sec                  
+[ 11][RX-C]   1.00-2.00   sec  5.23 GBytes  44.9 Gbits/sec                  
+[SUM][RX-C]   1.00-2.00   sec  10.9 GBytes  93.3 Gbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5][TX-C]   2.00-3.00   sec  5.17 GBytes  44.4 Gbits/sec    2   1023 KBytes       
+[  7][TX-C]   2.00-3.00   sec  4.10 GBytes  35.2 Gbits/sec    0   1023 KBytes       
+[SUM][TX-C]   2.00-3.00   sec  9.27 GBytes  79.6 Gbits/sec    2             
+[  9][RX-C]   2.00-3.00   sec  5.77 GBytes  49.6 Gbits/sec                  
+[ 11][RX-C]   2.00-3.00   sec  5.34 GBytes  45.9 Gbits/sec                  
+[SUM][RX-C]   2.00-3.00   sec  11.1 GBytes  95.5 Gbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID][Role] Interval           Transfer     Bitrate         Retr
+[  5][TX-C]   0.00-3.00   sec  15.0 GBytes  42.9 Gbits/sec    2            sender
+[  5][TX-C]   0.00-3.00   sec  15.0 GBytes  42.9 Gbits/sec                  receiver
+[  7][TX-C]   0.00-3.00   sec  13.0 GBytes  37.1 Gbits/sec    0            sender
+[  7][TX-C]   0.00-3.00   sec  13.0 GBytes  37.1 Gbits/sec                  receiver
+[SUM][TX-C]   0.00-3.00   sec  28.0 GBytes  80.0 Gbits/sec    2             sender
+[SUM][TX-C]   0.00-3.00   sec  28.0 GBytes  80.0 Gbits/sec                  receiver
+[  9][RX-C]   0.00-3.00   sec  15.9 GBytes  45.6 Gbits/sec    1            sender
+[  9][RX-C]   0.00-3.00   sec  15.9 GBytes  45.6 Gbits/sec                  receiver
+[ 11][RX-C]   0.00-3.00   sec  16.9 GBytes  48.5 Gbits/sec    0            sender
+[ 11][RX-C]   0.00-3.00   sec  16.9 GBytes  48.5 Gbits/sec                  receiver
+[SUM][RX-C]   0.00-3.00   sec  32.9 GBytes  94.1 Gbits/sec    1             sender
+[SUM][RX-C]   0.00-3.00   sec  32.9 GBytes  94.1 Gbits/sec                  receiver
+
+iperf Done.

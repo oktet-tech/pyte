@@ -1,0 +1,25 @@
+Connecting to host 127.0.0.1, port 5299
+[  5] local 127.0.0.1 port 58922 connected to 127.0.0.1 port 5299
+[  7] local 127.0.0.1 port 58930 connected to 127.0.0.1 port 5299
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  11.8 GBytes   101 Gbits/sec    0   1023 KBytes       
+[  7]   0.00-1.00   sec  11.9 GBytes   102 Gbits/sec    0   1.12 MBytes       
+[SUM]   0.00-1.00   sec  23.7 GBytes   204 Gbits/sec    0             
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5]   1.00-2.00   sec  11.8 GBytes   101 Gbits/sec    0   1023 KBytes       
+[  7]   1.00-2.00   sec  11.9 GBytes   102 Gbits/sec    0   1.12 MBytes       
+[SUM]   1.00-2.00   sec  23.6 GBytes   203 Gbits/sec    0             
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5]   2.00-3.00   sec  11.8 GBytes   101 Gbits/sec    0   1023 KBytes       
+[  7]   2.00-3.00   sec  11.8 GBytes   101 Gbits/sec    0   1.12 MBytes       
+[SUM]   2.00-3.00   sec  23.6 GBytes   203 Gbits/sec    0             
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-3.00   sec  35.4 GBytes   101 Gbits/sec    0            sender
+[  5]   0.00-3.00   sec  35.4 GBytes   101 Gbits/sec                  receiver
+[  7]   0.00-3.00   sec  35.6 GBytes   102 Gbits/sec    0            sender
+[  7]   0.00-3.00   sec  35.6 GBytes   102 Gbits/sec                  receiver
+[SUM]   0.00-3.00   sec  71.0 GBytes   203 Gbits/sec    0             sender
+[SUM]   0.00-3.00   sec  71.0 GBytes   203 Gbits/sec                  receiver
+
+iperf Done.

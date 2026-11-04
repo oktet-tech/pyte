@@ -1,0 +1,25 @@
+Connecting to host 127.0.0.1, port 5299
+[  5] local 127.0.0.1 port 40845 connected to 127.0.0.1 port 5299
+[  7] local 127.0.0.1 port 42701 connected to 127.0.0.1 port 5299
+[ ID] Interval           Transfer     Bitrate         Total Datagrams
+[  5]   0.00-1.00   sec  1.22 MBytes  10.2 Mbits/sec  39  
+[  7]   0.00-1.00   sec  1.22 MBytes  10.2 Mbits/sec  39  
+[SUM]   0.00-1.00   sec  2.44 MBytes  20.4 Mbits/sec  78  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5]   1.00-2.00   sec  1.19 MBytes  9.95 Mbits/sec  38  
+[  7]   1.00-2.00   sec  1.16 MBytes  9.69 Mbits/sec  38  
+[SUM]   1.00-2.00   sec  2.34 MBytes  19.6 Mbits/sec  76  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  5]   2.00-3.01   sec  1.19 MBytes  9.92 Mbits/sec  38  
+[  7]   2.00-3.01   sec  1.22 MBytes  10.2 Mbits/sec  38  
+[SUM]   2.00-3.01   sec  2.41 MBytes  20.1 Mbits/sec  76  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Jitter    Lost/Total Datagrams
+[  5]   0.00-3.01   sec  3.59 MBytes  10.0 Mbits/sec  0.000 ms  0/115 (0%)  sender
+[  5]   0.00-3.01   sec  3.59 MBytes  10.0 Mbits/sec  0.020 ms  0/115 (0%)  receiver
+[  7]   0.00-3.01   sec  3.59 MBytes  10.0 Mbits/sec  0.000 ms  0/115 (0%)  sender
+[  7]   0.00-3.01   sec  3.59 MBytes  10.0 Mbits/sec  0.010 ms  0/115 (0%)  receiver
+[SUM]   0.00-3.01   sec  7.19 MBytes  20.1 Mbits/sec  0.000 ms  0/230 (0%)  sender
+[SUM]   0.00-3.01   sec  7.19 MBytes  20.1 Mbits/sec  0.015 ms  0/230 (0%)  receiver
+
+iperf Done.
