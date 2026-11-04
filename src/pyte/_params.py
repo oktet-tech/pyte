@@ -79,8 +79,11 @@ class Params:
             if not key.startswith(COMP_PREFIX):
                 continue
             name = key[len(COMP_PREFIX):]
+            if not name:
+                raise ValueError(
+                    f"empty compound argument name in {key!r}")
             fields: dict[str, str] = {}
-            for field in filter(None, value.split(",")):
+            for field in filter(None, (x.strip() for x in value.split(","))):
                 full = f"{name}_{field}"
                 if full not in raw:
                     raise ValueError(

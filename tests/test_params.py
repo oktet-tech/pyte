@@ -128,3 +128,24 @@ def test_params_compound_empty_marker_and_te_names():
                            "te_other=x", "COMP.x="]))
     assert p.compounds() == {"x": {}}
     assert p.plain() == {"te_other": "x"}
+
+
+def test_params_compound_empty_name():
+    with pytest.raises(ValueError, match="empty compound argument name"):
+        Params(parse_argv(["COMP.=a", "_a=1"]))
+
+
+def test_params_compound_field_whitespace():
+    p = Params(parse_argv(["COMP.link=mtu, speed", "link_mtu=1",
+                           "link_speed=2"]))
+    assert p.compound("link") == {"mtu": "1", "speed": "2"}
+
+
+def test_params_raw_accessors_see_marker():
+    p = Params(parse_argv(["COMP.link=mtu", "link_mtu=1"]))
+    assert "COMP.link" in p and "COMP.link" in p.as_dict()
+
+
+def test_params_compounds_order():
+    p = Params(parse_argv(["COMP.b=x", "COMP.a=y", "b_x=1", "a_y=2"]))
+    assert list(p.compounds()) == ["b", "a"]
