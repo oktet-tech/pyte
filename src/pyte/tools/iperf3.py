@@ -372,23 +372,27 @@ class Iperf3(_tool.ToolHandle):
         self._intervals = intervals
         self._text = intervals is not None
         self._n_intervals = 0
+        self._n_reports = 0
         self._interval_bytes = 0
         self._parsed: Report | None = None
 
-    def progress(self) -> tuple[int, int]:
-        """(intervals that moved data, their bytes) so far; never blocks.
+    def progress(self) -> tuple[int, int, int]:
+        """(moved, nbytes, total) so far; never blocks.
 
         Drains the interval lines queued since the last call and adds
         them to the totals: one line per stream per ``-i`` interval
-        (both directions with ``--bidir``), bytes summed from their
-        Transfer column.  A line with a zero Transfer does not count:
-        a blocked stream (link down, peer stopped) keeps printing
-        "0.00 Bytes" lines every interval, and counting them would
-        make a stalled client look alive.  [SUM] lines and the end
-        summary do not count either.  After close() the job and its
-        filter are gone: the last totals are returned as they are.
-        Needs text mode: raises RuntimeError for a ``-J`` client,
-        which prints nothing until it ends.
+        (both directions with ``--bidir``).  *total* counts every
+        interval line seen, *moved* only those with a non-zero
+        Transfer, and *nbytes* sums the Transfer column of the moving
+        ones.  A blocked stream (link down, peer stopped) keeps
+        printing "0.00 Bytes" lines every interval: *total* goes on
+        advancing with the clock, which dates a sample across an
+        outage, while *moved* stays flat, which tells a stalled client
+        from a live one.  [SUM] lines and the end summary count in
+        neither.  After close() the job and its filter are gone: the
+        last totals are returned as they are.  Needs text mode: raises
+        RuntimeError for a ``-J`` client, which prints nothing until
+        it ends.
         """
         if not self._text:
             raise RuntimeError(
@@ -399,11 +403,12 @@ class Iperf3(_tool.ToolHandle):
                 for m in _INTERVAL_RE.finditer(msg.data):
                     if m.group(3).rstrip().endswith(("sender", "receiver")):
                         continue
+                    self._n_reports += 1
                     moved = _bytes(m.group(1), m.group(2))
                     if moved > 0:
                         self._n_intervals += 1
                         self._interval_bytes += moved
-        return self._n_intervals, self._interval_bytes
+        return self._n_intervals, self._interval_bytes, self._n_reports
 
     def _read_output(self, timeout: float) -> str:
         from pyte import log

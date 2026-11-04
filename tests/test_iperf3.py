@@ -306,24 +306,24 @@ def test_progress_counts_interval_lines():
         "         sender"))
     h = _text_client(intervals=flt)
     want = 2 * round(11.8 * G) + round(11.9 * G)
-    assert h.progress() == (3, want)
-    assert h.progress() == (3, want)      # nothing new: unchanged
+    assert h.progress() == (3, want, 3)
+    assert h.progress() == (3, want, 3)   # nothing new: unchanged
 
 
 def test_progress_is_cumulative_across_calls():
     lines = _agent_grep(_text("iperf3_text_client.txt"))
     h = _text_client(intervals=_GrepFilter(_msgs(*lines[:2]),
                                            _msgs(*lines[2:])))
-    assert h.progress() == (2, round(11.8 * G) + round(11.9 * G))
+    assert h.progress() == (2, round(11.8 * G) + round(11.9 * G), 2)
     # 11.8, 11.9 | 11.8, 11.9, 11.8, 11.8 GBytes, then the summary lines
-    assert h.progress() == (6, 4 * round(11.8 * G) + 2 * round(11.9 * G))
+    assert h.progress() == (6, 4 * round(11.8 * G) + 2 * round(11.9 * G), 6)
 
 
 def test_progress_over_the_captured_run_skips_sum_and_summary_lines():
     text = _text("iperf3_text_client.txt")
     assert len(_agent_grep(text)) == 10     # 6 intervals + 4 summaries
     h = _text_client(intervals=_GrepFilter(_msgs(*_agent_grep(text))))
-    assert h.progress() == (6, 4 * round(11.8 * G) + 2 * round(11.9 * G))
+    assert h.progress() == (6, 4 * round(11.8 * G) + 2 * round(11.9 * G), 6)
 
 
 def test_progress_counts_both_directions_of_bidir():
@@ -331,10 +331,10 @@ def test_progress_counts_both_directions_of_bidir():
     h = _text_client(intervals=_GrepFilter(_msgs(*_agent_grep(text))))
     sizes = [5.25, 4.84, 4.54, 6.36, 4.59, 4.02, 5.63, 5.23,
              5.17, 4.10, 5.77, 5.34]
-    assert h.progress() == (12, sum(round(v * G) for v in sizes))
+    assert h.progress() == (12, sum(round(v * G) for v in sizes), 12)
 
 
-def test_progress_skips_intervals_that_moved_nothing():
+def test_progress_counts_intervals_that_moved_nothing_apart():
     # Server SIGSTOPped from 2.2 s to 6.2 s: three "0.00 Bytes" lines.
     lines = _agent_grep(_text("iperf3_text_client_stalled.txt"))
     assert [line.split()[4:6] for line in lines[3:6]] == [
@@ -342,24 +342,26 @@ def test_progress_skips_intervals_that_moved_nothing():
     h = _text_client(intervals=_GrepFilter(
         _msgs(*lines[:3]), _msgs(*lines[3:6]), _msgs(*lines[6:])))
     moved = round(15.5 * G) + round(15.2 * G) + round(3.00 * G)
-    assert h.progress() == (3, moved)
-    assert h.progress() == (3, moved)     # the stalled intervals
+    assert h.progress() == (3, moved, 3)
+    # the stalled intervals: the total keeps growing, the moving count
+    # and the bytes stay flat
+    assert h.progress() == (3, moved, 6)
     # 12.4 and 15.3 GBytes after SIGCONT, then the summary rows
-    assert h.progress() == (5, moved + round(12.4 * G) + round(15.3 * G))
+    assert h.progress() == (5, moved + round(12.4 * G) + round(15.3 * G), 8)
 
 
 def test_progress_converts_mbytes_of_udp():
     text = _text("iperf3_text_client_udp.txt")
     h = _text_client(intervals=_GrepFilter(_msgs(*_agent_grep(text))))
     sizes = [1.22, 1.22, 1.19, 1.16, 1.19, 1.22]
-    assert h.progress() == (6, sum(round(v * M) for v in sizes))
+    assert h.progress() == (6, sum(round(v * M) for v in sizes), 6)
 
 
 def test_progress_after_close_keeps_the_last_counts():
     lines = _agent_grep(_text("iperf3_text_client_p1.txt"))
     flt = _GrepFilter(_msgs(*lines))
     h = _text_client(intervals=flt)
-    want = (3, 2 * round(12.6 * G) + round(12.5 * G))
+    want = (3, 2 * round(12.6 * G) + round(12.5 * G), 3)
     assert h.progress() == want
     h.close()
 
