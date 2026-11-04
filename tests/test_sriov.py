@@ -125,6 +125,12 @@ def test_enable_vfs_returns_device_oids_in_order(fake_cfg):
     assert fake_cfg.syncs == ["/agent:A/hardware:"]
 
 
+def test_vf_instances_in_index_order(fake_cfg):
+    fake_cfg.add_vfs("0000:03:00.0", 12, reverse=True)
+    assert sriov.vf_instances(PF) == [_fn(i) for i in range(12)]
+    assert fake_cfg.syncs == [] and fake_cfg.adds == []
+
+
 def test_enable_vfs_orders_by_vf_index(fake_cfg):
     _enable_hook(fake_cfg, 12, reverse=True)
     vfs = sriov.enable_vfs(PF, 12)

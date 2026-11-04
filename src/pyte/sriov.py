@@ -102,6 +102,16 @@ def enable_vfs(pci_oid: str, n: int, grab: bool = True) -> list[str]:
     return vfs
 
 
+def vf_instances(pci_oid: str) -> list[str]:
+    """The ``sriov:/vf:<i>`` instance OIDs of the PF, in index order.
+
+    These are the values :func:`enable_vfs` resolves to device OIDs;
+    nothing is created or grabbed here.
+    """
+    entries = sorted(Device(pci_oid).sriov.vf, key=lambda e: int(e.name))
+    return [entry.value for entry in entries]
+
+
 def _held(fn_oid: str) -> bool:
     """Whether the rsrc of :func:`grab_fn` points at ``fn_oid``."""
     agent, name = _fn_rsrc(fn_oid)
