@@ -846,6 +846,11 @@ extern te_errno pyte_env_get_if(tapi_env *env, const char *name,
 extern te_errno pyte_env_get_if_ta(tapi_env *env, const char *name,
                                    char **ta);
 
+/** Kind of the named interface: "netdev", "pci_fn", "pci_fn_netdev",
+ *  "vdev" or "unknown" (malloc'ed). */
+extern te_errno pyte_env_get_if_kind(tapi_env *env, const char *name,
+                                     char **kind);
+
 /** TA name for a host label ("" = the first host declared in the env
  *  string); malloc'ed. */
 extern te_errno pyte_env_get_host_ta(tapi_env *env, const char *name,

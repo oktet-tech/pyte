@@ -17,6 +17,8 @@ class _EnvLib:
     def __init__(self):
         self.calls = []
         self.pco_handle = object()
+        self.kind = b"netdev"
+        self.if_name = b"veth0"
 
     def pyte_env_get_pco(self, h, name, out):
         self.calls.append(("get_pco", h, bytes(name)))
@@ -37,13 +39,18 @@ class _EnvLib:
 
     def pyte_env_get_if(self, h, name, n_out, idx):
         self.calls.append(("get_if", h, bytes(name)))
-        n_out[0] = b"veth0"
+        n_out[0] = self.if_name
         idx[0] = 5
         return 0
 
     def pyte_env_get_if_ta(self, h, name, ta_out):
         self.calls.append(("get_if_ta", h, bytes(name)))
         ta_out[0] = b"Agt_A"
+        return 0
+
+    def pyte_env_get_if_kind(self, h, name, out):
+        self.calls.append(("get_if_kind", h, bytes(name)))
+        out[0] = self.kind
         return 0
 
     def pyte_env_get_host_ta(self, h, name, out):
@@ -127,9 +134,36 @@ def test_env_iface_bridge(monkeypatch):
             captured["args"] = (agent, name)
 
     monkeypatch.setattr("pyte.net.Iface", FakeIface)
-    i = env_mod.EnvIface(name="veth0", index=5, agent="Agt_B")
+    i = env_mod.EnvIface(name="veth0", index=5, agent="Agt_B",
+                         kind="netdev", bdf=None)
     i.cfg_iface()
     assert captured["args"] == ("Agt_B", "veth0")
+
+
+def test_env_iface_kind_and_bdf(monkeypatch):
+    env, lib = _fake_env(monkeypatch)
+    lib.kind = b"pci_fn"
+    lib.if_name = b"0000:03:00.2"
+    i = env.iface("iut_vf0")
+    assert (i.kind, i.bdf) == ("pci_fn", "0000:03:00.2")
+    assert ("get_if_kind", env._h, b"iut_vf0") in lib.calls
+
+
+def test_env_iface_netdev_has_no_bdf(monkeypatch):
+    env, lib = _fake_env(monkeypatch)
+    lib.kind = b"netdev"
+    lib.if_name = b"eth1"
+    i = env.iface("iut")
+    assert (i.name, i.kind, i.bdf) == ("eth1", "netdev", None)
+
+
+def test_env_iface_pci_fn_netdev_bdf_only_when_pci_address(monkeypatch):
+    env, lib = _fake_env(monkeypatch)
+    lib.kind = b"pci_fn_netdev"
+    lib.if_name = b"0000:03:00.0"
+    assert env.iface("a").bdf == "0000:03:00.0"
+    lib.if_name = b"eth2"
+    assert env.iface("a").bdf is None
 
 
 def test_rpc_server_not_owned_skips_destroy_but_clears_handle():

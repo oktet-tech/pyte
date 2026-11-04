@@ -1998,6 +1998,37 @@ pyte_env_get_if_ta(tapi_env *env, const char *name, char **ta)
 }
 
 te_errno
+pyte_env_get_if_kind(tapi_env *env, const char *name, char **kind)
+{
+    const tapi_env_if *eif = NULL;
+    const char *str;
+
+    PYTE_GUARD(eif = tapi_env_get_env_if(env, name));
+    if (eif == NULL)
+        return TE_RC(TE_TAPI, TE_ENOENT);
+    switch (eif->rsrc_type)
+    {
+        case NET_NODE_RSRC_TYPE_INTERFACE:
+            str = "netdev";
+            break;
+        case NET_NODE_RSRC_TYPE_PCI_FN:
+            str = "pci_fn";
+            break;
+        case NET_NODE_RSRC_TYPE_PCI_FN_NETDEV:
+            str = "pci_fn_netdev";
+            break;
+        case NET_NODE_RSRC_TYPE_RTE_VDEV:
+            str = "vdev";
+            break;
+        default:
+            str = "unknown";
+            break;
+    }
+    *kind = strdup(str);
+    return (*kind == NULL) ? TE_RC(TE_TAPI, TE_ENOMEM) : 0;
+}
+
+te_errno
 pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta)
 {
     tapi_env_host *host = NULL;

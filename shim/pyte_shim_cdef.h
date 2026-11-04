@@ -390,6 +390,7 @@ te_errno pyte_env_get_addr(tapi_env *env, const char *name,
 te_errno pyte_env_get_if(tapi_env *env, const char *name, char **ifname,
                          unsigned int *ifindex);
 te_errno pyte_env_get_if_ta(tapi_env *env, const char *name, char **ta);
+te_errno pyte_env_get_if_kind(tapi_env *env, const char *name, char **kind);
 te_errno pyte_env_get_host_ta(tapi_env *env, const char *name, char **ta);
 te_errno pyte_env_get_net_subnet(tapi_env *env, const char *name,
                                  int ipv6, char **subnet,

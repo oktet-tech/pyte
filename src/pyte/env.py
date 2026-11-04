@@ -21,6 +21,7 @@ when the env is freed); destroy() on them is a no-op.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
@@ -31,6 +32,8 @@ from pyte._util import enc as _enc
 
 # Shared impl in pyte._util; the local name stays for callers/tests.
 from pyte._util import take_str as _take_str  # noqa: E402
+
+_BDF_RE = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]")
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,9 @@ class EnvIface:
     name: str        # OS interface name
     index: int       # ifindex
     agent: str       # TA it lives on
+    kind: str        # "netdev" | "pci_fn" | "pci_fn_netdev" | "vdev"
+    #                  | "unknown": what tapi_env bound here
+    bdf: str | None  # PCI address of a pci_fn / pci_fn_netdev, else None
 
     def cfg_iface(self):
         """Bridge to a configurator-backed pyte.net.Iface."""
@@ -192,8 +198,20 @@ class Env:
         ta_out = ffi.new("char **")
         check(lib.pyte_env_get_if_ta(self._handle(), _enc(name), ta_out),
               f"env if {name!r} ta", EnvError)
+        kind_out = ffi.new("char **")
+        check(lib.pyte_env_get_if_kind(self._handle(), _enc(name),
+                                       kind_out),
+              f"env if {name!r} kind", EnvError)
+        kind = _take_str(kind_out)
+        # tapi_env keeps the PCI address of a pci_fn in if_name; a
+        # pci_fn_netdev has a netdev name there, so only a name that
+        # looks like an address counts.
+        bdf = None
+        if kind == "pci_fn" or (kind == "pci_fn_netdev"
+                                and _BDF_RE.fullmatch(ifname)):
+            bdf = ifname
         return EnvIface(name=ifname, index=idx[0],
-                        agent=_take_str(ta_out))
+                        agent=_take_str(ta_out), kind=kind, bdf=bdf)
 
     def host(self, name: str = "") -> str:
         """TA name of the named host ("" = the first host declared in
