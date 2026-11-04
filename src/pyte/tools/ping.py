@@ -26,6 +26,11 @@ faithful-enough deviation (cf. fio's stdout/stderr inversion).
 
 MI (tapi_ping_report_mi_log, only when with_rtt):
     RTT MIN/MEAN/MAX/STDEV in MILLI  ->  Logger.add(Meas.RTT, ..., Mult.MILLI)
+
+replies while running (pyte only; Ping.replies()):
+    "64 bytes from <addr>: icmp_seq=N ..." lines, grepped from stdout
+    -> count so far.  "From <addr> icmp_seq=N Destination Host
+    Unreachable" also carries icmp_seq= and is no reply: not counted.
 """
 from __future__ import annotations
 
@@ -43,6 +48,11 @@ if TYPE_CHECKING:
 # Mirrors TAPI_PING_MIN_PACKET_SIZE_FOR_RTT_STATS (documented; pyte derives
 # with_rtt from output presence rather than this threshold).
 MIN_PACKET_SIZE_FOR_RTT_STATS = 16
+
+#: One reply line up to its sequence number, for the agent's PCRE2
+#: filter (one message per match).  Errors such as "From ...
+#: icmp_seq=1 Destination Host Unreachable" have no "bytes from".
+_REPLY_REGEX = r"\d+ bytes from [^\n]*?icmp_seq=\d+"
 
 
 @dataclass(frozen=True)
@@ -159,11 +169,34 @@ class Ping(_tool.ToolHandle):
     wait() is parse-first and never raises on a parseable run's exit
     status: a normal ping with 100% loss exits non-zero but still
     prints a valid summary (the ``_check_status`` no-op below).
+
+    :meth:`replies` counts the reply lines while ping runs, from the
+    *replies* grep filter run() attaches.
     """
 
     tool = "ping"
     error_cls = PingError
     default_timeout = 60.0
+
+    def __init__(self, job, stdout_filter, replies=None):
+        super().__init__(job, stdout_filter)
+        self._replies = replies
+        self._n_replies = 0
+
+    def replies(self) -> int:
+        """Reply lines seen so far; never blocks.
+
+        Drains the reply lines queued since the last call and adds
+        them to the count.  After close() the job and its filter are
+        gone: the last count is returned as it is.  Raises
+        RuntimeError for a handle made without the reply filter.
+        """
+        if self._replies is None:
+            raise RuntimeError(
+                "ping replies() needs the reply filter run() attaches")
+        if not self._job_destroyed:
+            self._n_replies += len(self._replies.drain())
+        return self._n_replies
 
     def _parse(self, raw: str) -> Report:
         return _parse_report(raw)
@@ -207,9 +240,11 @@ def run(pco: "RpcServer", opts: Opts):
     """
     def _setup(job):
         flt = job.stdout.attach_filter(name="ping_stdout", readable=True)
+        replies = job.stdout.grep(_REPLY_REGEX, name="ping_replies")
         job.stderr.log(level="ERROR")
-        return flt
+        return flt, replies
 
-    job, flt = _tool.launch(pco, "ping", opts.to_argv(), setup=_setup)
-    with _tool.running(Ping(job, flt)) as p:
+    job, (flt, replies) = _tool.launch(pco, "ping", opts.to_argv(),
+                                       setup=_setup)
+    with _tool.running(Ping(job, flt, replies=replies)) as p:
         yield p
