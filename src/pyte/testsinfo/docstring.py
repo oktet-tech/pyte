@@ -7,6 +7,8 @@ themselves with a doxygen header: a one-paragraph objective, then a
 Google-style parameter section.  This module turns the cleaned
 (``ast.get_docstring(..., clean=True)``) text into the two pieces the
 tests-info document needs, and reports the lines it could not place.
+The doxygen filter (``dox``) reads the same pieces with the author's
+line breaks kept, plus the description paragraphs between them.
 
 Nothing here imports anything but the standard library: it runs during
 a suite build, under whatever ``python3`` is on the build host.
@@ -14,6 +16,7 @@ a suite build, under whatever ``python3`` is on the build host.
 from __future__ import annotations
 
 import re
+import textwrap
 
 #: Section headings that introduce parameter entries.  All four
 #: spellings are accepted on purpose: nap-ts test modules say
@@ -112,8 +115,8 @@ def _describe(lines: list[str]) -> str:
     return "\n".join(out)
 
 
-def parameters(doc: str) -> tuple[list[tuple[str, str]], list[str]]:
-    """The documented parameters of a test module.
+def _entries(doc: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
+    """The parameter entries of a docstring, as their source lines.
 
     An entry starts at the section's base indent (the indent of its
     first non-blank line) with ``name:``; every more deeply indented
@@ -124,13 +127,14 @@ def parameters(doc: str) -> tuple[list[tuple[str, str]], list[str]]:
         doc: The cleaned module docstring.
 
     Returns:
-        The (name, description) entries in docstring order, and the
-        findings for lines inside a section that are neither an entry
-        nor a continuation of one.  Duplicates are kept, for the
-        checker to report.
+        The (name, lines) entries in docstring order -- the text after
+        ``name:`` first, then each continuation line with the base
+        indent removed, a blank line as '' -- and the findings for
+        lines inside a section that are neither an entry nor a
+        continuation of one.  Duplicates are kept.
     """
     lines = doc.splitlines()
-    entries: list[tuple[str, str]] = []
+    entries: list[tuple[str, list[str]]] = []
     findings: list[str] = []
     i, n = 0, len(lines)
     while i < n:
@@ -164,8 +168,83 @@ def parameters(doc: str) -> tuple[list[tuple[str, str]], list[str]]:
                     f"malformed line in {heading} section: {line.strip()}")
                 continue
             if name is not None:
-                entries.append((name, _describe(descr)))
+                entries.append((name, descr))
             name, descr = match.group(1), [match.group(2)]
         if name is not None:
-            entries.append((name, _describe(descr)))
+            entries.append((name, descr))
     return entries, findings
+
+
+def parameters(doc: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """The documented parameters of a test module.
+
+    The section layout is the one ``_entries`` reads.  Each
+    description is filled for the log (see ``_describe``).
+
+    Args:
+        doc: The cleaned module docstring.
+
+    Returns:
+        The (name, description) entries in docstring order, and the
+        findings for lines inside a section that are neither an entry
+        nor a continuation of one.  Duplicates are kept, for the
+        checker to report.
+    """
+    entries, findings = _entries(doc)
+    return [(name, _describe(descr)) for name, descr in entries], findings
+
+
+def parameters_raw(doc: str) -> list[tuple[str, str]]:
+    """The documented parameters with their own line breaks.
+
+    The doxygen filter's counterpart of ``parameters``: a source file
+    is meant to be read, so the description keeps the author's
+    wrapping instead of being filled.  The continuation lines lose
+    their common indent, so a ``Fields:`` line and the list under it
+    come out flush with each other and a wrapped list item keeps its
+    hanging indent.  Leading and trailing blank lines go; a blank line
+    inside the description stays as ''.
+
+    Args:
+        doc: The cleaned module docstring.
+
+    Returns:
+        The (name, description) entries in docstring order.  Lines
+        that belong to no entry are left out; ``parameters`` reports
+        them.
+    """
+    out: list[tuple[str, str]] = []
+    for name, descr in _entries(doc)[0]:
+        rest = textwrap.dedent("\n".join(descr[1:])).split("\n")
+        text = "\n".join(line.rstrip() for line in [descr[0], *rest])
+        out.append((name, text.strip("\n")))
+    return out
+
+
+def description(doc: str) -> str:
+    """The paragraphs between the objective and the parameters.
+
+    What the C tests write between ``@objective`` and ``@param``.  The
+    objective paragraph ends where ``objective`` ends it, at a blank
+    line or a parameter section heading; the description runs from
+    there to the first heading, or to the end of the docstring when
+    there is none.  Text after a parameter section is not part of it.
+
+    Args:
+        doc: The cleaned module docstring.
+
+    Returns:
+        The description as written, its lines and blank lines kept,
+        leading and trailing blank lines dropped; '' when there is
+        none.
+    """
+    lines = doc.splitlines()
+    i, n = 0, len(lines)
+    while i < n and lines[i].strip() and not _is_heading(lines[i]):
+        i += 1
+    out: list[str] = []
+    for line in lines[i:]:
+        if _is_heading(line):
+            break
+        out.append(line.rstrip())
+    return "\n".join(out).strip("\n")
