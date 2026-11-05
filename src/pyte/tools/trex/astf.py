@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator
 
-from pyte import log
+from pyte import log, mi
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
 from pyte.process import Process
@@ -45,6 +45,33 @@ WAIT_MARGIN = 30.0
 
 #: Decade thresholds and prefixes for :func:`_rate`, largest first.
 _SI_STEPS = ((1e9, "G"), (1e6, "M"), (1e3, "K"), (1.0, ""))
+
+#: MI tool name :meth:`Client.mi_health` publishes under. Its own
+#: tool rather than a section of the run's throughput one: these are
+#: "did the traffic get hurt" counters, and a reader comparing runs
+#: wants them separable from the rates.
+MI_HEALTH_TOOL = "trex-astf-health"
+
+#: Client-side counters :meth:`Client.mi_health` publishes on every
+#: run, zero or not, as (counter name, MI measurement name).
+#:
+#: Always emitting them, rather than only when non-zero, is what makes
+#: them trendable: a measurement that appears only on the runs where
+#: it fired has no baseline to be compared against, so the run where
+#: it first fires looks like new data rather than like a regression.
+#: A flat line at zero that suddenly lifts is the whole point.
+#:
+#: These are the counters that say the traffic was damaged, not the
+#: ones that say how much of it there was -- volume is already
+#: published as throughput measurements by the suites.
+MI_HEALTH_COUNTERS = (
+    ("tcps_testdrops", "Connections dropped at timeout"),
+    ("tcps_conndrops", "Embryonic connections dropped"),
+    ("tcps_drops", "Connections dropped"),
+    ("tcps_rexmttimeo", "Retransmit timeouts"),
+    ("tcps_sndrexmitpack", "Packets retransmitted"),
+    ("udps_keepdrops", "UDP flows dropped"),
+)
 
 
 def _op_detail(name: str, args: tuple) -> str:
@@ -98,6 +125,7 @@ class Client:
         self._tmp_dir = tmp_dir
         self._profile = None
         self._tg_names: list[str] | None = None
+        self._counter_desc: dict | None = None
 
     def _call(self, fn, *args, timeout=None):
         """Ship one op-function, translating remote failures to TrexError.
@@ -213,6 +241,78 @@ class Client:
                 continue
         return out
 
+    def counter_desc(self) -> dict:
+        """TRex's own descriptors for the traffic counters, cached.
+
+        Fetched once per Client, like the template-group names: the
+        native client holds them for the life of its connection. An
+        empty mapping is cached too -- a TRex that does not surface
+        them will not start doing so mid-run, and asking again every
+        summary would trade a readable table for nothing.
+
+        Never raises. Descriptors decorate a diagnostic; a run that
+        measured what it was asked to measure must not fail because
+        the help text for its counters could not be fetched.
+        """
+        if self._counter_desc is None:
+            try:
+                raw = self._call(_ops.get_counter_desc)
+            except TrexError as exc:
+                log.warn(f"could not read TRex counter descriptions, "
+                         f"the counter table loses its help column "
+                         f"and its error marking: {exc}")
+                raw = []
+            self._counter_desc = _stats.parse_counter_desc(raw)
+        return self._counter_desc
+
+    def log_counters(self, traffic: _stats.AstfTraffic | None = None,
+                     skip_zero: bool = True) -> None:
+        """RING both sides' counters as a table, TRex's own layout.
+
+        In its own step bracket, so a hundred-odd rows collapse in RGT
+        rather than burying the summary they follow.
+
+        Pass ``traffic`` to render a snapshot already in hand; without
+        it one is fetched. The batch driver gets this for free by
+        RINGing TRex's raw stdout, which the interactive server never
+        writes -- every one of these counters crosses as RPC instead,
+        and until this existed they were fetched, reduced to a handful
+        of scalars and then dropped.
+        """
+        traffic = self.get_traffic() if traffic is None else traffic
+        text = _stats.format_counters(traffic, self.counter_desc(),
+                                      skip_zero=skip_zero)
+        log.step_push("ASTF counters")
+        log.ring(text or "every counter is zero")
+        log.step_pop("counters logged")
+
+    def mi_health(self, traffic: _stats.AstfTraffic | None = None,
+                  tool: str = MI_HEALTH_TOOL) -> None:
+        """Publish the run's health counters as MI measurements.
+
+        :data:`MI_HEALTH_COUNTERS` by name, always, plus one total
+        over every error counter of either side. The total is what
+        keeps the set honest: a TRex version that adds an error
+        counter nobody here listed still moves a number that has a
+        history behind it, instead of firing only into the log table.
+
+        Separate from :meth:`log_summary` on purpose. The table and
+        the summary are diagnostics a reader reaches for; these
+        measurements are part of the test's result, so which tests
+        publish them -- and under which tool name -- stays the
+        suite's decision.
+        """
+        traffic = self.get_traffic() if traffic is None else traffic
+        errors = traffic.flow_table_errors(self.counter_desc())
+        with mi.Logger(tool) as logger:
+            for name, label in MI_HEALTH_COUNTERS:
+                logger.add(mi.Meas.UNITLESS, label, mi.Aggr.SINGLE,
+                           float(traffic.client.get(name, 0)),
+                           mi.Mult.PLAIN)
+            logger.add(mi.Meas.UNITLESS, "Error counters (total)",
+                       mi.Aggr.SINGLE, float(sum(errors.values())),
+                       mi.Mult.PLAIN)
+
     def get_template_stats(self) -> list[_stats.TemplateStats]:
         if self._tg_names is None:
             self._tg_names = self._call(_ops.get_tg_names)
@@ -289,7 +389,7 @@ class Client:
             log.ring(f"latency port {port}: avg {lat.avg:.1f}us, "
                      f"max {lat.max:.1f}us, jitter {lat.jitter:.1f}us, "
                      f"p95 {lat.percentile(95):.1f}us")
-        errs = traffic.flow_table_errors()
+        errs = traffic.flow_table_errors(self.counter_desc())
         if errs:
             for name in sorted(errs):
                 log.warn(f"flow table error {name}: {errs[name]}")
@@ -297,6 +397,7 @@ class Client:
             log.ring("flow table errors: none")
         for tmpl in self.get_template_stats():
             log.ring(f"template {tmpl.name}: {tmpl.counters}")
+        self.log_counters(traffic)
         log.step_pop("summary logged")
 
 

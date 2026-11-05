@@ -266,6 +266,35 @@ def get_traffic_stats(cli):
     return cli.get_traffic_stats(skip_zero=False)
 
 
+def get_counter_desc(cli):
+    """Per-counter descriptors: name, help text and info class.
+
+    The native client fetches these once over its own
+    'get_counter_desc' RPC and keeps them in traffic_stats._desc,
+    indexed by counter id, populated by the first stats call. Reading
+    that cache rather than re-issuing the RPC keeps this free and
+    leaves one source of truth for what the counters are.
+
+    Returns a list of {"name", "help", "info"} dictionaries. A client
+    that keeps them somewhere else -- an older or newer TRex -- gets
+    an empty list, because the caller's table degrades to three
+    columns while a raised exception would take a healthy test with
+    it.
+    """
+    try:
+        desc = cli.traffic_stats._desc
+    except Exception:
+        return []
+    out = []
+    for item in desc or []:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        out.append({"name": item.get("name"),
+                    "help": item.get("help", ""),
+                    "info": item.get("info", "")})
+    return out
+
+
 def get_latency_stats(cli):
     """Latency counters; empty dict when no latency stream ran."""
     try:

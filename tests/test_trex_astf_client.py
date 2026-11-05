@@ -515,3 +515,147 @@ def test_bringup_failure_survives_a_failing_cleanup(server_fakes,
     # ...and the entry is still gone, so nothing is leaked for an
     # epilogue that will never be told about it.
     assert server_fakes.state["exists"] is False
+
+
+# ---------------------------------------------------------------------------
+# counter_desc / log_counters / mi_health
+# ---------------------------------------------------------------------------
+
+_DESC = [{"name": "tcps_connattempt", "help": "connections initiated",
+          "info": "info"},
+         {"name": "err_no_syn", "help": "no SYN", "info": "error"}]
+
+
+def _counting_remote(**results):
+    results.setdefault("get_counter_desc", _DESC)
+    results.setdefault("get_tg_names", [])
+    return FakeRemote(results=results)
+
+
+def test_counter_desc_is_fetched_once_and_cached(fake_shim):
+    rem = _counting_remote()
+    c = _client(rem)
+    assert c.counter_desc()["err_no_syn"].is_error
+    c.counter_desc()
+    c.counter_desc()
+    assert [n for n, _ in rem.calls].count("get_counter_desc") == 1
+
+
+def test_counter_desc_caches_an_empty_answer_too(fake_shim):
+    """A TRex that does not surface them will not start mid-run."""
+    rem = _counting_remote(get_counter_desc=[])
+    c = _client(rem)
+    assert c.counter_desc() == {}
+    c.counter_desc()
+    assert [n for n, _ in rem.calls].count("get_counter_desc") == 1
+
+
+def test_counter_desc_failure_warns_and_does_not_raise(fake_shim):
+    """A run that measured what it was asked to measure must not fail
+    because the help text for its counters could not be fetched."""
+    rem = FakeRemote(raises={"get_counter_desc": "no such attribute"})
+    c = _client(rem)
+    assert c.counter_desc() == {}
+    warns = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_WARN))
+    assert "counter description" in warns
+
+
+def test_log_counters_rings_a_table_with_the_help_text(fake_shim):
+    rem = _counting_remote(get_traffic_stats={
+        "client": {"tcps_connattempt": 25519}, "server": {}})
+    _client(rem).log_counters()
+    rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
+    assert "tcps_connattempt" in rings
+    assert "25519" in rings
+    assert "connections initiated" in rings
+
+
+def test_log_counters_says_so_when_every_counter_is_zero(fake_shim):
+    rem = _counting_remote(get_traffic_stats={"client": {}, "server": {}})
+    _client(rem).log_counters()
+    rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
+    assert "every counter is zero" in rings
+
+
+def test_log_counters_uses_a_snapshot_it_is_given(fake_shim):
+    """log_summary() renders the table from the same traffic its
+    scalars came from, so the two cannot disagree about a run that is
+    still moving."""
+    rem = _counting_remote()
+    c = _client(rem)
+    c.log_counters(astf._stats.AstfTraffic(
+        client={"tcps_connattempt": 7}, server={}))
+    assert "get_traffic_stats" not in [n for n, _ in rem.calls]
+    assert "7" in "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
+
+
+def test_log_summary_ends_with_the_counter_table(fake_shim):
+    rem = _counting_remote(get_traffic_stats={
+        "client": {"tcps_connattempt": 30}, "server": {}},
+        get_latency_stats={})
+    c = _client(rem)
+    c.log_summary(astf._stats.Series(), 0.0, 1.0)
+    rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
+    assert "connections initiated" in rings
+
+
+def test_log_summary_fetches_the_traffic_once(fake_shim):
+    """The table must not cost a second RPC round trip."""
+    rem = _counting_remote(get_traffic_stats={"client": {}, "server": {}},
+                           get_latency_stats={})
+    c = _client(rem)
+    c.log_summary(astf._stats.Series(), 0.0, 1.0)
+    assert [n for n, _ in rem.calls].count("get_traffic_stats") == 1
+
+
+def test_mi_health_publishes_every_named_counter_even_at_zero(
+        fake_shim, mi_logger, monkeypatch):
+    monkeypatch.setattr(astf.mi, "Logger", mi_logger)
+    rem = _counting_remote(get_traffic_stats={
+        "client": {"tcps_drops": 4}, "server": {}})
+    _client(rem).mi_health()
+    logger, = mi_logger.registry
+    assert logger.tool == astf.MI_HEALTH_TOOL
+    names = [name for _, name, _, _, _ in logger.adds]
+    for _, label in astf.MI_HEALTH_COUNTERS:
+        assert label in names
+    values = {name: value for _, name, _, value, _ in logger.adds}
+    assert values["Connections dropped"] == 4.0
+    assert values["Retransmit timeouts"] == 0.0
+
+
+def test_mi_health_totals_the_error_counters_of_both_sides(
+        fake_shim, mi_logger, monkeypatch):
+    monkeypatch.setattr(astf.mi, "Logger", mi_logger)
+    rem = _counting_remote(get_traffic_stats={
+        "client": {"err_no_syn": 3}, "server": {"err_cwf": 4}})
+    _client(rem).mi_health()
+    logger, = mi_logger.registry
+    values = {name: value for _, name, _, value, _ in logger.adds}
+    assert values["Error counters (total)"] == 7.0
+
+
+def test_mi_health_total_counts_an_error_only_trex_can_name(
+        fake_shim, mi_logger, monkeypatch):
+    """The total is what keeps the fixed set honest: a counter named
+    nothing like an error still moves a number that has a history."""
+    monkeypatch.setattr(astf.mi, "Logger", mi_logger)
+    rem = _counting_remote(
+        get_counter_desc=[{"name": "tcps_rcvbadsum", "help": "bad sum",
+                           "info": "error"}],
+        get_traffic_stats={"client": {"tcps_rcvbadsum": 9}, "server": {}})
+    _client(rem).mi_health()
+    logger, = mi_logger.registry
+    values = {name: value for _, name, _, value, _ in logger.adds}
+    assert values["Error counters (total)"] == 9.0
+
+
+def test_mi_health_is_not_published_by_log_summary(
+        fake_shim, mi_logger, monkeypatch):
+    """Which tests publish measurements, and under which tool name,
+    stays the suite's decision; log_summary is a diagnostic."""
+    monkeypatch.setattr(astf.mi, "Logger", mi_logger)
+    rem = _counting_remote(get_traffic_stats={"client": {}, "server": {}},
+                           get_latency_stats={})
+    _client(rem).log_summary(astf._stats.Series(), 0.0, 1.0)
+    assert mi_logger.registry == []

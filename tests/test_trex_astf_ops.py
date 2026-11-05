@@ -12,10 +12,22 @@ import pytest
 from pyte.tools.trex import _astf_ops as ops
 
 
+class FakeTrafficStats:
+    """The native client's stats helper, which caches the descriptors.
+
+    ``_desc`` is indexed by counter id and pre-filled with zeroes, so
+    the padding below is what a sparse id space really looks like.
+    """
+
+    def __init__(self, desc=None):
+        self._desc = desc
+
+
 class FakeCli:
-    def __init__(self):
+    def __init__(self, desc=None):
         self.calls = []
         self.stats = {"global": {"active_flows": 7}}
+        self.traffic_stats = FakeTrafficStats(desc)
 
     def reset(self):
         self.calls.append(("reset",))
@@ -269,3 +281,36 @@ def test_write_profile_then_remove_file_round_trip():
         assert f.read() == "print(1)\n"
     assert ops.remove_file(path) == {"removed": True}
     assert ops.remove_file(path) == {"removed": False}
+
+
+# ---------------------------------------------------------------------------
+# get_counter_desc
+# ---------------------------------------------------------------------------
+
+def test_get_counter_desc_reads_the_clients_cache():
+    cli = FakeCli(desc=[{"name": "tcps_connects", "id": 0,
+                         "help": "connections established",
+                         "info": "info", "abs": True}])
+    assert ops.get_counter_desc(cli) == [
+        {"name": "tcps_connects", "help": "connections established",
+         "info": "info"}]
+
+
+def test_get_counter_desc_drops_the_id_padding():
+    cli = FakeCli(desc=[0, {"name": "a", "help": "h", "info": "error"}, 0])
+    assert ops.get_counter_desc(cli) == [
+        {"name": "a", "help": "h", "info": "error"}]
+
+
+def test_get_counter_desc_of_an_unpopulated_cache_is_empty():
+    """The cache fills on the first stats call, not at connect."""
+    assert ops.get_counter_desc(FakeCli()) == []
+
+
+def test_get_counter_desc_survives_a_client_without_the_attribute():
+    """A TRex keeping its descriptors elsewhere must cost the caller a
+    help column, not a test."""
+    class Bare:
+        pass
+
+    assert ops.get_counter_desc(Bare()) == []

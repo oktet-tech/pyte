@@ -182,3 +182,197 @@ def _g(active):
 
 def _empty():
     return st.AstfTraffic(client={}, server={})
+
+
+# ---------------------------------------------------------------------------
+# Counter descriptors
+# ---------------------------------------------------------------------------
+
+def _desc(*items):
+    """Descriptors as get_counter_desc() ships them, parsed."""
+    return st.parse_counter_desc(
+        [{"name": n, "help": h, "info": i} for n, h, i in items])
+
+
+def test_parse_counter_desc_keys_by_name():
+    d = _desc(("tcps_connects", "connections established", "info"))
+    assert d["tcps_connects"].help == "connections established"
+    assert d["tcps_connects"].is_error is False
+
+
+def test_parse_counter_desc_marks_the_error_class():
+    assert _desc(("err_no_syn", "no SYN", "error"))["err_no_syn"].is_error
+
+
+def test_parse_counter_desc_drops_the_id_padding():
+    """The native client pre-fills its descriptor list with zeroes and
+    indexes it by counter id, so a sparse id space leaves integers
+    among the dictionaries."""
+    d = st.parse_counter_desc([0, {"name": "a", "help": "", "info": ""},
+                               0, {"name": "", "help": "x"}])
+    assert list(d) == ["a"]
+
+
+def test_parse_counter_desc_of_nothing_is_empty():
+    assert st.parse_counter_desc(None) == {}
+    assert st.parse_counter_desc([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# flow_table_errors() with descriptors
+# ---------------------------------------------------------------------------
+
+def test_descriptors_add_an_error_the_prefix_rule_would_miss():
+    t = st.AstfTraffic(client={"tcps_rcvbadsum": 3}, server={})
+    assert t.flow_table_errors() == {}
+    d = _desc(("tcps_rcvbadsum", "bad checksum", "error"))
+    assert t.flow_table_errors(d) == {"tcps_rcvbadsum": 3}
+
+
+def test_descriptors_never_hide_an_error_the_prefix_rule_caught():
+    # The union is the point: a descriptor set that classifies
+    # err_no_syn as merely informational must not suppress it.
+    t = st.AstfTraffic(client={"err_no_syn": 7}, server={})
+    d = _desc(("err_no_syn", "no SYN", "info"))
+    assert t.flow_table_errors(d) == {"err_no_syn": 7}
+
+
+def test_errors_sum_both_sides():
+    t = st.AstfTraffic(client={"err_cwf": 2}, server={"err_cwf": 5})
+    assert t.flow_table_errors() == {"err_cwf": 7}
+
+
+# ---------------------------------------------------------------------------
+# format_counters()
+# ---------------------------------------------------------------------------
+
+def test_format_counters_has_a_row_per_counter_and_a_header():
+    t = st.AstfTraffic(client={"tcps_connects": 5},
+                       server={"tcps_accepts": 4})
+    out = st.format_counters(t)
+    assert "client" in out.splitlines()[0]
+    assert "server" in out.splitlines()[0]
+    rows = [ln for ln in out.splitlines() if "tcps_" in ln]
+    assert len(rows) == 2
+
+
+def test_format_counters_shows_a_counter_absent_from_one_side_as_zero():
+    t = st.AstfTraffic(client={"tcps_connects": 5}, server={})
+    row = [ln for ln in st.format_counters(t).splitlines()
+           if "tcps_connects" in ln][0]
+    assert row.split("|")[1].strip() == "5"
+    assert row.split("|")[2].strip() == "0"
+
+
+def test_format_counters_skips_zero_rows_by_default():
+    t = st.AstfTraffic(client={"tcps_connects": 5, "tcps_drops": 0},
+                       server={})
+    out = st.format_counters(t)
+    assert "tcps_connects" in out
+    assert "tcps_drops" not in out
+
+
+def test_format_counters_keeps_zero_rows_when_asked():
+    t = st.AstfTraffic(client={"tcps_drops": 0}, server={})
+    assert "tcps_drops" in st.format_counters(t, skip_zero=False)
+
+
+def test_format_counters_always_shows_a_zero_error_counter():
+    """A zero error counter is the evidence that the error did not
+    happen; a zero data counter is noise."""
+    t = st.AstfTraffic(client={"err_no_syn": 0, "tcps_drops": 0},
+                       server={})
+    out = st.format_counters(t, _desc(("err_no_syn", "no SYN", "error")))
+    assert "err_no_syn" in out
+    assert "tcps_drops" not in out
+
+
+def test_format_counters_marks_error_rows():
+    t = st.AstfTraffic(client={"err_no_syn": 3, "tcps_connects": 1},
+                       server={})
+    out = st.format_counters(t, _desc(("err_no_syn", "no SYN", "error"),
+                                      ("tcps_connects", "est", "info")))
+    marked = [ln for ln in out.splitlines() if ln.startswith("!")]
+    assert len(marked) == 1
+    assert "err_no_syn" in marked[0]
+
+
+def test_format_counters_appends_the_help_text():
+    t = st.AstfTraffic(client={"tcps_connattempt": 9}, server={})
+    out = st.format_counters(
+        t, _desc(("tcps_connattempt", "connections initiated", "info")))
+    assert out.rstrip().endswith("connections initiated")
+
+
+def test_format_counters_without_descriptors_drops_the_help_column():
+    """An unexpected TRex still gets a readable table."""
+    t = st.AstfTraffic(client={"tcps_connattempt": 9}, server={})
+    row = [ln for ln in st.format_counters(t).splitlines()
+           if "tcps_connattempt" in ln][0]
+    assert row.rstrip().endswith("|")
+    assert not row.startswith("!")
+
+
+def test_format_counters_excludes_the_section_header_keys():
+    """get_traffic_stats() mixes in always-zero separator keys that
+    are not counters at all."""
+    t = st.AstfTraffic(client={"TCP": 0, "-": 0, "Flow Table": 0,
+                               "tcps_connects": 1}, server={})
+    out = st.format_counters(t, skip_zero=False)
+    assert "tcps_connects" in out
+    for key in st.NON_COUNTER_KEYS:
+        assert not any(ln.strip().startswith(key + " ")
+                       for ln in out.splitlines())
+
+
+def test_format_counters_groups_the_families_in_order():
+    t = st.AstfTraffic(
+        client={"m_active_flows": 1, "tcps_connects": 1,
+                "udps_connects": 1, "err_cwf": 1, "redirect_rx_ok": 1},
+        server={})
+    seen = [ln.split("|")[0].strip() for ln in
+            st.format_counters(t).splitlines()[1:] if ln.strip()]
+    assert seen == ["m_active_flows", "tcps_connects", "udps_connects",
+                    "err_cwf", "redirect_rx_ok"]
+
+
+def test_format_counters_separates_families_with_a_blank_line():
+    t = st.AstfTraffic(client={"m_active_flows": 1, "tcps_connects": 1},
+                       server={})
+    assert "" in st.format_counters(t).splitlines()
+
+
+def test_format_counters_renders_floats_with_two_decimals():
+    """The m_ family is bandwidths and rates, which round to a
+    useless 0 or 100 as integers."""
+    t = st.AstfTraffic(client={"m_tx_bw_l7_r": 51525.74257425742},
+                       server={})
+    assert "51525.74" in st.format_counters(t)
+
+
+def test_format_counters_of_nothing_is_empty():
+    assert st.format_counters(st.AstfTraffic(client={}, server={})) == ""
+    assert st.format_counters(
+        st.AstfTraffic(client={"tcps_drops": 0}, server={})) == ""
+
+
+def test_format_counters_columns_line_up():
+    t = st.AstfTraffic(client={"m_active_flows": 1, "tcps_connects": 1000},
+                       server={"tcps_connects": 2})
+    lines = [ln for ln in st.format_counters(t).splitlines() if ln.strip()]
+    positions = {tuple(i for i, ch in enumerate(ln) if ch == "|")
+                 for ln in lines}
+    assert len(positions) == 1
+
+
+def test_format_counters_renders_the_real_trex_capture():
+    """End to end on the TRex 3.06 fixture rather than on hand-made
+    dictionaries."""
+    t = st.parse_traffic(_load("astf_traffic.json"))
+    out = st.format_counters(t)
+    assert "tcps_connattempt" in out
+    assert "m_active_flows" in out
+    # 136 client connection attempts, no server-side ones.
+    row = [ln for ln in out.splitlines() if "tcps_connattempt" in ln][0]
+    assert row.split("|")[1].strip() == "136"
+    assert row.split("|")[2].strip() == "0"

@@ -36,6 +36,38 @@ FLOW_TABLE_ERR_NAMES = (
     "err_redirect_rx", "err_rx_throttled", "err_s_nf_throttled",
 )
 
+#: Keys get_traffic_stats() returns that are not counters. TRex's own
+#: table uses them as section separators -- they are the "---" rows --
+#: and their value is always zero, so they would survive a non-zero
+#: filter only to be rendered as counters that never count anything.
+NON_COUNTER_KEYS = frozenset({"-", "Application", "Flow Table",
+                              "TCP", "UDP"})
+
+#: Counter-name prefixes in the order :func:`format_counters` groups
+#: them. A name matching none of these is grouped after all of them.
+FAMILY_ORDER = ("m_", "tcps_", "udps_", "err_")
+
+
+@dataclass(frozen=True)
+class CounterDesc:
+    """What TRex says one of its traffic counters is.
+
+    The server publishes a descriptor per counter (its
+    'get_counter_desc' RPC): the name the stats dictionaries are keyed
+    by, the one-line help text its own table prints in the right-hand
+    column, and an ``info`` class of "info", "warning" or "error".
+    That last field is TRex's own answer to "is this counter a
+    problem", which is worth more than guessing from the name.
+    """
+
+    name: str
+    help: str
+    info: str
+
+    @property
+    def is_error(self) -> bool:
+        return self.info == "error"
+
 
 @dataclass(frozen=True)
 class AstfGlobal:
@@ -93,7 +125,8 @@ class AstfTraffic:
         attempts = self.connect_attempts
         return 100.0 * self.drops / attempts if attempts else 0.0
 
-    def flow_table_errors(self) -> dict[str, int]:
+    def flow_table_errors(self, desc: dict | None = None
+                          ) -> dict[str, int]:
         """The non-zero flow-table error counters, either side.
 
         Matches every key (from either side's dictionary) whose name
@@ -106,11 +139,23 @@ class AstfTraffic:
         "Flow Table", "TCP", "UDP") that never match the "err_"
         prefix and are excluded by construction, not by the non-zero
         check alone.
+
+        ``desc`` is a name -> :class:`CounterDesc` mapping from
+        :func:`parse_counter_desc`. It only ever *adds* names: a
+        counter TRex itself marks ``info == "error"`` is reported even
+        if it is named nothing like an error, while everything the
+        prefix rule already caught stays caught. Which means passing
+        descriptors can never hide an error this reported without
+        them -- the reason the two rules are unioned rather than the
+        better one replacing the worse.
         """
+        desc = desc or {}
         names = sorted(set(self.client) | set(self.server))
         out = {}
         for name in names:
-            if name != "rss_redirect_drops" and \
+            entry = desc.get(name)
+            if not (entry is not None and entry.is_error) and \
+                    name != "rss_redirect_drops" and \
                     not name.startswith("err_"):
                 continue
             value = int(self.client.get(name, 0)) + \
@@ -282,3 +327,108 @@ def parse_tg_stats(raw: dict) -> list[TemplateStats]:
     """Build per-template-group stats from get_traffic_tg_stats()."""
     return [TemplateStats(name=name, counters=dict(counters))
             for name, counters in sorted(raw.items())]
+
+
+def parse_counter_desc(raw) -> dict[str, CounterDesc]:
+    """Build a name -> CounterDesc mapping from get_counter_desc().
+
+    Entries without a name are dropped: the native client stores its
+    descriptor list indexed by counter id and pre-fills it with
+    zeroes, so a sparse id space leaves integers among the
+    dictionaries. A malformed or absent list yields an empty mapping
+    rather than an error -- every caller treats descriptors as an
+    enrichment, never as data it cannot proceed without.
+    """
+    out = {}
+    for item in raw or ():
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", ""))
+        if not name:
+            continue
+        out[name] = CounterDesc(name=name,
+                                help=str(item.get("help", "")),
+                                info=str(item.get("info", "")))
+    return out
+
+
+def _family_index(name: str) -> int:
+    """Which FAMILY_ORDER group ``name`` belongs to; last if none."""
+    for i, prefix in enumerate(FAMILY_ORDER):
+        if name.startswith(prefix):
+            return i
+    return len(FAMILY_ORDER)
+
+
+def _counter_value(value) -> str:
+    """One counter's value as the table prints it.
+
+    Floats keep two decimals -- the m_* family is bandwidths, packet
+    rates and a traffic duration, all of which round to a useless 0 or
+    100 as integers. Anything neither float nor int-able is printed as
+    itself rather than guessed at.
+    """
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def format_counters(traffic: AstfTraffic,
+                    desc: dict | None = None,
+                    skip_zero: bool = True) -> str:
+    """Render both sides' counters the way TRex's own table does.
+
+    Four columns -- name, client, server, help -- with the families
+    (m_, tcps_, udps_, err_, then anything else) separated by a blank
+    line and sorted by name within each.
+
+    A counter TRex marks ``info == "error"`` is flagged with "!" in
+    the left margin and printed even when zero, which is the one
+    exception to ``skip_zero``: a zero error counter is the evidence
+    that the error did not happen, while a zero data counter is
+    noise. Everything else is dropped when both sides read zero.
+
+    ``desc`` is a name -> :class:`CounterDesc` mapping from
+    :func:`parse_counter_desc`. Without it the help column and the
+    error marking are dropped rather than guessed at, so an
+    unexpected TRex still renders a readable three-column table.
+
+    Returns "" when no row survives the filter, so a caller can say
+    so in one line instead of logging a bare header.
+    """
+    desc = desc or {}
+    rows = []
+    for name in (set(traffic.client) | set(traffic.server)
+                 ) - NON_COUNTER_KEYS:
+        entry = desc.get(name)
+        is_error = entry is not None and entry.is_error
+        clt = traffic.client.get(name, 0)
+        srv = traffic.server.get(name, 0)
+        if skip_zero and not is_error and not clt and not srv:
+            continue
+        rows.append((_family_index(name), name, _counter_value(clt),
+                     _counter_value(srv),
+                     entry.help if entry is not None else "", is_error))
+    if not rows:
+        return ""
+
+    rows.sort(key=lambda r: (r[0], r[1]))
+    w_name = max(len(r[1]) for r in rows)
+    w_clt = max([len("client")] + [len(r[2]) for r in rows])
+    w_srv = max([len("server")] + [len(r[3]) for r in rows])
+
+    header = (f"  {'':>{w_name}} | {'client':>{w_clt}} | "
+              f"{'server':>{w_srv}} |")
+    out = [header]
+    family = None
+    for index, name, clt, srv, help_, is_error in rows:
+        if family is not None and index != family:
+            out.append("")
+        family = index
+        line = (f"{'!' if is_error else ' '} {name:>{w_name}} | "
+                f"{clt:>{w_clt}} | {srv:>{w_srv}} |")
+        out.append(f"{line}  {help_}" if help_ else line)
+    return "\n".join(out)
