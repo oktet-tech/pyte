@@ -164,6 +164,16 @@ def test_render_param_with_a_blank_line_is_a_parblock():
     ]
 
 
+def test_render_empty_param_is_bare():
+    # A parblock around nothing makes doxygen warn about a missing
+    # @endparblock.
+    out = render("g", "p", "T", "T", "", [("empty", ""), ("env", "Text.")],
+                 [], None)
+    lines = out.splitlines()
+    assert lines[6:8] == [" * @param empty", " * @param env   Text."]
+    assert "parblock" not in out
+
+
 def test_render_scenario_nests(tmp_path):
     lines = document(_write(tmp_path), "demo-hello", "demo").splitlines()
     idx = lines.index(" * @par Scenario:")
@@ -224,6 +234,23 @@ def test_render_never_opens_or_closes_the_comment():
     assert out.splitlines()[0] == "/** @defgroup g Glob /sys/ * /x"
     assert " * See `/sys/class/net/ * /device` / * here * /" in out
     assert " *    -# Read /sys/ * /speed" in out
+
+
+def test_render_escapes_double_and_triple_dashes():
+    # Doxygen prints -- as an en dash and --- as an em dash; longer
+    # runs are rules and stay, and a code span shows them as written.
+    out = render("g", "p", "T", "T",
+                 "pass --<option> or --- here, `--x` in code,\n"
+                 "a - b\n----",
+                 [("env", "as --<option>")], [(1, "Run testpmd --txq=2")],
+                 None)
+    lines = out.splitlines()
+    assert (" * pass \\-\\-\\<option\\> or \\-\\-\\- here, "
+            "`--x` in code,") in lines
+    assert " * a - b" in lines
+    assert " * ----" in lines
+    assert " * @param env as \\-\\-\\<option\\>" in lines
+    assert " *    -# Run testpmd \\-\\-txq=2" in lines
 
 
 def test_render_title_is_left_raw():

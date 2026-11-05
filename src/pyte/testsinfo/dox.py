@@ -49,6 +49,12 @@ _CODE = re.compile(r"(`+).*?\1", re.DOTALL)
 #: gets doxygen's backslash escape.
 _SPECIAL = re.compile(r"[\\@&<>#%]")
 
+#: A run of two or three dashes, which doxygen prints as an en or an em
+#: dash: ``--<option>`` would read as a one-dash option.  Each dash of
+#: it gets the backslash escape.  Longer runs are left alone, as they
+#: are markdown rules and table separators.
+_DASHES = re.compile(r"(?<!-)-{2,3}(?!-)")
+
 #: Where a ``/`` and a ``*`` touch.  The output is a C comment, so
 #: ``*/`` in a docstring (a sysfs glob, say) would close it early and
 #: ``/*`` opens a nested one doxygen warns about.  Neither has an
@@ -65,15 +71,21 @@ def _uncomment(text: str) -> str:
     return _COMMENT_TOKEN.sub(" ", text)
 
 
+def _literal(text: str) -> str:
+    """Prose made literal for doxygen: markup characters, dash runs."""
+    text = _SPECIAL.sub(r"\\\g<0>", text)
+    return _DASHES.sub(lambda match: "\\-" * len(match.group(0)), text)
+
+
 def _escape(text: str) -> str:
     """Docstring text made literal for doxygen, code spans left alone."""
     out: list[str] = []
     pos = 0
     for match in _CODE.finditer(text):
-        out.append(_SPECIAL.sub(r"\\\g<0>", text[pos:match.start()]))
+        out.append(_literal(text[pos:match.start()]))
         out.append(match.group(0))
         pos = match.end()
-    out.append(_SPECIAL.sub(r"\\\g<0>", text[pos:]))
+    out.append(_literal(text[pos:]))
     return _uncomment("".join(out))
 
 
@@ -89,7 +101,9 @@ def render_params(params: list[tuple[str, str]]) -> list[str]:
     description sits under the text column.  A blank line would end
     the ``@param`` paragraph and spill the rest of the description into
     the page body, so a description holding one is wrapped in
-    ``@parblock``/``@endparblock``.
+    ``@parblock``/``@endparblock``.  An empty description is a bare
+    ``@param name``: a parblock around nothing makes doxygen read the
+    ``@endparblock`` as code and warn that it is missing.
 
     Args:
         params: The (name, description) entries, descriptions already
@@ -103,7 +117,7 @@ def render_params(params: list[tuple[str, str]]) -> list[str]:
     out: list[str] = []
     for name, text in params:
         lines = text.split("\n")
-        if "" in lines:
+        if len(lines) > 1 and "" in lines:
             lines = ["@parblock", *lines, "@endparblock"]
         first, *rest = lines
         out.append(f" * @param {name:<{width}} {first}".rstrip())
