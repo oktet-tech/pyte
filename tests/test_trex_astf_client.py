@@ -101,6 +101,39 @@ def test_poll_records_a_series_and_rings_one_line_per_tick(fake_shim):
                 if "active" in x]) == 2
 
 
+def test_poll_brackets_the_watch_window_in_a_step(fake_shim):
+    """poll() is the run's only long unbracketed window, and the
+    agent logs the server's stdout at whatever nesting is current:
+    without a bracket the flood interleaves with the step's own lines
+    one level too shallow."""
+    rem = FakeRemote(results={
+        "get_stats": {"global": {"active_flows": 5}},
+        "get_traffic_stats": {"client": {}, "server": {}}})
+    c = _client(rem)
+    ticks = iter([True, True, False])
+    c.poll(every=0.0, until=lambda: next(ticks))
+    logs = fake_shim.logs
+    push = [i for i, (k, _) in enumerate(logs) if k == "STEP_PUSH"]
+    pop = [i for i, (k, _) in enumerate(logs) if k == "STEP_POP"]
+    ticks_at = [i for i, (k, t) in enumerate(logs)
+                if k == FakeShimLib.TE_LL_RING and t.startswith("t=")]
+    assert len(push) == len(pop) == 1
+    assert push[0] < ticks_at[0]
+    assert ticks_at[-1] < pop[0]
+
+
+def test_poll_pops_the_watch_step_when_a_poll_raises(fake_shim):
+    """A raised poll must not leave the nesting pushed: everything
+    the test logs afterwards would shift one level deeper."""
+    rem = FakeRemote(raises={"get_stats": "boom"})
+    c = _client(rem)
+    with pytest.raises(TrexError):
+        c.poll(every=0.0, until=lambda: True)
+    kinds = [k for k, _ in fake_shim.logs]
+    assert kinds[0] == "STEP_PUSH"
+    assert kinds[-1] == "STEP_POP"
+
+
 def test_get_template_stats_is_empty_without_groups(fake_shim):
     rem = FakeRemote(results={"get_tg_names": []})
     assert _client(rem).get_template_stats() == []

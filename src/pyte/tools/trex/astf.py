@@ -328,25 +328,38 @@ class Client:
 
         Returns the accumulated Series, so callers never collect
         snapshots themselves.
+
+        In its own step bracket, like every other long op: the
+        Configurator-owned server's stdout is logged by the agent at
+        whatever nesting level is current, so an unbracketed poll is
+        the one window where that flood lands beside the step's own
+        lines instead of one level deeper under them.
         """
         series = _stats.Series()
         t0 = time.time()
-        while until is None or until():
-            glob = self.get_global()
-            traffic = self.get_traffic()
-            now = time.time() - t0
-            series.add(_stats.Snapshot(t=now, glob=glob,
-                                       traffic=traffic))
-            log.ring(
-                f"t={now:6.1f}s active={glob.active_flows} "
-                f"est={glob.est_flows} "
-                f"tx={_rate(glob.tx_bps, 'bps')}/"
-                f"{_rate(glob.tx_pps, 'pps')} "
-                f"rx={_rate(glob.rx_bps, 'bps')}/"
-                f"{_rate(glob.rx_pps, 'pps')} "
-                f"drops={traffic.drop_pct:.2f}%")
-            if every:
-                time.sleep(every)
+        log.step_push("watch the traffic")
+        try:
+            while until is None or until():
+                glob = self.get_global()
+                traffic = self.get_traffic()
+                now = time.time() - t0
+                series.add(_stats.Snapshot(t=now, glob=glob,
+                                           traffic=traffic))
+                log.ring(
+                    f"t={now:6.1f}s active={glob.active_flows} "
+                    f"est={glob.est_flows} "
+                    f"tx={_rate(glob.tx_bps, 'bps')}/"
+                    f"{_rate(glob.tx_pps, 'pps')} "
+                    f"rx={_rate(glob.rx_bps, 'bps')}/"
+                    f"{_rate(glob.rx_pps, 'pps')} "
+                    f"drops={traffic.drop_pct:.2f}%")
+                if every:
+                    time.sleep(every)
+        finally:
+            # Not only for symmetry: an exception raised mid-watch
+            # would otherwise leave the nesting pushed, shifting
+            # everything the test logs afterwards one level deeper.
+            log.step_pop("traffic watched")
         return series
 
     def log_summary(self, series: _stats.Series, t0: float,
