@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex ServerOpts unit tests (offline: yaml + cmdline)."""
 import pytest
-
 from pyte.tools.trex import ServerOpts
 
 
@@ -143,12 +142,40 @@ def test_cfg_extra_is_appended_verbatim():
     assert o.cfg_yaml().endswith(extra)
 
 
-def test_port_info_and_port_macs_are_mutually_exclusive():
-    with pytest.raises(ValueError, match="port_info"):
-        ServerOpts(trex_exec="/usr/local/trex/t-rex-64", ports=["x"],
-                   port_info=[("10.0.0.1", "10.0.0.2")],
+def test_port_macs_carry_ip_identity_too():
+    """MACs pin the ethernet headers; ip/default_gw are the port's
+    IPv4 identity, without which TRex does not answer ARP for its own
+    address and a routing peer cannot resolve the tester. The YAML
+    accepts all four keys per port, so they are not exclusive."""
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                   ports=["0000:03:00.0"],
+                   port_info=[("10.214.10.1", "10.214.10.200")],
                    port_macs=[("00:11:22:33:44:55",
                                "00:11:22:33:44:66")])
+    assert o.cfg_yaml() == (
+        "- port_limit: 1\n"
+        "  version: 2\n"
+        "  interfaces: ['0000:03:00.0']\n"
+        "  port_info:\n"
+        "    - src_mac: '00:11:22:33:44:55'\n"
+        "      dest_mac: '00:11:22:33:44:66'\n"
+        "      ip: '10.214.10.1'\n"
+        "      default_gw: '10.214.10.200'\n")
+
+
+def test_ip_identity_without_gw_is_legal():
+    """default_gw exists only so TRex can resolve a gateway it must
+    reach; a rig that pins dest_mac has no such need, and the ip alone
+    is what makes the ARP responder answer."""
+    o = ServerOpts(trex_exec="/usr/local/trex/t-rex-64",
+                   ports=["0000:03:00.0"],
+                   port_info=[("10.214.10.1", None)])
+    assert o.cfg_yaml() == (
+        "- port_limit: 1\n"
+        "  version: 2\n"
+        "  interfaces: ['0000:03:00.0']\n"
+        "  port_info:\n"
+        "    - ip: '10.214.10.1'\n")
 
 
 def test_cfg_yaml_macs_parse_as_strings():

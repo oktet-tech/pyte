@@ -59,13 +59,18 @@ class ServerOpts:
     sync_port: int = 4501
     #: ZMQ async stats port the client subscribes to (loopback).
     async_port: int = 4500
-    #: Optional per-port (ip, default_gw) pairs (DPDK mode); same order
-    #: as ports.
-    port_info: list[tuple[str, str]] | None = None
+    #: Optional per-port ``(ip, default_gw)`` IPv4 identity, same order
+    #: as ports. ``ip`` is what makes TRex answer ARP for its own
+    #: address; ``default_gw`` may be None when the gateway's MAC is
+    #: pinned via ``port_macs`` and TRex needs to resolve nothing.
+    port_info: list[tuple[str, str | None]] | None = None
     #: Software/af_packet mode: interfaces are Linux names, launch adds
     #: ``--software``. Needs ``port_macs``.
     software: bool = False
-    #: Per-port (src_mac, dest_mac) for software mode; same order as ports.
+    #: Per-port (src_mac, dest_mac); same order as ports. Pins the
+    #: ethernet headers of everything TRex sends, so TRex itself needs
+    #: no ARP to transmit. Composable with ``port_info`` -- the YAML
+    #: accepts all four keys per port.
     port_macs: list[tuple[str, str]] | None = None
     #: Run TRex in ASTF service mode (adds ``--astf``).
     astf: bool = False
@@ -91,9 +96,6 @@ class ServerOpts:
             raise ValueError("port_info length must match ports length")
         if self.port_macs is not None and len(self.port_macs) != len(self.ports):
             raise ValueError("port_macs length must match ports length")
-        if self.port_info is not None and self.port_macs is not None:
-            raise ValueError(
-                "port_info and port_macs are mutually exclusive")
         if self.software and self.port_macs is None:
             raise ValueError("software mode requires port_macs")
 
@@ -112,16 +114,25 @@ class ServerOpts:
         ]
         # MACs/IPs are quoted like the interfaces: an unquoted
         # colon-separated MAC is a sexagesimal INTEGER under YAML 1.1.
-        if self.port_macs is not None:
+        if self.port_macs is not None or self.port_info is not None:
             out.append("  port_info:")
-            for src_mac, dest_mac in self.port_macs:
-                out.append(f"    - src_mac: '{src_mac}'")
-                out.append(f"      dest_mac: '{dest_mac}'")
-        elif self.port_info is not None:
-            out.append("  port_info:")
-            for ip, gw in self.port_info:
-                out.append(f"    - ip: '{ip}'")
-                out.append(f"      default_gw: '{gw}'")
+            macs = (self.port_macs if self.port_macs is not None
+                    else [(None, None)] * len(self.ports))
+            addrs = (self.port_info if self.port_info is not None
+                     else [(None, None)] * len(self.ports))
+            for (src_mac, dest_mac), (ip, gw) in zip(macs, addrs):
+                if src_mac is not None:
+                    out.append(f"    - src_mac: '{src_mac}'")
+                    out.append(f"      dest_mac: '{dest_mac}'")
+                else:
+                    out.append(f"    - ip: '{ip}'")
+                    if gw is not None:
+                        out.append(f"      default_gw: '{gw}'")
+                    continue
+                if ip is not None:
+                    out.append(f"      ip: '{ip}'")
+                    if gw is not None:
+                        out.append(f"      default_gw: '{gw}'")
         text = "\n".join(out) + "\n"
         if self.cfg_extra:
             text += self.cfg_extra
