@@ -108,13 +108,39 @@ def test_render_pci_bdf_iface_single_quoted():
 
 def test_render_mixed_ip_and_dst_mac_raises():
     # DIVERGENCE: C's gen_yaml_config would silently misalign the
-    # port_info YAML lists (ip goes to PORTINFO_IP while dst_mac goes to
-    # PORTINFO_DST_MAC, splitting one logical port across both groups).
+    # port_info YAML lists (ip goes to PORTINFO_IP while dst_mac goes
+    # to PORTINFO_DST_MAC, splitting one logical port across both groups).
     # pyte requires exactly one address form per port and raises instead.
     o = _opts(clients=(batch.Endpoint(ip="10.0.0.1",
                                       dst_mac="00:00:00:00:00:01"),))
     with pytest.raises(ValueError):
         batch.render_cfg_yaml(o)
+
+
+def test_render_full_form_pairs_identity_with_macs():
+    """A port with both complete pairs -- pinned ethernet headers and
+    the IPv4 identity -- renders as ONE port_info entry, in port
+    order: without the identity TRex answers no ARP for its own
+    address, and a routing peer cannot resolve the generator."""
+    o = _opts(clients=(batch.Endpoint(
+                  iface=batch.LinuxIface("eth0"),
+                  src_mac="00:00:00:00:00:01", dst_mac="00:00:00:00:00:02",
+                  ip="10.214.10.1", gw="10.214.10.200"),),
+              servers=(batch.Endpoint(
+                  iface=batch.LinuxIface("eth1"),
+                  src_mac="00:00:00:00:00:03", dst_mac="00:00:00:00:00:04"),))
+    assert batch.render_cfg_yaml(o) == (
+        "- port_limit      : 2\n"
+        "  version         : 2\n"
+        "  interfaces: ['eth0', 'eth1']\n"
+        "  port_info:\n"
+        "    - dest_mac: 00:00:00:00:00:02\n"
+        "      src_mac: 00:00:00:00:00:01\n"
+        "      ip: 10.214.10.1\n"
+        "      default_gw: 10.214.10.200\n"
+        "    - dest_mac: 00:00:00:00:00:04\n"
+        "      src_mac: 00:00:00:00:00:03\n"
+    )
 
 
 def test_render_mixed_src_mac_and_gw_raises():

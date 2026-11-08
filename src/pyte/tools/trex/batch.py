@@ -175,6 +175,15 @@ class Endpoint:
     dst_mac: str | None = None
 
     def __post_init__(self) -> None:
+        # The full form -- both pairs complete, pinned ethernet
+        # headers plus the port's IPv4 identity -- is legal; every
+        # other cross-form combination is rejected here or, for the
+        # diagonals render_cfg_yaml guards, at rendering.
+        full = (self.ip is not None and self.gw is not None
+                and self.src_mac is not None
+                and self.dst_mac is not None)
+        if full:
+            return
         if self.ip is not None and self.src_mac is not None:
             raise ValueError("Endpoint.ip and .src_mac are exclusive")
         if self.gw is not None and self.dst_mac is not None:
@@ -308,8 +317,12 @@ def render_cfg_yaml(opts: Opts) -> str:
         ports.append(client)
         ports.append(server)
 
-    ip_ports: list[tuple[str, str]] = []
-    mac_ports: list[tuple[str, str]] = []
+    # One port_info entry per port, in port order. A port carrying
+    # both complete pairs (the full form: pinned ethernet headers plus
+    # the port's IPv4 identity) renders all four keys in that one
+    # entry; pure forms render exactly the lines the C template's
+    # grouped output produced for an all-pure set.
+    entries: list[list[str]] = []
     for ep in ports:
         addr_is_mac = ep.src_mac is not None
         gw_is_mac = ep.dst_mac is not None
@@ -320,11 +333,28 @@ def render_cfg_yaml(opts: Opts) -> str:
                 "would silently misalign the port_info YAML lists "
                 f"here); got ip={ep.ip!r} gw={ep.gw!r} "
                 f"src_mac={ep.src_mac!r} dst_mac={ep.dst_mac!r}")
+        has_ip = ep.ip is not None or ep.gw is not None
+        if has_ip and addr_is_mac and not (ep.ip is not None
+                                           and ep.gw is not None):
+            raise ValueError(
+                "Endpoint mixes address forms without completing "
+                "either: the full form (pinned src_mac/dst_mac plus "
+                "the port ip/gw identity) needs all four fields; "
+                f"got ip={ep.ip!r} gw={ep.gw!r} "
+                f"src_mac={ep.src_mac!r} dst_mac={ep.dst_mac!r}")
+        port_lines: list[str] = []
         if addr_is_mac:
-            mac_ports.append((ep.dst_mac, ep.src_mac))
-        else:
-            ip_ports.append((ep.ip if ep.ip is not None else "0.0.0.0",
-                             ep.gw if ep.gw is not None else "0.0.0.0"))
+            port_lines.append(f"    - dest_mac: {ep.dst_mac}")
+            port_lines.append(f"      src_mac: {ep.src_mac}")
+        if ep.ip is not None or ep.gw is not None:
+            ip = ep.ip if ep.ip is not None else "0.0.0.0"
+            gw = ep.gw if ep.gw is not None else "0.0.0.0"
+            prefix = "    - " if not port_lines else "      "
+            port_lines.append(f"{prefix}ip: {ip}")
+            port_lines.append(f"      default_gw: {gw}")
+        if not port_lines:
+            port_lines = ["    - ip: 0.0.0.0", "      default_gw: 0.0.0.0"]
+        entries.append(port_lines)
 
     lines = [
         f"- port_limit      : {len(ports)}",
@@ -333,12 +363,8 @@ def render_cfg_yaml(opts: Opts) -> str:
         ", ".join(_iface_literal(ep.iface) for ep in ports) + "]",
         "  port_info:",
     ]
-    for ip, gw in ip_ports:
-        lines.append(f"    - ip: {ip}")
-        lines.append(f"      default_gw: {gw}")
-    for dst_mac, src_mac in mac_ports:
-        lines.append(f"    - dest_mac: {dst_mac}")
-        lines.append(f"      src_mac: {src_mac}")
+    for port_lines in entries:
+        lines.extend(port_lines)
 
     yaml_text = "\n".join(lines) + "\n"
     if opts.cfg_extra:
