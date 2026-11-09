@@ -129,22 +129,22 @@ def test_params_and_default_and_per_request_headers(server):
 def test_set_header_add_and_remove(server):
     c = bootstrap(server, True, {}, 8 << 20)
     set_header(c, "Authorization", "Bearer t")
-    got = request(c, "GET", "/echo", {})["json"]["headers"]
+    got = json.loads(request(c, "GET", "/echo", {})["body"])["headers"]
     assert got["authorization"] == "Bearer t"
     set_header(c, "Authorization", None)
-    got = request(c, "GET", "/echo", {})["json"]["headers"]
+    got = json.loads(request(c, "GET", "/echo", {})["body"])["headers"]
     assert "authorization" not in got
 
 
 def test_body_kinds(server):
     c = bootstrap(server, True, {}, 8 << 20)
     r = c.request("POST", "/echo", json={"a": 1})
-    assert r["json"] == {"ct": "application/json", "body": '{"a": 1}'}
+    assert json.loads(r["body"]) == {"ct": "application/json", "body": '{"a": 1}'}
     r = c.request("POST", "/echo", form={"a": "1", "b": "x y"})
-    assert r["json"] == {"ct": "application/x-www-form-urlencoded",
+    assert json.loads(r["body"]) == {"ct": "application/x-www-form-urlencoded",
                          "body": "a=1&b=x+y"}
     r = c.request("POST", "/echo", data=b"<x/>", content_type="text/xml")
-    assert r["json"] == {"ct": "text/xml", "body": "<x/>"}
+    assert json.loads(r["body"]) == {"ct": "text/xml", "body": "<x/>"}
 
 
 def test_explicit_content_type_overrides_kind_default(server):
@@ -158,7 +158,7 @@ def test_request_op_decodes_data_b64(server):
     c = bootstrap(server, True, {}, 8 << 20)
     r = request(c, "POST", "/echo",
                 {"data_b64": "PHgvPg==", "content_type": "text/xml"})
-    assert r["json"] == {"ct": "text/xml", "body": "<x/>"}
+    assert json.loads(r["body"]) == {"ct": "text/xml", "body": "<x/>"}
 
 
 def test_body_kinds_are_exclusive_and_data_needs_content_type(server):
@@ -178,6 +178,33 @@ def test_body_cap(server):
     with pytest.raises(RuntimeError,
                        match="1000 bytes exceeds the 512 byte cap"):
         bootstrap(server, True, {}, 512).request("GET", "/big")
+
+
+def test_request_op_reply_has_no_json_key(server):
+    c = bootstrap(server, True, {}, 8 << 20)
+    r = request(c, "GET", "/echo", {})
+    assert "json" not in r and r["status"] == 200
+
+
+def test_request_op_caps_the_encoded_reply(server):
+    class Cjk(Handler):
+        def do_GET(self):
+            self._send(200, ("\u4e2d" * 100).encode(),
+                       "text/plain; charset=utf-8")
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Cjk)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        c = bootstrap("http://127.0.0.1:%d" % srv.server_address[1],
+                      True, {}, 512)
+        # 300 raw bytes fit the cap, but json.dumps gives 602 chars (quotes)
+        with pytest.raises(RuntimeError,
+                           match="response body 602 bytes exceeds the 512"):
+            request(c, "GET", "/", {})
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_timeout_then_next_request_works(server):

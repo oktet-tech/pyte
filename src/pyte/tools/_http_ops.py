@@ -107,10 +107,12 @@ def bootstrap(base_url, verify, headers, max_body):
                 raw = resp.read(self.max_body + 1)
                 if len(raw) > self.max_body:
                     size = resp.headers.get("Content-Length")
-                    size = int(size) if size and size.isdigit() else len(raw)
+                    known = bool(size and size.isdigit())
+                    size = int(size) if known else len(raw)
                     raise RuntimeError(
-                        "response body %d bytes exceeds the %d byte cap"
-                        % (size, self.max_body))
+                        "response body %s%d bytes exceeds the %d byte cap"
+                        % ("" if known else "at least ", size,
+                           self.max_body))
                 status = resp.status if hasattr(resp, "status") else resp.code
                 reason = resp.reason
                 final_url = resp.geturl()
@@ -143,7 +145,15 @@ def request(client, method, path, kw):
     if "data_b64" in kw:
         import base64
         kw["data"] = base64.b64decode(kw.pop("data_b64"))
-    return client.request(method, path, **kw)
+    import json
+    r = client.request(method, path, **kw)
+    r.pop("json", None)
+    size = len(json.dumps(r["body"]))
+    if size > client.max_body:
+        raise RuntimeError(
+            "response body %d bytes exceeds the %d byte cap"
+            % (size, client.max_body))
+    return r
 
 
 def set_header(client, name, value):
