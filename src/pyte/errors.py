@@ -162,6 +162,17 @@ class SshError(ToolError):
     """ssh/sshd failed."""
 
 
+class HttpError(ToolError):
+    """pyte.tools.http: transport failure, unexpected status, or
+    unparseable JSON.  ``response`` carries the Response for a status
+    failure.
+    """
+
+    def __init__(self, msg: str, response=None):
+        super().__init__(msg)
+        self.response = response
+
+
 class RcfError(TeError):
     """RCF request failed."""
 
