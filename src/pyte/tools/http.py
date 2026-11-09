@@ -15,6 +15,7 @@ headers at VERB. Failures surface as :class:`pyte.errors.HttpError`.
 """
 from __future__ import annotations
 
+import base64
 import json as jsonlib
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -79,6 +80,7 @@ class Session:
     def call(self, fn: Callable, *args, timeout: float | None = None,
              **kwargs):
         """Ship *fn* with the agent-side client as its first argument."""
+        log.verb(f"http op: call {fn.__name__}")
         return self._rem.call(
             fn, self._client, *args,
             timeout=(timeout or self._timeout) + TRANSPORT_MARGIN, **kwargs)
@@ -101,7 +103,12 @@ class Session:
                 headers: dict[str, str] | None = None, ok: bool = True,
                 timeout: float | None = None,
                 log_body: int | None = None) -> Response:
-        """Issue one request; with *ok* raise HttpError on non-2xx."""
+        """Issue one request; with *ok* raise HttpError on non-2xx.
+
+        At most one of json/form/data; data needs content_type. A str
+        *data* is shipped as is, bytes are shipped base64-encoded
+        (``data_b64``) and decoded on the agent.
+        """
         if sum(x is not None for x in (json, form, data)) > 1:
             raise ValueError("json, form and data are mutually exclusive")
         if data is not None and content_type is None:
@@ -109,6 +116,9 @@ class Session:
         limit = self._log_body if log_body is None else log_body
         agent_timeout = float(timeout or self._timeout)
         kw: dict[str, Any] = {"timeout": agent_timeout}
+        if isinstance(data, (bytes, bytearray)):
+            kw["data_b64"] = base64.b64encode(data).decode("ascii")
+            data = None
         for key, val in (("params", params), ("json", json),
                          ("form", form), ("data", data),
                          ("content_type", content_type),
@@ -117,27 +127,34 @@ class Session:
                 kw[key] = val
 
         log.step_push(f"{method} {path}")
-        log.verb(f"http op: request {method} {path}")
-        if headers:
-            log.verb(f"request headers: {self._headers_line(headers)}")
-        if json is not None:
-            self._log_text("request body", jsonlib.dumps(json), limit)
-        elif form is not None:
-            self._log_text("request body", repr(form), limit)
-        elif isinstance(data, str):
-            self._log_text("request body", data, limit)
+        popped = False
         try:
-            raw = self._rem.call(_ops.request, self._client, method, path,
-                                 kw, timeout=agent_timeout + TRANSPORT_MARGIN)
-        except RemotePythonError as exc:
-            log.step_pop(f"failed: {exc}")
-            raise HttpError(f"{method} {path}: {exc}") from exc
-        resp = Response(status=raw["status"], reason=raw["reason"],
-                        headers=raw["headers"], body=raw["body"],
-                        url=raw["url"], elapsed=raw["elapsed"])
-        log.verb(f"response headers: {self._headers_line(resp.headers)}")
-        self._log_text("response body", resp.body, limit)
-        log.step_pop(f"{resp.status} {resp.reason} ({resp.elapsed:.3f}s)")
+            log.verb(f"http op: request {method} {path}")
+            if headers:
+                log.verb(f"request headers: {self._headers_line(headers)}")
+            if json is not None:
+                self._log_text("request body", jsonlib.dumps(json), limit)
+            elif form is not None:
+                self._log_text("request body", repr(form), limit)
+            elif isinstance(data, str):
+                self._log_text("request body", data, limit)
+            try:
+                raw = self._rem.call(
+                    _ops.request, self._client, method, path, kw,
+                    timeout=agent_timeout + TRANSPORT_MARGIN)
+            except RemotePythonError as exc:
+                raise HttpError(f"{method} {path}: {exc}") from exc
+            resp = Response(status=raw["status"], reason=raw["reason"],
+                            headers=raw["headers"], body=raw["body"],
+                            url=raw["url"], elapsed=raw["elapsed"])
+            log.verb(f"response headers: {self._headers_line(resp.headers)}")
+            self._log_text("response body", resp.body, limit)
+            log.step_pop(f"{resp.status} {resp.reason} "
+                         f"({resp.elapsed:.3f}s)")
+            popped = True
+        finally:
+            if not popped:
+                log.step_pop("failed")
         if ok and not resp.ok:
             raise HttpError(
                 f"{method} {path} -> {resp.status} {resp.reason}: "
@@ -188,15 +205,22 @@ def session(pco, base_url: str, *, timeout: float = 30.0,
             redact: Iterable[str] = ()) -> Iterator[Session]:
     """Open an HTTP session against *base_url* from pco's agent."""
     log.step_push(f"HTTP session: {base_url}")
-    with remote.python(pco, timeout=timeout + TRANSPORT_MARGIN) as rem:
-        if not verify:
-            log.ring(f"TLS verification disabled for {base_url}")
-        try:
-            client = rem.call(_ops.bootstrap, base_url, verify,
-                              dict(headers or {}), MAX_BODY)
-        except RemotePythonError as exc:
-            log.step_pop(f"failed: {exc}")
-            raise HttpError(f"HTTP session {base_url}: {exc}") from exc
-        log.step_pop("HTTP session ready")
-        yield Session(rem, client, timeout=timeout, log_body=log_body,
-                      redact=frozenset(x.lower() for x in redact))
+    popped = False
+    try:
+        with remote.python(pco, timeout=timeout + TRANSPORT_MARGIN) as rem:
+            if not verify:
+                log.ring(f"TLS verification disabled for {base_url}")
+            log.verb(f"http op: bootstrap {base_url}")
+            try:
+                client = rem.call(_ops.bootstrap, base_url, verify,
+                                  dict(headers or {}), MAX_BODY)
+            except RemotePythonError as exc:
+                raise HttpError(
+                    f"HTTP session {base_url}: {exc}") from exc
+            log.step_pop("HTTP session ready")
+            popped = True
+            yield Session(rem, client, timeout=timeout, log_body=log_body,
+                          redact=frozenset(x.lower() for x in redact))
+    finally:
+        if not popped:
+            log.step_pop("failed")

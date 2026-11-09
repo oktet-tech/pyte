@@ -71,7 +71,7 @@ def bootstrap(base_url, verify, headers, max_body):
                     raise RuntimeError("data requires content_type")
                 body = data.encode("utf-8") if isinstance(data, str) else data
                 ctype = content_type
-            if content_type is not None and ctype is None:
+            if content_type is not None:
                 ctype = content_type
 
             if path.startswith(("http://", "https://")):
@@ -135,7 +135,14 @@ def bootstrap(base_url, verify, headers, max_body):
 
 
 def request(client, method, path, kw):
-    """Issue one request on *client*; kw are Client.request keyword args."""
+    """Issue one request on *client*; kw are Client.request keyword args.
+
+    Bytes bodies cross the transport as ``data_b64`` (base64 text).
+    """
+    kw = dict(kw)
+    if "data_b64" in kw:
+        import base64
+        kw["data"] = base64.b64decode(kw.pop("data_b64"))
     return client.request(method, path, **kw)
 
 

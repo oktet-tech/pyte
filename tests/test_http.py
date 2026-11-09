@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """Tests for pyte.tools.http (HTTP client session)."""
-from pyte.errors import HttpError, TeError, ToolError
+from contextlib import contextmanager
+
+import pytest
+
+from pyte import log
+from pyte.errors import HttpError, RemotePythonError, TeError, ToolError
+from pyte.tools import http
 
 
 def test_httperror_is_toolerror_with_response():
@@ -13,15 +19,6 @@ def test_httperror_is_toolerror_with_response():
 
 
 # ---- facade tests -------------------------------------------------------
-from contextlib import contextmanager  # noqa: E402
-
-import pytest  # noqa: E402
-
-from pyte import log  # noqa: E402
-from pyte.errors import RemotePythonError  # noqa: E402
-from pyte.tools import http  # noqa: E402
-
-
 class _FakeRem:
     """Fake pyte.remote session: records (op_name, args, kwargs)."""
 
@@ -159,9 +156,8 @@ def test_step_bracket_and_body_logging(logs):
 def test_body_truncation_and_marker(logs):
     s, _ = _sess({"request": _resp(body="a" * 5000)})
     s.get("/x")
-    texts = [t for t in logs["ring"] if "a" * 100 in t]
-    assert len(texts) == 1
-    assert texts[0].endswith("a" * 4096 + "... (5000 chars)")
+    assert ("response body: " + "a" * 4096 + "... (5000 chars)"
+            in logs["ring"])
 
 
 def test_log_body_zero_silences_bodies(logs):
@@ -221,3 +217,67 @@ def test_session_bootstraps_with_defaults(monkeypatch, logs):
                             ("https://d", False, {}, http.MAX_BODY), {})
     assert "TLS verification disabled for https://d" in logs["ring"]
     assert seen["timeout"] == 60.0
+
+
+def test_bytes_data_ships_base64_and_str_ships_as_is(logs):
+    s, rem = _sess()
+    s.post("/x", data=b"<x/>", content_type="text/xml")
+    kw = rem.calls[-1][1][3]
+    assert kw["data_b64"] == "PHgvPg==" and "data" not in kw
+    s.post("/x", data="<x/>", content_type="text/xml")
+    kw = rem.calls[-1][1][3]
+    assert kw["data"] == "<x/>" and "data_b64" not in kw
+
+
+def test_call_and_bootstrap_log_verb_op_lines(monkeypatch, logs):
+    s, _ = _sess({"custom": 1})
+
+    def custom(client):
+        pass
+
+    s.call(custom)
+    assert "http op: call custom" in logs["verb"]
+    rem = _FakeRem({"bootstrap": CLIENT})
+
+    @contextmanager
+    def fake_python(pco, timeout=None):
+        yield rem
+
+    monkeypatch.setattr(http.remote, "python", fake_python)
+    with http.session(object(), "https://d"):
+        pass
+    assert "http op: bootstrap https://d" in logs["verb"]
+
+
+def test_step_popped_on_remote_error(logs):
+    s, _ = _sess({"request": RemotePythonError("boom")})
+    with pytest.raises(HttpError):
+        s.get("/x")
+    assert len(logs["push"]) == len(logs["pop"]) == 1
+
+
+def test_step_popped_on_timeout_which_propagates_unwrapped(logs):
+    s, _ = _sess({"request": TimeoutError("slow")})
+    with pytest.raises(TimeoutError):
+        s.get("/x")
+    assert len(logs["push"]) == len(logs["pop"]) == 1
+
+
+def test_step_popped_on_unserialisable_json(logs):
+    s, _ = _sess()
+    with pytest.raises(TypeError):
+        s.post("/x", json={"a": object()})
+    assert len(logs["push"]) == len(logs["pop"]) == 1
+
+
+def test_session_open_failure_pops_step(monkeypatch, logs):
+    @contextmanager
+    def broken(pco, timeout=None):
+        raise RemotePythonError("no runner")
+        yield
+
+    monkeypatch.setattr(http.remote, "python", broken)
+    with pytest.raises(RemotePythonError):
+        with http.session(object(), "https://d"):
+            pass
+    assert len(logs["push"]) == len(logs["pop"]) == 1

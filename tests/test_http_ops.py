@@ -147,6 +147,20 @@ def test_body_kinds(server):
     assert r["json"] == {"ct": "text/xml", "body": "<x/>"}
 
 
+def test_explicit_content_type_overrides_kind_default(server):
+    c = bootstrap(server, True, {}, 8 << 20)
+    r = c.request("POST", "/echo", json={"a": 1},
+                  content_type="application/merge-patch+json")
+    assert r["json"]["ct"] == "application/merge-patch+json"
+
+
+def test_request_op_decodes_data_b64(server):
+    c = bootstrap(server, True, {}, 8 << 20)
+    r = request(c, "POST", "/echo",
+                {"data_b64": "PHgvPg==", "content_type": "text/xml"})
+    assert r["json"] == {"ct": "text/xml", "body": "<x/>"}
+
+
 def test_body_kinds_are_exclusive_and_data_needs_content_type(server):
     c = bootstrap(server, True, {}, 8 << 20)
     with pytest.raises(RuntimeError, match="mutually exclusive"):
