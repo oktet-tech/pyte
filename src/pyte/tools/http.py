@@ -61,6 +61,17 @@ class Response:
         return 200 <= self.status < 300
 
 
+def _ship(rem, fn, label: str, *args, timeout: float | None = None,
+          **kwargs):
+    log.verb(f"http op: {label}")
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    try:
+        return rem.call(fn, *args, **kwargs)
+    except RemotePythonError as exc:
+        raise HttpError(f"{label}: {exc}") from exc
+
+
 class Session:
     """A live HTTP client session on a test agent; see :func:`session`."""
 
@@ -80,10 +91,18 @@ class Session:
     def call(self, fn: Callable, *args, timeout: float | None = None,
              **kwargs):
         """Ship *fn* with the agent-side client as its first argument."""
-        log.verb(f"http op: call {fn.__name__}")
-        return self._rem.call(
-            fn, self._client, *args,
+        return self._ship(
+            fn, f"call {fn.__name__}", self._client, *args,
             timeout=(timeout or self._timeout) + TRANSPORT_MARGIN, **kwargs)
+
+    def _ship(self, fn, label: str, *args, timeout: float | None = None,
+              **kwargs):
+        """Log the op, ship it and wrap agent-side failures in HttpError.
+
+        A transport timeout (pyte.errors.TimeoutError, a builtin
+        TimeoutError) is not a RemotePythonError and propagates as is.
+        """
+        return _ship(self._rem, fn, label, *args, timeout=timeout, **kwargs)
 
     def _headers_line(self, headers: dict[str, str]) -> str:
         return ", ".join(
@@ -129,7 +148,6 @@ class Session:
         log.step_push(f"{method} {path}")
         popped = False
         try:
-            log.verb(f"http op: request {method} {path}")
             if headers:
                 log.verb(f"request headers: {self._headers_line(headers)}")
             if json is not None:
@@ -138,12 +156,9 @@ class Session:
                 self._log_text("request body", repr(form), limit)
             elif isinstance(data, str):
                 self._log_text("request body", data, limit)
-            try:
-                raw = self._rem.call(
-                    _ops.request, self._client, method, path, kw,
-                    timeout=agent_timeout + TRANSPORT_MARGIN)
-            except RemotePythonError as exc:
-                raise HttpError(f"{method} {path}: {exc}") from exc
+            raw = self._ship(
+                _ops.request, f"request {method} {path}", self._client,
+                method, path, kw, timeout=agent_timeout + TRANSPORT_MARGIN)
             resp = Response(status=raw["status"], reason=raw["reason"],
                             headers=raw["headers"], body=raw["body"],
                             url=raw["url"], elapsed=raw["elapsed"])
@@ -189,13 +204,12 @@ class Session:
 
     def set_header(self, name: str, value: str | None) -> None:
         """Set (or, with None, remove) a session default header."""
-        log.verb(f"http op: set_header {name}")
-        self._rem.call(_ops.set_header, self._client, name, value)
+        self._ship(_ops.set_header, f"set_header {name}", self._client,
+                   name, value)
 
     def cookies(self) -> dict[str, str]:
         """Return the session cookies as a name -> value dict."""
-        log.verb("http op: cookies")
-        return self._rem.call(_ops.cookies, self._client)
+        return self._ship(_ops.cookies, "cookies", self._client)
 
 
 @contextmanager
@@ -210,13 +224,8 @@ def session(pco, base_url: str, *, timeout: float = 30.0,
         with remote.python(pco, timeout=timeout + TRANSPORT_MARGIN) as rem:
             if not verify:
                 log.ring(f"TLS verification disabled for {base_url}")
-            log.verb(f"http op: bootstrap {base_url}")
-            try:
-                client = rem.call(_ops.bootstrap, base_url, verify,
-                                  dict(headers or {}), MAX_BODY)
-            except RemotePythonError as exc:
-                raise HttpError(
-                    f"HTTP session {base_url}: {exc}") from exc
+            client = _ship(rem, _ops.bootstrap, f"bootstrap {base_url}",
+                           base_url, verify, dict(headers or {}), MAX_BODY)
             log.step_pop("HTTP session ready")
             popped = True
             yield Session(rem, client, timeout=timeout, log_body=log_body,

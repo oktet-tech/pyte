@@ -134,7 +134,7 @@ def test_remote_error_wrapped(logs):
     s, _ = _sess({"request": err})
     with pytest.raises(HttpError) as ei:
         s.get("/x")
-    assert str(ei.value) == f"GET /x: {err}"
+    assert str(ei.value) == f"request GET /x: {err}"
     assert ei.value.__cause__ is err
 
 
@@ -187,6 +187,24 @@ def test_set_header_and_cookies_ship_ops(logs):
     assert rem.calls[-1][1] == (CLIENT, "X-A", "b")
     assert s.cookies() == {"sid": "1"}
     assert rem.calls[-1][0] == "cookies"
+
+
+@pytest.mark.parametrize("op,invoke", [
+    ("set_header", lambda s: s.set_header("X-A", "b")),
+    ("cookies", lambda s: s.cookies()),
+    ("_custom", lambda s: s.call(_custom)),
+])
+def test_other_ops_wrap_remote_errors(logs, op, invoke):
+    err = RemotePythonError("boom")
+    s, _ = _sess({op: err})
+    with pytest.raises(HttpError) as ei:
+        invoke(s)
+    assert "boom" in str(ei.value)
+    assert ei.value.__cause__ is err
+
+
+def _custom(client):
+    pass
 
 
 def test_call_inserts_client_first(logs):
