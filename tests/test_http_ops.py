@@ -207,6 +207,15 @@ def test_request_op_caps_the_encoded_reply(server):
         srv.server_close()
 
 
+def test_request_prints_one_log_line(server, capsys):
+    bootstrap(server, True, {}, 8 << 20).request("GET", "/data")
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1
+    assert re.fullmatch(
+        re.escape("http: GET %s/data -> 401 Unauthorized (" % server)
+        + r"\d+\.\d{3}s\)", out[0])
+
+
 def test_timeout_then_next_request_works(server):
     c = bootstrap(server, True, {}, 8 << 20)
     with pytest.raises(Exception):          # socket.timeout / URLError
