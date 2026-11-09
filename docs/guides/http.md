@@ -15,15 +15,18 @@ started on the agent with `serve()`; `web` is the session):
 
 ## Requests and bodies
 
-`http.session(pco, base_url, ...)` is a context manager yielding a
-`Session`.  Paths are joined to `base_url`; a path starting with
+`http.session(pco, base_url, *, timeout=30.0, verify=True,
+headers=None, log_body=4096, redact=())` is a context manager yielding a
+`Session`; `verify=True` is the default, so TLS certificates are
+checked.  Paths are joined to `base_url`; a path starting with
 `http://` or `https://` is used as is.  `get()`, `delete()`, `post()`
 and `put()` are shortcuts for `request(method, path, ...)`.
 
 `post()` and `put()` take at most one body: `json=` (encoded as JSON,
 `application/json`), `form=` (URL-encoded, a list value repeats the
 key) or `data=` (a `str` or `bytes` sent verbatim, which requires
-`content_type=`).  Giving two of them raises `ValueError`.  An explicit
+`content_type=`; `data=` without it is a `ValueError`).  Giving two of
+them raises `ValueError` too.  An explicit
 `content_type=` given with `json=` or `form=` overrides the default
 Content-Type of that kind.  Bytes in `data=` cross the transport
 base64-encoded and are decoded on the agent, while `str` goes as text.
@@ -48,10 +51,16 @@ redirects) and `elapsed` (seconds).  `resp.ok` is true for 2xx and
 `response` attribute then holds the `Response`, so the status and body
 stay available (see the 404 step in the snippet).  It is also raised
 when the request itself fails on the agent (connection refused,
-timeout, body over the size cap) or the session cannot be set up; in
-those cases `response` is not set.  Only a `pyte.remote` transport
-failure makes the session unusable; HTTP-level failures leave it
-usable and the next request works.
+timeout, TLS errors, body over the size cap) or the session cannot be
+set up; in those cases `response` is `None`.  HTTP-level failures
+leave the session usable and the next request works.
+
+A `pyte.remote` failure is different.  If the runner on the agent dies
+or the remote code itself breaks, the error reaches you as `HttpError`
+(with the original as `__cause__`).  If the transport times out
+(the request timeout plus the 30 second margin), `pyte.errors.TimeoutError`
+propagates as is, is not an `HttpError`, and the session is broken: stop
+using it.
 
 ## Logging
 
@@ -61,6 +70,11 @@ Inside it, request and response bodies go to the RING level, cut after
 `log_body` characters (default 4096) with a `... (N chars)` suffix;
 `log_body=0` silences them, as the login in the snippet does.  Set it
 per session or per request.  Headers are logged at VERB.
+
+Requests made inside `call()` are not logged as steps and their
+bodies are not logged at all.  Each one only leaves a single line
+`http: METHOD url -> status reason (elapsed)` that the agent writes to
+stderr, which TE logs.
 
 Header values of `Authorization`, `Cookie` and `Set-Cookie` are always
 logged as `<redacted>`; `redact=[...]` on `session()` adds more header
@@ -81,11 +95,15 @@ The client offers two methods for this.  `client.request(method, path,
 **kw)` takes the same keywords as `Session.request()` (without `ok`
 and `log_body`; `data` as `str` or `bytes`) and returns a plain dict
 with `status`, `reason`, `headers`, `body`, `url`, `elapsed` and
-`json` (the parsed body, or `None`).  It does not raise on non-2xx.
-`client.cookies()` returns the cookies as a name to value dict.
+`json` (the parsed body, or `None`).  It does not raise on non-2xx, but it does raise on exclusive bodies
+(`json`, `form`, `data`), on `data` without `content_type`, on a body
+over the size cap and on connection failures; through `call()` these
+reach the engine as `HttpError`.  `client.cookies()` returns the whole
+jar as a name to value dict.
 
 The transport timeout of `call()` is `timeout` (default: the session's)
-plus a 30 second margin.  A function that makes several requests should
+plus a 30 second margin; the same margin applies to every single
+request.  A function that makes several requests should
 be given a `timeout=` that covers all of them.  `web.remote` is the
 underlying `pyte.remote` session, an escape hatch for anything else.
 
