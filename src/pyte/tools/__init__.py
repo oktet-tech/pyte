@@ -7,6 +7,9 @@ dataclass that builds argv, a run()/server() context-manager factory, and
 frozen Report dataclasses parsed from the tool's output. Option and report
 surfaces are pinned to the corresponding TE tapi_* C source.
 
+The HTTP client session (``http``) is the odd one out: it runs
+stdlib urllib on the agent through pyte.remote, not a tapi_job tool.
+
 Shared machinery lives in ``pyte.tools._tool`` (ToolHandle lifecycle,
 launch()/running(), argv builders, option coercion) and
 ``pyte.tools._units`` (suffix parsing); per-tool modules keep only what
