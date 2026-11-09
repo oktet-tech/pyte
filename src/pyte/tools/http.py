@@ -225,7 +225,7 @@ def session(pco, base_url: str, *, timeout: float = 30.0,
             if not verify:
                 log.ring(f"TLS verification disabled for {base_url}")
             client = _ship(rem, _ops.bootstrap, f"bootstrap {base_url}",
-                           base_url, verify, dict(headers or {}), MAX_BODY)
+                           base_url, verify, dict(headers or {}), MAX_BODY, timeout)
             log.step_pop("HTTP session ready")
             popped = True
             yield Session(rem, client, timeout=timeout, log_body=log_body,

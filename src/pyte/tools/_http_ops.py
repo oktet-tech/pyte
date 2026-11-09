@@ -12,7 +12,7 @@ as ``client``.
 """
 
 
-def bootstrap(base_url, verify, headers, max_body):
+def bootstrap(base_url, verify, headers, max_body, timeout):
     """Build the cookie-keeping stdlib HTTP client and return it."""
     import http.cookiejar
     import json as jsonlib
@@ -28,7 +28,7 @@ def bootstrap(base_url, verify, headers, max_body):
         def __init__(self):
             self.base_url = base_url
             self.max_body = max_body
-            self.timeout = None
+            self.timeout = timeout
             self.headers = dict(headers)
             self.jar = http.cookiejar.CookieJar()
             ctx = ssl.create_default_context()

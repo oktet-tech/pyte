@@ -232,7 +232,7 @@ def test_session_bootstraps_with_defaults(monkeypatch, logs):
     with http.session(object(), "https://d", verify=False) as s:
         assert isinstance(s, http.Session)
     assert rem.calls[0] == ("bootstrap",
-                            ("https://d", False, {}, http.MAX_BODY), {})
+                            ("https://d", False, {}, http.MAX_BODY, 30.0), {})
     assert "TLS verification disabled for https://d" in logs["ring"]
     assert seen["timeout"] == 60.0
 
