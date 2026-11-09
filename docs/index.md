@@ -23,6 +23,7 @@ guides/rpc
 guides/net
 guides/rcf
 guides/remote
+guides/http
 guides/env
 guides/tester
 guides/tools-fio
