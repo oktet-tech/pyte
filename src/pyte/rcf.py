@@ -73,8 +73,16 @@ def _grow_loop(call, initial: int = 4096) -> bytes:
             raise rc
 
 
-def _conf_pairs(host: str | None, port: int,
-                sudo: bool = False) -> list[tuple[str, str]]:
+# rcfunix keys accepted by the Configurator (conf_rcf.c), in its order.
+RCFUNIX_KEYS = ("host", "port", "user", "key", "ssh_port", "ssh_proxy",
+                "copy_timeout", "copy_tries", "kill_timeout", "notcopy",
+                "sudo", "connect", "ext_rcf_listener", "shell", "opaque")
+# Presence-only keys: their value MUST be empty.
+RCFUNIX_FLAGS = frozenset({"notcopy", "sudo", "ext_rcf_listener"})
+
+
+def _conf_pairs(host: str | None, port: int, sudo: bool = False,
+                extra=()) -> list[tuple[str, str]]:
     """rcfunix conf kvpairs for a managed (Configurator-driven) agent.
 
     Keys are the ones engine/configurator/conf_rcf.c consumes when it
@@ -83,11 +91,21 @@ def _conf_pairs(host: str | None, port: int,
     same form conf/rcf.conf passes when TE_IUT is unset.  "sudo" is a
     presence-only key: its value MUST stay empty (conf_rcf.c rejects a
     non-empty value with EINVAL), mirroring rcf.conf's
-    ``<conf name="sudo" cond=.../>``.
+    ``<conf name="sudo" cond=.../>``.  ``extra`` pairs are validated
+    against RCFUNIX_KEYS and appended; repeating a key is refused.
     """
     pairs = [("host", host or ""), ("port", str(port))]
     if sudo:
         pairs.append(("sudo", ""))
+    seen = {k for k, _ in pairs}
+    seen.add("host")
+    for key, value in extra:
+        if key not in RCFUNIX_KEYS:
+            raise ValueError(f"unknown rcfunix key {key!r}")
+        if key in seen:
+            raise ValueError(f"duplicate rcfunix key {key!r}")
+        seen.add(key)
+        pairs.append((key, "" if key in RCFUNIX_FLAGS else str(value)))
     return pairs
 
 
@@ -269,7 +287,8 @@ def agent(name: str) -> RcfAgent:
 
 def add_agent(name: str, host: str | None = None, type: str = "linux",
               port: int = 0, rebootable: bool = False,
-              managed: bool = False, sudo: bool = False) -> DynamicAgent:
+              managed: bool = False, sudo: bool = False,
+              conf=()) -> DynamicAgent:
     """Add a TA at runtime. host=None: start on the engine host (no ssh).
 
     managed=True registers the agent in the Configurator's /rcf subtree
@@ -280,14 +299,22 @@ def add_agent(name: str, host: str | None = None, type: str = "linux",
     Configurator, so it only supports RCF-level operations (files,
     restart); use managed=True for everything else.  sudo starts the
     agent under sudo and is supported on the managed path only.
+
+    conf is an iterable of extra (key, value) rcfunix pairs appended
+    after host/port/sudo (managed only); flag keys (notcopy,
+    ext_rcf_listener) take "".  E.g. to run the agent in a namespace:
+    conf=[("shell", "ip netns exec ns1")].
     """
+    conf = list(conf)
+    if conf and not managed:
+        raise ValueError("conf requires managed=True")
     if sudo and not managed:
         raise ValueError("sudo=True requires managed=True "
                          "(the raw RCF path starts agents unprivileged)")
     ffi, lib = _shim()
     flags = lib.PYTE_RCF_TA_REBOOTABLE if rebootable else 0
     if managed:
-        pairs = _conf_pairs(host, port or _pick_port(), sudo)
+        pairs = _conf_pairs(host, port or _pick_port(), sudo, conf)
         # Keepalive: kv_strs owns the char[] copies for the call's
         # duration (same pattern as Job.create argv).
         kv_strs = [ffi.new("char[]", _enc(s)) for kv in pairs for s in kv]

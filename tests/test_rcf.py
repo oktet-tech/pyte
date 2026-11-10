@@ -70,6 +70,54 @@ def test_add_agent_sudo_requires_managed():
         add_agent("Agt_X", sudo=True)
 
 
+def test_conf_pairs_appends_extra_in_order():
+    assert _conf_pairs("h", 5, extra=[("connect", "10.0.0.1"),
+                                      ("shell", "ip netns exec ns1")]) == \
+        [("host", "h"), ("port", "5"), ("connect", "10.0.0.1"),
+         ("shell", "ip netns exec ns1")]
+
+
+def test_conf_pairs_rejects_unknown_and_duplicate_keys():
+    with pytest.raises(ValueError, match="unknown rcfunix key 'bogus'"):
+        _conf_pairs("h", 5, extra=[("bogus", "1")])
+    with pytest.raises(ValueError, match="duplicate"):
+        _conf_pairs("h", 5, extra=[("port", "6")])
+
+
+def test_add_agent_conf_requires_managed():
+    from pyte.rcf import add_agent
+
+    with pytest.raises(ValueError, match="conf requires managed=True"):
+        add_agent("A", conf=[("shell", "x")])
+
+
+def test_add_agent_managed_passes_extra_pairs(monkeypatch):
+    from pyte import rcf
+
+    seen = {}
+
+    class FakeLib:
+        PYTE_RCF_TA_REBOOTABLE = 1
+
+        def pyte_cfg_rcf_add_ta(self, name, type_, lib, kv, n, flags):
+            seen["kv"] = [kv[i] for i in range(2 * n)]
+            seen["n"] = n
+            return 0
+
+    class FakeFfi:
+        def new(self, decl, init=None):
+            return list(init) if decl.startswith("const char *[]") \
+                else init
+
+    monkeypatch.setattr(rcf, "_shim", lambda: (FakeFfi(), FakeLib()))
+    monkeypatch.setattr(rcf, "check", lambda rc, *a, **k: None)
+    rcf.add_agent("A", port=7, managed=True, sudo=True,
+                  conf=[("shell", "ip netns exec ns1")])
+    assert seen["n"] == 4
+    assert seen["kv"] == [b"host", b"", b"port", b"7", b"sudo", b"",
+                          b"shell", b"ip netns exec ns1"]
+
+
 # -- _grow_loop tests -------------------------------------------------------
 
 def test_grow_loop_succeeds_first_try():
