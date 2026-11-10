@@ -69,6 +69,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b"caf\xe9", "text/plain; charset=latin-1")
         elif u.path == "/big":
             self._send(200, b"x" * 1000, "text/plain")
+        elif u.path == "/short":
+            # Advertise 100 bytes, send 40, close: a cut response.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"x" * 40)
         elif u.path == "/slow":
             time.sleep(2)
             self._send(200, {})
@@ -179,6 +186,12 @@ def test_body_cap(server):
     with pytest.raises(RuntimeError,
                        match="1000 bytes exceeds the 512 byte cap"):
         bootstrap(server, True, {}, 512, None).request("GET", "/big")
+
+
+def test_body_shorter_than_content_length_fails(server):
+    with pytest.raises(RuntimeError,
+                       match="response body truncated: 40 of 100 bytes"):
+        bootstrap(server, True, {}, 8 << 20, None).request("GET", "/short")
 
 
 def test_request_op_reply_has_no_json_key(server):

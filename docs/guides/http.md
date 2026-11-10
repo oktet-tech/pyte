@@ -110,6 +110,9 @@ underlying `pyte.remote` session, an escape hatch for anything else.
 ## Limits
 
 - A response body over 8 MiB fails the request with `HttpError`.
+- A response body shorter than its `Content-Length` (the server closed
+  early) fails the request with `HttpError` too, as an unsized urllib
+  read would: a cut page is never returned as a 200.
 - Bodies are text: they are decoded with the declared charset (UTF-8
   by default, undecodable bytes replaced), so binary downloads are not
   supported.

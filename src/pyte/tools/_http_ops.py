@@ -115,6 +115,16 @@ def bootstrap(base_url, verify, headers, max_body, timeout):
                            self.max_body))
                 status = resp.status if hasattr(resp, "status") else resp.code
                 reason = resp.reason
+                # A sized read returns what arrived before the server
+                # closed, where an unsized one raises IncompleteRead:
+                # keep that contract, a short body is not a response.
+                length = resp.headers.get("Content-Length")
+                if (length and length.isdigit() and method.upper() != "HEAD"
+                        and status not in (204, 304)
+                        and len(raw) < int(length)):
+                    raise RuntimeError(
+                        f"response body truncated: {len(raw)} of "
+                        f"{length} bytes")
                 final_url = resp.geturl()
                 hdrs = {k.lower(): v for k, v in resp.headers.items()}
                 charset = resp.headers.get_content_charset() or "utf-8"
