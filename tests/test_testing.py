@@ -105,6 +105,16 @@ def test_verdict_recorder_fail_and_skip_raise():
         t.fail("nope")
     with pytest.raises(TestSkip):
         t.skip("not applicable")
+    assert t.verdicts == []
+
+
+def test_verdict_recorder_fail_records_the_verdict_like_the_real_one():
+    t = VerdictRecorder()
+    with pytest.raises(TestFail, match="3 flows failed"):
+        t.fail("3 flows failed", verdict="Flows failed")
+    with pytest.raises(TestFail, match="no DUT"):
+        t.fail("no DUT", verdict=True)
+    assert t.verdicts == [("Flows failed", True), ("no DUT", True)]
 
 
 # -- RecordingMiLogger -------------------------------------------------

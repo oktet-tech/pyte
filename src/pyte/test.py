@@ -51,7 +51,27 @@ class Test:
         lib.pyte_artifact(lib.TE_LL_RING, _enc(text))
 
     # -- outcome -----------------------------------------------------
-    def fail(self, text: str) -> None:
+    def fail(self, text: str, *, verdict: str | bool = False) -> None:
+        """Fail the test with ``text``.
+
+        A failure on its own is invisible to TRC, which matches
+        verdicts only. ``verdict`` makes it visible:
+
+        * ``verdict=True`` records ``text`` itself as an error verdict
+          and fails. The harness then does not repeat the text as
+          "Test failed:", so a constant message is logged once.
+        * ``verdict="..."`` records that constant as the error verdict
+          and fails with ``text``, which may carry the volatile detail
+          (counts, names, values) a verdict must not.
+        * ``verdict=False`` (the default) fails with no verdict at all.
+        """
+        if verdict is True:
+            self.verdict(text, error=True)
+            exc = TestFail(text)
+            exc.verdict_recorded = True
+            raise exc
+        if verdict:
+            self.verdict(verdict, error=True)
         raise TestFail(text)
 
     def skip(self, text: str = "") -> None:
@@ -60,9 +80,9 @@ class Test:
     def expect(self, actual, expected, label: str | None = None) -> None:
         """Fail unless ``actual == expected``.
 
-        The failure verdict is ``"{label}: expected {expected!r}, got
+        The failure text is ``"{label}: expected {expected!r}, got
         {actual!r}"`` (``"value"`` when *label* is omitted). This format
-        is stable: TRC expectations may match against it.
+        is stable; no verdict is recorded, see :meth:`fail`.
         """
         if actual != expected:
             self.fail(f"{label or 'value'}: expected {expected!r}, "
@@ -269,8 +289,14 @@ def start(name: str | None = None):
         # the appended frames the agent-side traceback reaches no log
         # at all.  Empty whenever nothing in the chain came from
         # pyte.remote, which is the usual case.
-        log.error(f"Test failed: {e}{_cleanup_detail(e)}"
-                  f"{_remote_detail(e)}")
+        detail = f"{_cleanup_detail(e)}{_remote_detail(e)}"
+        if getattr(e, "verdict_recorded", False):
+            # The error verdict already carries the text; only what
+            # the verdict cannot hold is logged.
+            if detail:
+                log.error(f"Test failed, see the verdict;{detail}")
+        else:
+            log.error(f"Test failed: {e}{detail}")
         result = 1
     except SystemExit as e:
         # sys.exit() can itself unwind through a `with` block whose

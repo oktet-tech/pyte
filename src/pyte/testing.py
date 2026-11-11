@@ -240,8 +240,12 @@ class VerdictRecorder:
     def substep(self, text: str) -> None:
         self.substeps.append(text)
 
-    def fail(self, text: str) -> None:
+    def fail(self, text: str, *, verdict: str | bool = False) -> None:
         from pyte.errors import TestFail
+        if verdict is True:
+            self.verdict(text, error=True)
+        elif verdict:
+            self.verdict(verdict, error=True)
         raise TestFail(text)
 
     def skip(self, text: str = "") -> None:

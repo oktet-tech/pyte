@@ -167,6 +167,63 @@ def test_start_system_exit_with_cleanup_errors_logs_the_detail(
     assert any("umount failed" in txt for txt in err_logs)
 
 
+# -- fail() with a verdict ---------------------------------------------
+#
+# A bare fail() is invisible to TRC. fail(verdict=...) records the
+# error verdict first; with verdict=True the text is logged once, as
+# the verdict, and not again as "Test failed:".
+
+def test_fail_with_verdict_true_records_text_once(lib, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.fail("the box forwards nothing", verdict=True)
+    assert ei.value.code == 1
+    assert lib.verdicts == [
+        (FakeShimLib.TE_LL_ERROR, "the box forwards nothing")]
+    assert not any("forwards nothing" in txt
+                   for txt in lib.texts(FakeShimLib.TE_LL_ERROR))
+
+
+def test_fail_with_verdict_text_records_both(lib, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.fail("3 of 200 flows failed", verdict="Flows failed")
+    assert ei.value.code == 1
+    assert lib.verdicts == [(FakeShimLib.TE_LL_ERROR, "Flows failed")]
+    assert any("Test failed: 3 of 200 flows failed" == txt
+               for txt in lib.texts(FakeShimLib.TE_LL_ERROR))
+
+
+def test_fail_with_verdict_true_still_logs_cleanup_detail(
+        lib, monkeypatch):
+    """The verdict cannot hold a teardown failure, so that part is
+    still logged even when the text itself is not repeated."""
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            try:
+                t.fail("core dumped", verdict=True)
+            except TestFail as boom:
+                cleanup_all(lambda: (_ for _ in ()).throw(
+                    RuntimeError("umount failed")), primary=boom)
+                raise
+    assert ei.value.code == 1
+    err_logs = lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert any("umount failed" in txt and "core dumped" not in txt
+               for txt in err_logs)
+
+
+def test_fail_without_verdict_records_none(lib, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit):
+        with test.start() as t:
+            t.fail("plain")
+    assert lib.verdicts == []
+    assert "Test failed: plain" in lib.texts(FakeShimLib.TE_LL_ERROR)
+
+
 # -- expect() / check() -----------------------------------------------
 #
 # Pure Python, no shim involved: fail() just raises TestFail, so a bare

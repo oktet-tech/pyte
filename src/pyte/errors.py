@@ -259,7 +259,14 @@ class TimeoutError(TeError, builtins.TimeoutError):
 
 
 class TestFail(Exception):
-    """Raise (or call test.fail()) to fail the test with a message."""
+    """Raise (or call test.fail()) to fail the test with a message.
+
+    ``verdict_recorded`` is set by :meth:`pyte.test.Test.fail` when
+    the message was already recorded as an error verdict, so that the
+    harness does not log the same text a second time.
+    """
+
+    verdict_recorded: bool = False
 
 
 class TestSkip(Exception):
