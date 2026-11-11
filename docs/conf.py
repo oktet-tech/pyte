@@ -24,8 +24,8 @@ import showcase_gen
 showcase_gen.generate(_DOCS)
 
 project = "pyte"
-author = "OKTET Labs"
-copyright = "2026, OKTET Labs"
+author = "OKTET"
+copyright = "2026, OKTET"
 release = _version
 
 extensions = [
