@@ -26,7 +26,12 @@ from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
 from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import ClosedResourceError, EnvError, check
+from pyte.errors import (
+    ClosedResourceError,
+    EnvError,
+    EnvNotFoundError,
+    check,
+)
 from pyte._util import enc as _enc
 
 
@@ -136,8 +141,8 @@ class Env:
         """Raise for a failed lookup: friendly ENOENT, else check()."""
         lib = _shim_lib()
         if lib.pyte_rc_error(rc) == lib.pyte_rc_error(lib.PYTE_ENOENT):
-            raise EnvError(f"env has no {kind} {name!r} "
-                           f"(env: {self._cfg})")
+            raise EnvNotFoundError(f"env has no {kind} {name!r} "
+                                   f"(env: {self._cfg})")
         check(rc, f"env {kind} {name!r}", EnvError)
 
     def pco(self, name: str):
@@ -185,6 +190,26 @@ class Env:
                   f"allocate_port for {name!r}", EnvError)
             p = alloc[0]
         return Addr(ip=ip, family=family, port=p)
+
+    def find_addr(self, name: str, port=None) -> Addr | None:
+        """addr(), or None when the env has no address *name*.
+
+        Any other failure still raises, as addr() does.
+        """
+        try:
+            return self.addr(name, port)
+        except EnvNotFoundError:
+            return None
+
+    def find_iface(self, name: str) -> EnvIface | None:
+        """iface(), or None when the env has no interface *name*.
+
+        Any other failure still raises, as iface() does.
+        """
+        try:
+            return self.iface(name)
+        except EnvNotFoundError:
+            return None
 
     def iface(self, name: str) -> EnvIface:
         """The named interface: OS name, ifindex, owning agent."""

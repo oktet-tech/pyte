@@ -67,6 +67,10 @@ class EnvError(_RcOrMsg, TeError):
     """
 
 
+class EnvNotFoundError(EnvError):
+    """The env has no object of the name looked up."""
+
+
 class DpdkError(_RcOrMsg, TeError):
     """Preparing an agent for DPDK failed (pyte.dpdk).
 

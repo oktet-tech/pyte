@@ -333,3 +333,26 @@ def test_lookups_raise_closed_resource_error_after_close_not_shim(
     # None of the lookups reached the shim: only teardown calls (the
     # env_free from close()) are recorded.
     assert all(c[0] == "env_free" for c in lib.calls)
+
+
+def test_find_iface_and_find_addr_return_none_for_a_miss(monkeypatch):
+    env, lib = _fake_env(monkeypatch)
+    assert env.find_iface("iut_pf0").name == "veth0"
+    assert env.find_addr("iut_pf0_addr").ip == "10.0.0.1"
+    lib.pyte_env_get_if = lambda *a: lib.PYTE_ENOENT
+    lib.pyte_env_get_addr = lambda *a: lib.PYTE_ENOENT
+    assert env.find_iface("nosuch") is None
+    assert env.find_addr("nosuch_addr") is None
+    with pytest.raises(EnvError, match="no interface 'nosuch'"):
+        env.iface("nosuch")
+
+
+def test_find_iface_and_find_addr_still_raise_real_failures(monkeypatch):
+    env, lib = _fake_env(monkeypatch)
+    lib.PYTE_ETIMEDOUT = 0x7E3C
+    lib.pyte_env_get_if = lambda *a: 5
+    lib.pyte_env_get_addr = lambda *a: 5
+    with pytest.raises(EnvError):
+        env.find_iface("iut_pf0")
+    with pytest.raises(EnvError):
+        env.find_addr("iut_pf0_addr")
