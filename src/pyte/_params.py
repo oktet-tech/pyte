@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+
+from pyte.errors import ParamError
 
 _VAR_PREFIX = "VAR."
 _ENV_PREFIX = "TE_TEST_VAR_"
@@ -51,7 +54,149 @@ def parse_argv(argv: list[str]) -> dict[str, str]:
     return params
 
 
-class Params:
+_UNSET = object()
+_TRUE = frozenset({"true", "yes", "1", "on"})
+_FALSE = frozenset({"false", "no", "0", "off"})
+
+
+def _to_int(value: str) -> int:
+    return int(value, 0)
+
+
+def _to_bool(value: str) -> bool:
+    v = value.lower()
+    if v in _TRUE:
+        return True
+    if v in _FALSE:
+        return False
+    raise ValueError(value)
+
+
+def _to_flag(value: str) -> bool:
+    if value == "TRUE":
+        return True
+    if value == "FALSE":
+        return False
+    raise ValueError(value)
+
+
+class _Readers:
+    """The typed readers Params and Compound share.
+
+    Each takes the name to look up and, optionally, the value to
+    return when it is absent; that default is returned as it is, not
+    parsed.  A value that does not parse is a ParamError naming the
+    parameter in full: ``iperf3_tcp_count='abc': want an integer``.
+
+    A subclass says how a name is looked up (_lookup(), which returns
+    the full parameter name and its value, or None) and what an
+    absent one without a default raises (_absent()).
+    """
+
+    def _lookup(self, name: str) -> tuple[str, str] | None:
+        raise NotImplementedError
+
+    def _absent(self, name: str):
+        raise NotImplementedError
+
+    def _read(self, name: str, default, conv, want: str):
+        found = self._lookup(name)
+        if found is None:
+            if default is _UNSET:
+                self._absent(name)
+            return default
+        full, value = found
+        try:
+            return conv(value)
+        except ValueError:
+            raise ParamError(f"{full}={value!r}: want {want}") from None
+
+    def int(self, name: str, default=_UNSET) -> int:
+        """An integer; 0x, 0o and 0b prefixes are accepted."""
+        return self._read(name, default, _to_int, "an integer")
+
+    def float(self, name: str, default=_UNSET) -> float:
+        return self._read(name, default, float, "a number")
+
+    def bool(self, name: str, default=_UNSET) -> bool:
+        """A boolean in any common spelling, whatever the case:
+        true/false, yes/no, 1/0, on/off."""
+        return self._read(name, default, _to_bool,
+                          "a boolean (true/false, yes/no, 1/0, on/off)")
+
+    def flag(self, name: str, default=_UNSET) -> bool:
+        """A boolean in TE's own spelling only: TRUE or FALSE.
+
+        What TEST_GET_BOOL_PARAM accepts in a C test.  One spelling
+        per meaning keeps the iterations of a test the same ones in
+        TRC and in the results history.
+        """
+        return self._read(name, default, _to_flag, "TRUE or FALSE")
+
+    def enum(self, name: str, mapping: dict[str, object],
+             default=_UNSET) -> object:
+        """The value *mapping* gives for the parameter's text."""
+        def conv(value):
+            if value not in mapping:
+                raise ValueError(value)
+            return mapping[value]
+        return self._read(name, default, conv,
+                          f"one of {sorted(mapping)}")
+
+
+class Compound(_Readers, Mapping):
+    """One compound argument: its name and its field -> value mapping.
+
+    A read-only mapping of the fields, in Tester's order, plus the
+    typed readers of Params.  The readers and error() report a field
+    by the flattened name ``<argument>_<field>``, the one the log
+    shows and a plain argument overrides the field by.
+    """
+
+    def __init__(self, name: str, fields: Mapping[str, str]):
+        self.name = name
+        self._fields = dict(fields)
+
+    def __getitem__(self, field: str) -> str:
+        return self._fields[field]
+
+    def __iter__(self):
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def __repr__(self) -> str:
+        return f"Compound({self.name!r}, {self._fields!r})"
+
+    def param(self, field: str) -> str:
+        """The flattened parameter name of *field*."""
+        return f"{self.name}_{field}"
+
+    def _lookup(self, name: str) -> tuple[str, str] | None:
+        if name not in self._fields:
+            return None
+        return self.param(name), self._fields[name]
+
+    def _absent(self, name: str):
+        raise ParamError(f"{self.param(name)}: the field is required")
+
+    def require(self, field: str) -> str:
+        """The text of *field*; ParamError when the argument lacks it."""
+        if field not in self._fields:
+            self._absent(field)
+        return self._fields[field]
+
+    def error(self, field: str, msg: str) -> ParamError:
+        """A ParamError about *field*, to raise: the flattened name,
+        the value when the field is there, then *msg*."""
+        if field in self._fields:
+            return ParamError(
+                f"{self.param(field)}={self._fields[field]!r}: {msg}")
+        return ParamError(f"{self.param(field)}: {msg}")
+
+
+class Params(_Readers):
     """Typed access to test parameters.
 
     Note: the methods int(), float(), and bool() intentionally shadow the
@@ -67,9 +212,6 @@ class Params:
     ``<arg>_<field>`` entries.  Those are exposed by compounds(),
     compound() and plain(); the raw accessors still see everything.
     """
-
-    _TRUE = {"true", "yes", "1", "on"}
-    _FALSE = {"false", "no", "0", "off"}
 
     def __init__(self, raw: dict[str, str]):
         self._raw = raw
@@ -116,14 +258,14 @@ class Params:
         """
         return dict(self._raw)
 
-    def compounds(self) -> dict[str, dict[str, str]]:
-        """Compound arguments as a new name -> {field: value} dict."""
-        return {n: dict(f) for n, f in self._compounds.items()}
+    def compounds(self) -> dict[str, Compound]:
+        """Compound arguments as a new name -> Compound dict."""
+        return {n: Compound(n, f) for n, f in self._compounds.items()}
 
-    def compound(self, name: str) -> dict[str, str]:
-        """One compound argument as a new field -> value dict."""
+    def compound(self, name: str) -> Compound:
+        """One compound argument."""
         try:
-            return dict(self._compounds[name])
+            return Compound(name, self._compounds[name])
         except KeyError:
             raise KeyError(
                 f"test has no compound argument {name!r}") from None
@@ -136,23 +278,10 @@ class Params:
         """
         return dict(self._plain)
 
-    def int(self, name: str) -> int:
-        return int(self[name], 0)
+    def _lookup(self, name: str) -> tuple[str, str] | None:
+        if name not in self._raw:
+            return None
+        return name, self._raw[name]
 
-    def float(self, name: str) -> float:
-        return float(self[name])
-
-    def bool(self, name: str) -> bool:
-        v = self[name].lower()
-        if v in self._TRUE:
-            return True
-        if v in self._FALSE:
-            return False
-        raise ValueError(f"parameter {name}={v!r} is not a boolean")
-
-    def enum(self, name: str, mapping: dict[str, object]) -> object:
-        v = self[name]
-        if v not in mapping:
-            raise ValueError(f"parameter {name}={v!r} not in "
-                             f"{sorted(mapping)}")
-        return mapping[v]
+    def _absent(self, name: str):
+        raise KeyError(f"test has no parameter {name!r}")

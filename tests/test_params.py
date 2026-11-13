@@ -149,3 +149,100 @@ def test_params_raw_accessors_see_marker():
 def test_params_compounds_order():
     p = Params(parse_argv(["COMP.b=x", "COMP.a=y", "b_x=1", "a_y=2"]))
     assert list(p.compounds()) == ["b", "a"]
+
+
+def test_param_error_is_a_test_failure_and_a_value_error():
+    from pyte.errors import ParamError, TestFail
+    assert issubclass(ParamError, TestFail)
+    assert issubclass(ParamError, ValueError)
+
+
+@pytest.mark.parametrize("read, raw, want", [
+    ("int", "abc", "n='abc': want an integer"),
+    ("float", "1.5.2", "n='1.5.2': want a number"),
+    ("bool", "maybe", "n='maybe': want a boolean"),
+    ("flag", "true", "n='true': want TRUE or FALSE"),
+])
+def test_reader_errors_name_the_parameter(read, raw, want):
+    from pyte.errors import ParamError
+    p = Params({"n": raw})
+    with pytest.raises(ParamError, match=want):
+        getattr(p, read)("n")
+
+
+def test_enum_error_names_the_parameter_and_the_choices():
+    from pyte.errors import ParamError
+    p = Params({"mode": "z"})
+    assert p.enum("mode", {"z": 26}) == 26
+    with pytest.raises(ParamError, match=r"mode='z': want one of \['a', 'b'\]"):
+        p.enum("mode", {"a": 1, "b": 2})
+
+
+def test_flag_takes_only_the_te_spelling():
+    p = Params({"a": "TRUE", "b": "FALSE"})
+    assert p.flag("a") is True and p.flag("b") is False
+    assert p.bool("a") is True          # bool() stays loose
+
+
+def test_readers_return_the_default_of_an_absent_parameter():
+    p = Params({"n": "3"})
+    assert p.int("n", 7) == 3
+    assert p.int("missing", 7) == 7
+    assert p.float("missing", 0.5) == 0.5
+    assert p.bool("missing", True) is True
+    assert p.flag("missing", False) is False
+    assert p.enum("missing", {"a": 1}, None) is None
+    with pytest.raises(KeyError, match="no parameter 'missing'"):
+        p.int("missing")
+
+
+def test_compound_is_a_named_mapping():
+    p = Params(parse_argv(["COMP.link=mtu,speed", "link_mtu=1500",
+                           "link_speed=25G"]))
+    link = p.compound("link")
+    assert link.name == "link"
+    assert dict(link) == {"mtu": "1500", "speed": "25G"}
+    assert list(link) == ["mtu", "speed"] and len(link) == 2
+    assert link["mtu"] == "1500" and link.get("duplex") is None
+    assert "speed" in link and "duplex" not in link
+    assert p.compounds()["link"] == link
+
+
+def test_compound_readers_report_the_flattened_name():
+    from pyte._params import Compound
+    from pyte.errors import ParamError
+    lane = Compound("iperf3_tcp", {"count": "abc", "streams": "4",
+                                   "reverse": "yes"})
+    assert lane.int("streams") == 4
+    assert lane.int("burst", 32) == 32
+    with pytest.raises(ParamError,
+                       match="iperf3_tcp_count='abc': want an integer"):
+        lane.int("count")
+    with pytest.raises(ParamError,
+                       match="iperf3_tcp_reverse='yes': want TRUE or FALSE"):
+        lane.flag("reverse")
+
+
+def test_compound_require_and_error():
+    from pyte._params import Compound
+    from pyte.errors import ParamError
+    lane = Compound("ping", {"dut": "iut_pf0", "count": "0"})
+    assert lane.require("dut") == "iut_pf0"
+    with pytest.raises(ParamError,
+                       match="ping_peer: the field is required"):
+        lane.require("peer")
+    with pytest.raises(ParamError, match="ping_peer: the field is required"):
+        lane.int("peer")
+    e = lane.error("count", "must be >= 1")
+    assert isinstance(e, ParamError)
+    assert str(e) == "ping_count='0': must be >= 1"
+    assert str(lane.error("peer", "is needed here")) == (
+        "ping_peer: is needed here")
+
+
+def test_compound_does_not_alias_the_callers_fields():
+    from pyte._params import Compound
+    fields = {"a": "1"}
+    c = Compound("x", fields)
+    fields["a"] = "2"
+    assert c["a"] == "1"

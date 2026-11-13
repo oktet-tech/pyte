@@ -13,7 +13,7 @@ from typing import Callable
 
 from pyte import log
 from pyte._util import shim_lib as _shim_lib
-from pyte._params import Params, parse_argv
+from pyte._params import Compound, Params, parse_argv  # noqa: F401
 from pyte.errors import TestFail, TestSkip
 from pyte._util import enc as _enc
 from pyte._util import format_exc_chain as _format_exc_chain

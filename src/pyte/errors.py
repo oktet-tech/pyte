@@ -293,6 +293,16 @@ class TestFail(Exception):
     verdict_recorded: bool = False
 
 
+class ParamError(TestFail, ValueError):
+    """A test parameter has a value the test cannot use.
+
+    The message names the parameter.  It is a TestFail, so raised
+    under test.start() it fails the test with that message and no
+    traceback; it is a ValueError too, which the typed readers of
+    Params raised before.
+    """
+
+
 class TestSkip(Exception):
     """Raise (or call test.skip()) to mark the test skipped."""
 
