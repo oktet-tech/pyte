@@ -6,7 +6,8 @@ from __future__ import annotations
 import enum
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, RpcError, check
 
 
@@ -118,7 +119,7 @@ class IoMux:
         self._h = handle
 
     @classmethod
-    def create(cls, server, kind: Kind = Kind.EPOLL) -> "IoMux":
+    def create(cls, server, kind: Kind = Kind.EPOLL) -> IoMux:
         """Create a new iomux of the given *kind* on *server*."""
         ffi, lib = _shim()
         if not isinstance(kind, Kind):
@@ -147,7 +148,7 @@ class IoMux:
               f"iomux_destroy on {self._server!r}", RpcError)
         self._h = None
 
-    def __enter__(self) -> "IoMux":
+    def __enter__(self) -> IoMux:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

@@ -28,7 +28,7 @@ class _SleepServer(RpcServer):
             "timeout covers only its FIRST rpc, not the sleep")
 
 
-@pytest.fixture()
+@pytest.fixture
 def _no_shim_calls(monkeypatch):
     """Any transport shim call in sleep() is a bug now — fail loudly.
 
@@ -249,6 +249,7 @@ def test_check_call_always_raises_on_failure(_no_shim_calls, monkeypatch):
     """No suppression state: a failed predicate raises, full stop."""
     import sys
     import types
+
     from pyte.errors import RpcError
 
     class Lib:
@@ -554,6 +555,7 @@ class _SeekLib:
 
 def _seek_file(monkeypatch, length, pos):
     import cffi
+
     from pyte.rpc.files import RpcFile
     lib = _SeekLib(length)
     lib.pos = pos

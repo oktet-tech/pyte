@@ -28,7 +28,7 @@ step.  A run of pure setup code inside an ``if`` is not scenario.
 from __future__ import annotations
 
 import ast
-from typing import Iterator
+from collections.abc import Iterator
 
 #: Call attribute names that declare scenario, and what they do.
 _KINDS = {"step": "step", "step_push": "push", "step_pop": "pop"}

@@ -4,7 +4,11 @@
 from pyte.job import JobStatus, StatusKind
 from pyte.tools import ssh  # noqa: F401  (import-smoke check)
 from pyte.tools.ssh import (
-    ClientOpts, PermitRootLogin, ServerOpts, StrictHostKeyChecking, Ssh,
+    ClientOpts,
+    PermitRootLogin,
+    ServerOpts,
+    Ssh,
+    StrictHostKeyChecking,
 )
 
 OK = JobStatus(StatusKind.EXITED, 0)

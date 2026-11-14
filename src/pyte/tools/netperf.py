@@ -51,9 +51,11 @@ from typing import TYPE_CHECKING
 
 from pyte.errors import NetperfError
 from pyte.tools import _tool
-from pyte.tools._clientserver import serve
+from pyte.tools._clientserver import (
+    Endpoint,  # noqa: F401  (re-exported)
+    serve,
+)
 from pyte.tools._tool import check_ipversion
-from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
@@ -279,7 +281,7 @@ class Netperf(_tool.ToolHandle):
 
 
 @contextmanager
-def server(pco: "RpcServer", opts: "Opts | None" = None, *,
+def server(pco: RpcServer, opts: Opts | None = None, *,
            bind: str = "127.0.0.1", ready_delay: float = 1.0):
     """Context manager: run a netserver for the block's duration.
 
@@ -302,7 +304,7 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: run a netperf *client*; yield a :class:`Netperf`."""
     def _setup(job):
         flt = job.stdout.attach_filter(name="netperf_stdout",

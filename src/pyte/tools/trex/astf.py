@@ -18,14 +18,14 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterator
+from typing import TYPE_CHECKING
 
 from pyte import log, mi
 from pyte._cleanup import cleanup_all
-from pyte.errors import (ProcessOutputUnsupportedError, RemotePythonError,
-                         TrexError)
+from pyte.errors import ProcessOutputUnsupportedError, RemotePythonError, TrexError
 from pyte.process import Output, Process
 from pyte.tools.trex import _agent
 from pyte.tools.trex import _astf_ops as _ops
@@ -477,7 +477,7 @@ class ServerInfo:
     console_path: str = ""
 
 
-def _write_cfg_on_agent(pco: "RpcServer", opts: ServerOpts,
+def _write_cfg_on_agent(pco: RpcServer, opts: ServerOpts,
                         tmp_dir: str | None) -> str:
     """Write the platform cfg YAML on the agent, return its path."""
     from pyte import remote
@@ -486,7 +486,7 @@ def _write_cfg_on_agent(pco: "RpcServer", opts: ServerOpts,
         return rem.call(_stl_ops.write_cfg, opts.cfg_yaml(), tmp_dir)
 
 
-def _wait_sync_port(pco: "RpcServer", opts: ServerOpts,
+def _wait_sync_port(pco: RpcServer, opts: ServerOpts,
                     timeout: float) -> None:
     """Block until an ASTF client can connect, or raise TrexError.
 
@@ -519,7 +519,7 @@ def _wait_sync_port(pco: "RpcServer", opts: ServerOpts,
 _BRINGUP_TAIL = 64 * 1024
 
 
-def _log_console_tail(pco: "RpcServer", path: str) -> None:
+def _log_console_tail(pco: RpcServer, path: str) -> None:
     """Log the end of the console of a TRex that did not come up.
 
     The console file is the only record of why: the agent does not log
@@ -537,7 +537,7 @@ def _log_console_tail(pco: "RpcServer", path: str) -> None:
     log.step_pop("TRex console logged")
 
 
-def start_server(pco: "RpcServer", opts: ServerOpts,
+def start_server(pco: RpcServer, opts: ServerOpts,
                  name: str = "trex",
                  connect_timeout: float = CONNECT_TIMEOUT) -> ServerInfo:
     """Start a TRex the Configurator owns, and wait for it to answer.
@@ -610,7 +610,7 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     return info
 
 
-def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
+def stop_server(info: ServerInfo, pco: RpcServer | None = None) -> None:
     """Stop the process, then remove its cfg file and console file.
 
     The order is load-bearing, and is the one session()'s teardown
@@ -643,8 +643,8 @@ def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
 
 
 @contextmanager
-def attach(pco: "RpcServer", info: ServerInfo,
-           connect_timeout: float = CONNECT_TIMEOUT) -> Iterator["Client"]:
+def attach(pco: RpcServer, info: ServerInfo,
+           connect_timeout: float = CONNECT_TIMEOUT) -> Iterator[Client]:
     """Connect a client to an already-running TRex.
 
     A context manager, unlike :func:`start_server`, because this does
@@ -723,7 +723,7 @@ def attach(pco: "RpcServer", info: ServerInfo,
 
 
 @contextmanager
-def session(pco: "RpcServer", opts: ServerOpts,
+def session(pco: RpcServer, opts: ServerOpts,
             connect_timeout: float = CONNECT_TIMEOUT
             ) -> Iterator[Client]:
     """Launch ``t-rex-64 -i --astf`` on pco's agent, yield a Client.

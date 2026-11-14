@@ -4,11 +4,26 @@
 import pytest
 
 from pyte import errors
-from pyte.errors import (EnvError, EthtoolError, FioError, IperfError,
-                         MemaslapError, MemcachedError, MemtierError,
-                         Mke2fsError, NetperfError, NptcpError, PingError,
-                         SfntError, SshError, TeError, ToolError, TrcError,
-                         TrexError, WrkError)
+from pyte.errors import (
+    EnvError,
+    EthtoolError,
+    FioError,
+    IperfError,
+    MemaslapError,
+    MemcachedError,
+    MemtierError,
+    Mke2fsError,
+    NetperfError,
+    NptcpError,
+    PingError,
+    SfntError,
+    SshError,
+    TeError,
+    ToolError,
+    TrcError,
+    TrexError,
+    WrkError,
+)
 
 TOOL_ERRORS = [FioError, PingError, IperfError, TrexError, WrkError,
                NetperfError, SfntError, NptcpError, MemcachedError,

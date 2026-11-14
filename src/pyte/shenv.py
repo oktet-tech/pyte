@@ -13,7 +13,7 @@ configuration backup restores each agent's environment after the run.
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from pyte import cfg
 

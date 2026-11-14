@@ -6,8 +6,7 @@ import base64
 import pytest
 from scapy.all import IP, UDP, Ether
 
-from pyte.tools.trex import (PktBuilder, Stream, TXCont, TXMultiBurst,
-                             TXSingleBurst)
+from pyte.tools.trex import PktBuilder, Stream, TXCont, TXMultiBurst, TXSingleBurst
 
 
 def test_pktbuilder_rejects_string():

@@ -70,12 +70,11 @@ if TYPE_CHECKING:
 # Unit-scale dictionaries (mirror tapi_wrk.c parse_unit tables)
 # ---------------------------------------------------------------------------
 
-from pyte.tools._units import (BINARY as _BINARY,  # noqa: E402
-                               METRIC as _METRIC,
-                               PERCENT as _PERCENT,
-                               TIME_US as _TIME_US,
-                               parse_unit as _parse_unit)
-
+from pyte.tools._units import BINARY as _BINARY  # noqa: E402
+from pyte.tools._units import METRIC as _METRIC
+from pyte.tools._units import PERCENT as _PERCENT
+from pyte.tools._units import TIME_US as _TIME_US
+from pyte.tools._units import parse_unit as _parse_unit
 
 # ---------------------------------------------------------------------------
 # Frozen report dataclasses
@@ -353,7 +352,7 @@ class Wrk(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: create, start, and clean up a wrk job.
 
     Yields a :class:`Wrk`; call :meth:`Wrk.wait` inside the block.

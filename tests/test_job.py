@@ -827,7 +827,7 @@ def test_run_default_level_is_ring(monkeypatch):
 def test_run_one_shot_reports_failure_status(monkeypatch):
     """A non-zero exit is a result, not an exception (subprocess.run
     parity without check=True)."""
-    from pyte.job import run, StatusKind
+    from pyte.job import StatusKind, run
     lib = _fake_shim(monkeypatch)
     lib.wait_result = (FakeLib.PYTE_JOB_EXITED, 3)
     server = types.SimpleNamespace(

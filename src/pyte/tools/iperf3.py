@@ -70,9 +70,11 @@ from typing import TYPE_CHECKING
 
 from pyte.errors import IperfError
 from pyte.tools import _tool
-from pyte.tools._clientserver import serve
+from pyte.tools._clientserver import (
+    Endpoint,  # noqa: F401  (re-exported)
+    serve,
+)
 from pyte.tools._tool import check_ipversion
-from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
 
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
@@ -458,7 +460,7 @@ class Iperf3(_tool.ToolHandle):
 
 
 @contextmanager
-def server(pco: "RpcServer", opts: "Opts | None" = None, *,
+def server(pco: RpcServer, opts: Opts | None = None, *,
            host: str = "127.0.0.1", ready_delay: float = 1.0):
     """Context manager: run an iperf3 server for the block's duration.
 
@@ -481,7 +483,7 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: run an iperf3 *client*; yield an :class:`Iperf3`."""
     def _setup(job):
         # Capture stdout (the -J JSON or the text summary, fed to the

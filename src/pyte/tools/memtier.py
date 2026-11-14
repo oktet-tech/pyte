@@ -174,10 +174,10 @@ class Memtier(_tool.ToolHandle):
     def _read_output(self, timeout: float) -> list:
         return [m.data for m in self._stats_flt.messages(timeout=timeout)]
 
-    def _parse(self, rows: list) -> "Report":
+    def _parse(self, rows: list) -> Report:
         return parse_report([r for r in rows if r], self._cmd)
 
-    def _mi(self, logger, rep: "Report") -> None:
+    def _mi(self, logger, rep: Report) -> None:
         from pyte.mi import Aggr, Meas, Mult
         for name, st in (("Sets", rep.sets),
                          ("Gets", rep.gets),
@@ -194,7 +194,7 @@ class Memtier(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Create+start a memtier_benchmark client; yields Memtier;
     close() on exit."""
     def _setup(job):

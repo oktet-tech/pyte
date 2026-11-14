@@ -3,12 +3,10 @@
 """TE logging: direct API + stdlib logging bridge."""
 from __future__ import annotations
 
-from pyte._util import shim_lib as _shim_lib
-
 import logging
 
 from pyte._util import enc
-
+from pyte._util import shim_lib as _shim_lib
 
 # The implementation lives in pyte._util (shared infra); the name stays
 # importable here for existing callers.

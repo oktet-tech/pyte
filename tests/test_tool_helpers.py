@@ -7,7 +7,6 @@ import pytest
 
 from pyte.tools import _tool, _units
 
-
 # -- argv builders ------------------------------------------------------
 
 def test_opt_emits_flag_value_pair():

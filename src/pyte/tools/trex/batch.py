@@ -107,7 +107,8 @@ import os
 import random
 import shlex
 import string
-from typing import TYPE_CHECKING, Iterator
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 from pyte import log, rcf
 from pyte._cleanup import cleanup_all
@@ -451,7 +452,7 @@ def _shell_cmd(trex_exec: str, argv: list[str]) -> str:
             + " ".join(shlex.quote(a) for a in argv))
 
 
-def _bind_pci(pco: "RpcServer", opts: Opts) -> None:
+def _bind_pci(pco: RpcServer, opts: Opts) -> None:
     """Bind every :class:`PciBdf` endpoint's device to ``opts.driver``.
 
     Mirrors ``tapi_trex_bind_pci_addr`` (tapi_trex.c:628-676): find
@@ -465,7 +466,7 @@ def _bind_pci(pco: "RpcServer", opts: Opts) -> None:
             pci.device[ep.iface.bdf].driver = opts.driver
 
 
-def _remove_tmp_files(pco: "RpcServer", *paths: str) -> None:
+def _remove_tmp_files(pco: RpcServer, *paths: str) -> None:
     """Best-effort ``pco.unlink()`` of each path; ENOENT is not an error.
 
     Deliberately still the RPC ``unlink()`` here, not
@@ -500,7 +501,7 @@ class Trex:
         :func:`_shell_cmd`), so ``job.program`` is ``"/bin/sh"``.
     """
 
-    def __init__(self, pco: "RpcServer", job: "Job", cmd: list[str],
+    def __init__(self, pco: RpcServer, job: Job, cmd: list[str],
                  yaml_path: str, astf_path: str):
         self.job = job
         self.cmd = cmd
@@ -511,12 +512,12 @@ class Trex:
         self._stopped = False
         self._job_destroyed = False
         self._files_removed = False
-        self._summary: dict[str, "Filter"] = {}
-        self._m_traff_dur: tuple["Filter", "Filter"] | None = None
-        self._opt: dict[str, tuple["Filter", "Filter"]] = {}
-        self._port_stat: dict[str, list["Filter"]] = {}
-        self._port_time: dict[str, "Filter"] = {}
-        self._global: dict[str, "Filter"] = {}
+        self._summary: dict[str, Filter] = {}
+        self._m_traff_dur: tuple[Filter, Filter] | None = None
+        self._opt: dict[str, tuple[Filter, Filter]] = {}
+        self._port_stat: dict[str, list[Filter]] = {}
+        self._port_time: dict[str, Filter] = {}
+        self._global: dict[str, Filter] = {}
 
     def _attach_filters(self, opts: Opts) -> None:
         """Attach every stdout filter table BEFORE start() (tapi_trex.c:
@@ -567,7 +568,7 @@ class Trex:
         """Start the TRex process (tapi_trex_start)."""
         self.job.start()
 
-    def wait(self, timeout: float | None = None) -> "JobStatus":
+    def wait(self, timeout: float | None = None) -> JobStatus:
         """Wait for completion; None (the default) blocks forever.
 
         Mirrors ``tapi_trex_wait`` (tapi_trex.c:1685-1699): a still-
@@ -679,7 +680,7 @@ class Trex:
 
 
 @contextlib.contextmanager
-def create(pco: "RpcServer", opts: Opts) -> Iterator[Trex]:
+def create(pco: RpcServer, opts: Opts) -> Iterator[Trex]:
     """Build a :class:`Trex` batch run; NOT started (call :meth:`Trex.start`).
 
     Order (mirrors ``tapi_trex_create``, tapi_trex.c:1477-1672, modulo

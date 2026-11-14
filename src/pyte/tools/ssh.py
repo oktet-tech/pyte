@@ -35,9 +35,9 @@ no tapi_job_wrapper binding). No MI (the C TAPI emits none).
 from __future__ import annotations
 
 import enum
+import signal as _signal
 from contextlib import contextmanager
 from dataclasses import dataclass
-import signal as _signal
 from typing import TYPE_CHECKING
 
 from pyte.errors import SshError
@@ -177,7 +177,7 @@ class Ssh(_tool.ToolHandle):
         timeout = self._resolve_timeout(timeout)
         return self._job.wait(timeout=timeout)
 
-    def kill(self, signal: "int | _signal.Signals" = _signal.SIGTERM) -> None:
+    def kill(self, signal: int | _signal.Signals = _signal.SIGTERM) -> None:
         """Send a signal to the process."""
         self._job.kill(signal)
 
@@ -185,7 +185,7 @@ class Ssh(_tool.ToolHandle):
         pass    # C behaviour: destroy only, no graceful stop
 
 
-def client(pco: "RpcServer", opts: ClientOpts) -> Ssh:
+def client(pco: RpcServer, opts: ClientOpts) -> Ssh:
     """Create (but do not start) an ssh client job."""
     job = pco.job(opts.path, opts.client_argv())
     job.stdout.log(level="RING")
@@ -193,7 +193,7 @@ def client(pco: "RpcServer", opts: ClientOpts) -> Ssh:
     return Ssh(job)
 
 
-def server(pco: "RpcServer", opts: ServerOpts) -> Ssh:
+def server(pco: RpcServer, opts: ServerOpts) -> Ssh:
     """Create (but do not start) an sshd server job."""
     job = pco.job(opts.path, opts.server_argv())
     job.stdout.log(level="RING")
@@ -202,7 +202,7 @@ def server(pco: "RpcServer", opts: ServerOpts) -> Ssh:
 
 
 @contextmanager
-def run(pco: "RpcServer", opts):
+def run(pco: RpcServer, opts):
     """Context manager: create + start an ssh (or sshd) job, then close.
 
     Dispatches on the opts type: :class:`ServerOpts` runs sshd,

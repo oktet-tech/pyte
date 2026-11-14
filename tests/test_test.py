@@ -21,7 +21,7 @@ from pyte.errors import RemotePythonError, TestFail
 from pyte.testing import FakeShimLib
 
 
-@pytest.fixture()
+@pytest.fixture
 def lib(monkeypatch, start_state):
     lib = FakeShimLib()
     monkeypatch.setitem(sys.modules, "pyte._shim",
@@ -179,7 +179,7 @@ def test_fail_with_verdict_text_records_both(lib, monkeypatch):
             t.fail("3 of 200 flows failed", verdict="Flows failed")
     assert ei.value.code == 1
     assert lib.verdicts == [(FakeShimLib.TE_LL_ERROR, "Flows failed")]
-    assert any("Test failed: 3 of 200 flows failed" == txt
+    assert any(txt == "Test failed: 3 of 200 flows failed"
                for txt in lib.texts(FakeShimLib.TE_LL_ERROR))
 
 
@@ -217,7 +217,7 @@ def test_fail_without_verdict_records_none(lib, monkeypatch):
 # Test(Params({})) is enough to exercise these.
 
 
-@pytest.fixture()
+@pytest.fixture
 def t():
     return test.Test(Params({}))
 
@@ -299,7 +299,7 @@ def test_verdict_recorder_need_matches_the_handle():
 # a monkeypatched pyte.cfg.get (test.py imports cfg lazily).
 
 
-@pytest.fixture()
+@pytest.fixture
 def cfg_get(monkeypatch):
     """Record the OIDs asked for; answer from a settable value."""
     from pyte import cfg

@@ -7,9 +7,10 @@ import enum
 from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import check
 from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import check
 
 
 class Msg(enum.Flag):
@@ -71,7 +72,7 @@ def _ensure_msg_bits() -> None:
         MSG_BITS[member] = int(getattr(lib, const))
 
 
-def _msg_bits(flags: "Msg") -> int:
+def _msg_bits(flags: Msg) -> int:
     """Convert a :class:`Msg` flag into the TE RPC integer bit mask."""
     if not isinstance(flags, Msg):
         raise TypeError(
@@ -84,7 +85,7 @@ def _msg_bits(flags: "Msg") -> int:
     return bits
 
 
-def _msg_flag(bits: int) -> "Msg":
+def _msg_flag(bits: int) -> Msg:
     """Decode a TE RPC integer bit mask back into a :class:`Msg` flag."""
     _ensure_msg_bits()
     flag = Msg(0)
@@ -114,7 +115,7 @@ class RecvMsg:
     data: bytes
     ancillary: list[tuple[int, int, bytes]]
     addr: tuple[str, int] | None
-    flags: "Msg"
+    flags: Msg
 
 # inet6/local need sockaddr helpers not yet implemented (_mk_addr and
 # _parse_addr only handle AF_INET), so only inet is exposed for now.
@@ -198,7 +199,7 @@ class RpcSocket:
 
     @classmethod
     def open(cls, server, family: Family = Family.INET,
-             type: SockType = SockType.STREAM) -> "RpcSocket":
+             type: SockType = SockType.STREAM) -> RpcSocket:
         if not isinstance(family, Family):
             raise TypeError(
                 f"family must be a Family, not "
@@ -287,7 +288,7 @@ class RpcSocket:
         self.server._check_call(rc, out[0], lambda v: v == 0,
                                 f"connect({addr})")
 
-    def accept(self) -> "RpcSocket":
+    def accept(self) -> RpcSocket:
         ffi, lib = _shim()
         ss = ffi.new("struct sockaddr_storage *")
         sslen = ffi.new("socklen_t *",
@@ -504,7 +505,7 @@ class RpcSocket:
         return int(sent[0])
 
     def recvmsg(self, bufsize: int, ctrl_space: int = 0,
-                flags: Msg = Msg(0)) -> "RecvMsg":
+                flags: Msg = Msg(0)) -> RecvMsg:
         """Receive a message with optional ancillary data.
 
         :param bufsize:    data buffer size in bytes.

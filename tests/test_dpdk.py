@@ -64,7 +64,7 @@ class FakeModule:
         FakeModule.created.append(self)
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_cfg(monkeypatch):
     def install(cfg):
         monkeypatch.setattr(dpdk, "cfg", cfg)
@@ -72,7 +72,7 @@ def fake_cfg(monkeypatch):
     return install
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_module(monkeypatch):
     FakeModule.created = []
     monkeypatch.setattr(dpdk, "Module", FakeModule)

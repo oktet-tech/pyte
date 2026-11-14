@@ -13,7 +13,7 @@ byte-for-byte, and attaches what went wrong during teardown to it.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 
 def _attach(exc: BaseException, failures: list[BaseException]) -> None:

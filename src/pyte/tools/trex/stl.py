@@ -13,17 +13,23 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 from pyte import log
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
 from pyte.tools.trex import _agent, _ops
 from pyte.tools.trex._config import ServerOpts
-from pyte.tools.trex._stats import (GlobalStats, LatencyStats, PortStats,
-                                    parse_global_stats, parse_latency_stats,
-                                    parse_port_stats)
+from pyte.tools.trex._stats import (
+    GlobalStats,
+    LatencyStats,
+    PortStats,
+    parse_global_stats,
+    parse_latency_stats,
+    parse_port_stats,
+)
 from pyte.tools.trex._stream import Stream
 
 if TYPE_CHECKING:
@@ -209,7 +215,7 @@ class Client:
 
 
 @contextmanager
-def session(pco: "RpcServer", opts: ServerOpts,
+def session(pco: RpcServer, opts: ServerOpts,
             connect_timeout: float = CONNECT_TIMEOUT) -> Iterator[Client]:
     """Launch ``t-rex-64 -i`` on pco's agent and yield a connected Client.
 

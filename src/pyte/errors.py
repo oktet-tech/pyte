@@ -3,9 +3,10 @@
 """TE error model: te_errno -> exceptions."""
 from __future__ import annotations
 
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-
 import builtins
+
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
 
 
 class TeError(Exception):

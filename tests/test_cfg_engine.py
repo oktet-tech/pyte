@@ -13,7 +13,6 @@ from pyte import cfg
 from pyte.cfg import _engine
 from pyte.cfg._engine import CfgObject, IntKnob
 
-
 # -- hand-written domain used to exercise the engine ------------------
 
 class Interface(CfgObject):
@@ -206,8 +205,7 @@ def test_intknob_accepts_custom_cvt_name(fake):
 
 # -- typed knob subclasses --------------------------------------------
 
-from pyte.cfg._engine import (AddrKnob, BoolKnob, DoubleKnob,  # noqa: E402
-                              IpAddrKnob, StrKnob)
+from pyte.cfg._engine import AddrKnob, BoolKnob, DoubleKnob, IpAddrKnob, StrKnob  # noqa: E402
 
 
 class Knobs(CfgObject):

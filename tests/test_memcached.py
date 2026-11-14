@@ -4,6 +4,7 @@
 from contextlib import contextmanager
 
 import pytest
+
 from pyte.errors import MemcachedError
 from pyte.tools import memcached
 

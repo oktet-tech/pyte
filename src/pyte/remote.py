@@ -36,9 +36,10 @@ import inspect
 import json
 import textwrap
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib import resources
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 from pyte._util import shim_lib as _shim_lib
 from pyte.errors import RemotePythonError
@@ -99,7 +100,7 @@ class RemoteObject:
     runner can drop the objects (no extra round trip).
     """
 
-    def __init__(self, session: "RemotePython", handle: int):
+    def __init__(self, session: RemotePython, handle: int):
         object.__setattr__(self, "_session", session)
         object.__setattr__(self, "_handle", handle)
 
@@ -136,7 +137,7 @@ class RemoteObject:
 class RemotePython:
     """A live remote Python session; create with remote.python()."""
 
-    def __init__(self, job: "Job | None", flt: "Filter | None",
+    def __init__(self, job: Job | None, flt: Filter | None,
                  timeout: float, server=None):
         self._job = job
         self._flt = flt
@@ -327,7 +328,7 @@ class RemotePython:
 
 
 @contextmanager
-def python(pco: "RpcServer", timeout: float = DEFAULT_TIMEOUT,
+def python(pco: RpcServer, timeout: float = DEFAULT_TIMEOUT,
            interpreter: str = "python3") -> Iterator[RemotePython]:
     """Start a remote Python session on pco's agent.
 

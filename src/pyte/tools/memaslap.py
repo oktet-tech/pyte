@@ -209,7 +209,7 @@ class Memaslap(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
+def run(pco: RpcServer, opts: Opts, cfg_opts: CfgOpts | None = None):
     """Create+start a memaslap client; yields Memaslap; close() on exit.
 
     When cfg_opts is given, its rendered text is uploaded to the agent
@@ -218,6 +218,7 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
     the handle exists).
     """
     import os
+
     from pyte import log
 
     def _setup(job):

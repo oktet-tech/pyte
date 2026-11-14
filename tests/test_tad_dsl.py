@@ -11,7 +11,6 @@ import pytest
 
 from pyte.tad.dsl import ICMP4, IP4, TCP, UDP, Ether, Socket, Stack, stack
 
-
 # -- composition ------------------------------------------------------
 
 def test_stack_id_composition():

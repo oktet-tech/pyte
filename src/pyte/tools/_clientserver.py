@@ -32,7 +32,7 @@ class Endpoint:
 
 
 @contextmanager
-def serve(pco: "RpcServer", program: str, argv: list[str], *,
+def serve(pco: RpcServer, program: str, argv: list[str], *,
           host: str, port: int | None, ready_delay: float = 1.0,
           term: int | _signal.Signals = _signal.SIGINT):
     """Run a server job for the duration of the ``with`` block.

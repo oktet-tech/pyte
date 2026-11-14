@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from pyte.tools.trex import GlobalStats, LatencyStats, PortStats
-from pyte.tools.trex._stats import (parse_global_stats, parse_latency_stats,
-                                    parse_port_stats)
+from pyte.tools.trex._stats import parse_global_stats, parse_latency_stats, parse_port_stats
 
 DATA = Path(__file__).parent / "data"
 

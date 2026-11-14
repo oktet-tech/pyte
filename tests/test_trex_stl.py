@@ -5,8 +5,7 @@ import pytest
 from scapy.all import IP, UDP, Ether
 
 from pyte.errors import TeError, TrexError
-from pyte.tools.trex import PktBuilder, Stream, TXCont
-from pyte.tools.trex import _agent, stl
+from pyte.tools.trex import PktBuilder, Stream, TXCont, _agent, stl
 
 
 def test_trexerror_message_path():

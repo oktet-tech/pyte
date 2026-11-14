@@ -191,8 +191,8 @@ class Opts:
     iodepth: int = 1
     runtime: int = 0
     rwmixread: int = 50
-    rwtype: "RwType | str" = RwType.SEQ
-    ioengine: "IoEngine | str" = IoEngine.PSYNC
+    rwtype: RwType | str = RwType.SEQ
+    ioengine: IoEngine | str = IoEngine.PSYNC
     direct: bool = False
     size: str | int | None = None
     extra_args: list[str] = field(default_factory=list)
@@ -436,7 +436,7 @@ class Fio(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: create, start, and clean up a fio job.
 
     Yields a :class:`Fio` object; call :meth:`Fio.wait` inside the

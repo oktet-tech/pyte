@@ -8,8 +8,12 @@ import types
 import pytest
 
 from pyte import log
-from pyte.errors import (CfgNotFoundError, ProcessOutputUnsupportedError,
-                         RemotePythonError, TrexError)
+from pyte.errors import (
+    CfgNotFoundError,
+    ProcessOutputUnsupportedError,
+    RemotePythonError,
+    TrexError,
+)
 from pyte.testing import FakeShimLib
 from pyte.tools.trex import _agent, astf
 from pyte.tools.trex._config import ServerOpts

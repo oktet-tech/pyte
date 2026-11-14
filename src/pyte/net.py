@@ -22,14 +22,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pyte import cfg, log
-from pyte._util import shim as _shim, shim_lib as _shim_lib
+from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
 from pyte.cfg import SubObject
 from pyte.cfg.gen.agent import Agent as _GenAgent
 from pyte.cfg.gen.interface import Interface as _GenInterface
 from pyte.cfg.gen.interface import Phy as _GenPhy
 from pyte.cfg.gen.sys import Sys as _GenSys
 from pyte.errors import CfgError, CfgNotFoundError, NetError, check
-from pyte._util import enc as _enc
 
 
 def _parse_dst(spec: str) -> tuple[str, int]:

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.memtier argv/report tests (no testbed)."""
 import pytest
+
 from pyte.tools import memtier
 
 

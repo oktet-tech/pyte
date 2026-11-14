@@ -35,7 +35,7 @@ Syntax notes discovered during calibration:
 from __future__ import annotations
 
 import ipaddress
-from typing import Callable, Union
+from collections.abc import Callable
 
 __all__ = ["Layer", "Ether", "IP4", "UDP", "TCP", "ICMP4", "Socket",
            "Stack", "stack"]
@@ -136,7 +136,7 @@ class Layer:
             parts.append(f"{ndn} {fmt(self._fields[kwarg])}")
         return "{ " + ", ".join(parts) + " }" if parts else "{}"
 
-    def __truediv__(self, other: "Layer | bytes") -> "Stack":
+    def __truediv__(self, other: Layer | bytes) -> Stack:
         return Stack((self,)) / other
 
     # Single-layer conveniences (Socket(...).csap_spec() etc.)
@@ -263,7 +263,7 @@ class Stack:
         self.layers: tuple[Layer, ...] = tuple(layers)
         self.payload = payload
 
-    def __truediv__(self, other: Union[Layer, "Stack", bytes]) -> "Stack":
+    def __truediv__(self, other: Layer | Stack | bytes) -> Stack:
         if isinstance(other, Layer):
             return Stack(self.layers + (other,), self.payload)
         if isinstance(other, Stack):

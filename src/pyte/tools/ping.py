@@ -226,7 +226,7 @@ class Ping(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: create, start, and clean up a ping job.
 
     Yields a :class:`Ping`; call :meth:`Ping.wait` inside the block.

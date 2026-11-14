@@ -114,7 +114,7 @@ class Opts:
         Each is omitted from argv when None.
     """
     if_name: str
-    cmd: "Cmd | str" = Cmd.NONE
+    cmd: Cmd | str = Cmd.NONE
     stats: bool = False
     raw: bool | None = None
     hex: bool | None = None
@@ -207,12 +207,12 @@ class Report:
     out: str
     err: str
     err_code: ErrCode
-    if_props: "IfProps | None" = None
-    stats: "dict[str, str] | None" = None
-    pause: "Pause | None" = None
-    ring: "Ring | None" = None
+    if_props: IfProps | None = None
+    stats: dict[str, str] | None = None
+    pause: Pause | None = None
+    ring: Ring | None = None
     #: Job completion status (None only for offline-built reports).
-    status: "JobStatus | None" = None
+    status: JobStatus | None = None
 
     def get_stat(self, name: str) -> int:
         """Return a single statistic as an int (mirror tapi_ethtool_get_stat).
@@ -273,7 +273,7 @@ def _parse_ring(out: str) -> Ring:
                 rx=int(rx[1]), tx=int(tx[1]))
 
 
-def _parse_stats(out: str) -> "dict[str, str]":
+def _parse_stats(out: str) -> dict[str, str]:
     from pyte.errors import EthtoolError
     stats: dict[str, str] = {}
     for line in out.splitlines():
@@ -287,7 +287,7 @@ def _parse_stats(out: str) -> "dict[str, str]":
     return stats
 
 
-def _err_code(err: str, status: "JobStatus | None") -> ErrCode:
+def _err_code(err: str, status: JobStatus | None) -> ErrCode:
     if "Operation not supported" in err:
         return ErrCode.EOPNOTSUPP
     if status is not None and not status.ok:
@@ -300,7 +300,7 @@ def _err_code(err: str, status: "JobStatus | None") -> ErrCode:
 
 
 def _build_report(cmd: Cmd, out: str, err: str,
-                  status: "JobStatus | None" = None) -> Report:
+                  status: JobStatus | None = None) -> Report:
     """Assemble a Report from raw stdout/stderr (offline-testable)."""
     err_code = _err_code(err, status)
     kwargs: dict = dict(cmd=cmd, out=out, err=err, err_code=err_code,
@@ -322,7 +322,7 @@ def _build_report(cmd: Cmd, out: str, err: str,
 # Runner
 # ---------------------------------------------------------------------------
 
-def run(pco: "RpcServer", opts: Opts, timeout: float = 10.0) -> Report:
+def run(pco: RpcServer, opts: Opts, timeout: float = 10.0) -> Report:
     """Run an ethtool command and return a parsed :class:`Report`.
 
     ethtool is a short-lived command, so this runs it to completion

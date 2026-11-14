@@ -98,7 +98,7 @@ class Stress(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: create, start, and clean up a stress job.
 
     Yields a :class:`Stress`; call :meth:`Stress.wait` inside the block.

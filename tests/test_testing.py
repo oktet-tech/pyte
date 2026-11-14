@@ -7,11 +7,16 @@ re-exports them exactly as a suite's own conftest would.
 """
 import pytest
 
-from pyte import log, test as pyte_test
+from pyte import log
+from pyte import test as pyte_test
 from pyte.errors import TeError, TestFail, TestSkip
-from pyte.testing import (FakeShimLib, FakeTrexReport, RecordingMiLogger,
-                          VerdictRecorder, end_test)
-
+from pyte.testing import (
+    FakeShimLib,
+    FakeTrexReport,
+    RecordingMiLogger,
+    VerdictRecorder,
+    end_test,
+)
 
 # -- FakeShimLib -------------------------------------------------------
 

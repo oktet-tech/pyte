@@ -32,7 +32,7 @@ class FakeCfg:
         return [Node(a) for a in self.agents]
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_cfg(monkeypatch):
     def install(cfg):
         monkeypatch.setattr(shenv, "cfg", cfg)

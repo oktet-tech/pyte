@@ -9,7 +9,7 @@ from pyte import test
 from pyte._params import Params
 
 
-@pytest.fixture()
+@pytest.fixture
 def t(fake_shim, tmp_path, monkeypatch):
     monkeypatch.setenv("TE_LOG_DIR", str(tmp_path))
     monkeypatch.delenv("TE_RUN_DIR", raising=False)

@@ -4,16 +4,18 @@
 from __future__ import annotations
 
 import signal
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
+from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
 from pyte.errors import ClosedResourceError, check
 from pyte.errors import TimeoutError as TeTimeoutError
-from pyte._util import enc as _enc
 
 if TYPE_CHECKING:
     from pyte.rpc.server import RpcServer
@@ -108,7 +110,7 @@ class JobMessage:
     raw: bytes
     eos: bool
     dropped: int
-    filter: "Filter"
+    filter: Filter
 
     @property
     def data(self) -> str:
@@ -119,7 +121,7 @@ class JobMessage:
 class Channel:
     """A primary output channel (stdout/stderr) of a job."""
 
-    def __init__(self, job: "Job", handle, name: str):
+    def __init__(self, job: Job, handle, name: str):
         self._job = job
         self._h = handle
         self.name = name
@@ -138,13 +140,13 @@ class Channel:
 
     def attach_filter(self, name: str | None = None, readable: bool = True,
                       log_level: int | str | None = None,
-                      regex: str | None = None, group: int = 0) -> "Filter":
+                      regex: str | None = None, group: int = 0) -> Filter:
         """Attach a filter to this channel; see Job.filter() for args."""
         return _attach_filter([self], name=name, readable=readable,
                               log_level=log_level, regex=regex, group=group)
 
     def grep(self, regex: str, group: int = 0,
-             name: str | None = None) -> "Filter":
+             name: str | None = None) -> Filter:
         """Readable regexp filter: yields matches (PCRE2, multiline).
 
         group selects the capture group to extract (0 = whole match).
@@ -152,7 +154,7 @@ class Channel:
         return self.attach_filter(name=name, readable=True, regex=regex,
                                   group=group)
 
-    def log(self, level: int | str = "RING") -> "Filter":
+    def log(self, level: int | str = "RING") -> Filter:
         """Send everything on this channel to the TE log; the output
         is not readable from the test.
         """
@@ -166,7 +168,7 @@ class Channel:
 class InputChannel:
     """The stdin channel of a job."""
 
-    def __init__(self, job: "Job", handle):
+    def __init__(self, job: Job, handle):
         self._job = job
         self._h = handle
 
@@ -192,7 +194,7 @@ class InputChannel:
 class Filter:
     """A secondary (filter) channel: a message source for the test."""
 
-    def __init__(self, job: "Job", handle, name: str, n_channels: int = 1):
+    def __init__(self, job: Job, handle, name: str, n_channels: int = 1):
         self._job = job
         self._h = handle
         self.name = name
@@ -429,7 +431,7 @@ class CompletedJob:
         return self.status.ok
 
 
-def run(server: "RpcServer", program: str, args: list[str] | None = None,
+def run(server: RpcServer, program: str, args: list[str] | None = None,
         env: dict[str, str] | None = None,
         timeout: float | None = DEFAULT_TIMEOUT,
         log_level: str | None = "RING") -> CompletedJob:
@@ -460,7 +462,7 @@ class Wrapper:
     job.  delete() is idempotent.
     """
 
-    def __init__(self, job: "Job", handle):
+    def __init__(self, job: Job, handle):
         self._job = job
         self._h = handle
         self._deleted = False
@@ -519,9 +521,9 @@ class Job:
         return self._h
 
     @classmethod
-    def create(cls, server: "RpcServer", program: str, args: list[str],
+    def create(cls, server: RpcServer, program: str, args: list[str],
                env: dict[str, str] | None = None,
-               stdin: bool = False) -> "Job":
+               stdin: bool = False) -> Job:
         """Create (but do not start) a job running program on server.
 
         args are the program arguments (argv[0] = program is added
@@ -840,7 +842,7 @@ class Job:
 
         cleanup_all(_destroy_job_once, _destroy_factory_once)
 
-    def __enter__(self) -> "Job":
+    def __enter__(self) -> Job:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

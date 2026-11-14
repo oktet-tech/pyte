@@ -27,7 +27,8 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
 from pyte.errors import TrcClosedError, TrcError, check
 
 # Public re-export so callers can do ``from pyte.trc import TrcError``.
@@ -121,7 +122,7 @@ class Entry:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, db: "Db", handle):
+    def __init__(self, db: Db, handle):
         self._db = db
         self._h = handle
 
@@ -171,7 +172,7 @@ class Group:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, db: "Db", handle):
+    def __init__(self, db: Db, handle):
         self._db = db
         self._h = handle
 
@@ -250,7 +251,7 @@ class Iter:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, db: "Db", handle):
+    def __init__(self, db: Db, handle):
         self._db = db
         self._h = handle
 
@@ -343,7 +344,7 @@ class Iter:
             return None
         return Group(self._db, h)
 
-    def child_tests(self) -> Iterator["Test"]:
+    def child_tests(self) -> Iterator[Test]:
         """Iterate over child tests of this iteration (for package iters)."""
         h = self._handle()
         ffi, lib = _shim()
@@ -359,7 +360,7 @@ class Test:
     Holds a borrowed pointer valid only while the owning Db is open.
     """
 
-    def __init__(self, db: "Db", handle):
+    def __init__(self, db: Db, handle):
         self._db = db
         self._h = handle
 
@@ -456,7 +457,7 @@ class Db:
         return self._h
 
     @classmethod
-    def open(cls, path: str | PathLike) -> "Db":
+    def open(cls, path: str | PathLike) -> Db:
         """Open a TRC XML database, applying XInclude if needed."""
         ffi, lib = _shim()
         out = ffi.new("te_trc_db **")
@@ -470,7 +471,7 @@ class Db:
             self._finalizer()   # runs trc_db_close exactly once
             self._h = None
 
-    def __enter__(self) -> "Db":
+    def __enter__(self) -> Db:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

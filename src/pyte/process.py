@@ -51,13 +51,13 @@ class Process:
 
     @classmethod
     def create(cls, ta: str, name: str, exe: str,
-               args: "list[str] | tuple[str, ...]" = (),
-               env: "dict[str, str] | None" = None,
+               args: list[str] | tuple[str, ...] = (),
+               env: dict[str, str] | None = None,
                workdir: str | None = None,
                stdout_file: str | None = None,
                stdout_log_level: str | None = None,
                stderr_file: str | None = None,
-               stderr_log_level: str | None = None) -> "Process":
+               stderr_log_level: str | None = None) -> Process:
         """Add the entry and configure it, without starting it.
 
         ``args`` are raw arguments, installed as ``arg:`` instances

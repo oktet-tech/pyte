@@ -177,7 +177,7 @@ _OPER = "/agent:A/interface:eth0/oper_status:"
 _PHY = "/agent:A/interface:eth0/phy:/state:"
 
 
-@pytest.fixture()
+@pytest.fixture
 def cfg_stub(monkeypatch):
     from pyte import net
 
@@ -187,7 +187,7 @@ def cfg_stub(monkeypatch):
     return install
 
 
-@pytest.fixture()
+@pytest.fixture
 def no_sleep(monkeypatch):
     from pyte import net
     slept = []

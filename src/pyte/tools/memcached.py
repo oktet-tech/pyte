@@ -250,7 +250,7 @@ def parse_stats(text: str) -> Stats:
 class Memcached:
     """A running memcached server (yielded by server())."""
 
-    def __init__(self, pco: "RpcServer", job, opts: Opts):
+    def __init__(self, pco: RpcServer, job, opts: Opts):
         self._pco = pco
         self.job = job          # exposed: suite attaches filters/wrappers
         self.opts = opts
@@ -293,7 +293,7 @@ class Memcached:
 
 
 @contextmanager
-def server(pco: "RpcServer", opts: Opts | None = None):
+def server(pco: RpcServer, opts: Opts | None = None):
     """Create (but do not start) a memcached server job for the block.
 
     Yields a Memcached whose job is created with the C TAPI's filters

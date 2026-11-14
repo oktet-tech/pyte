@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim
 from pyte._util import enc as _enc
+from pyte._util import shim as _shim
 
 
 class RpcFile:

@@ -30,9 +30,10 @@ import tempfile
 from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import RcfError, check
 from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import RcfError, check
 
 
 def _split_ta_list(block: bytes) -> list[str]:

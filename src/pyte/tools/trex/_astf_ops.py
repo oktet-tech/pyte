@@ -142,7 +142,7 @@ def bootstrap(trex_lib_dir, server, sync_port, async_port, timeout):
     else:
         notes.append("sys.path: %s already on it" % (trex_lib_dir,))
 
-    import trex        # noqa: F401  sets up its bundled external_libs
+    import trex  # noqa: F401  sets up its bundled external_libs
     notes.append("trex: imported from %s"
                  % (getattr(trex, "__file__", "unknown"),))
 

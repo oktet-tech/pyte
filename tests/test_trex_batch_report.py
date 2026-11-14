@@ -16,7 +16,6 @@ import pytest
 from pyte.tools.trex import _batch_filters as flt
 from pyte.tools.trex import _batch_report as rpt
 
-
 # --------------------------------------------------------------------
 # A hand-computed 6-sample, 2-port OBYTES series, at 1-second
 # intervals, used by the window()/series_by_time() tests below.

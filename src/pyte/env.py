@@ -25,18 +25,18 @@ import re
 from dataclasses import dataclass
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
+from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+
+# Shared impl in pyte._util; the local name stays for callers/tests.
+from pyte._util import take_str as _take_str  # noqa: E402
 from pyte.errors import (
     ClosedResourceError,
     EnvError,
     EnvNotFoundError,
     check,
 )
-from pyte._util import enc as _enc
-
-
-# Shared impl in pyte._util; the local name stays for callers/tests.
-from pyte._util import take_str as _take_str  # noqa: E402
 
 _BDF_RE = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]")
 
@@ -89,7 +89,7 @@ class Env:
         self._pcos: dict = {}
 
     @classmethod
-    def bind(cls, cfg: str) -> "Env":
+    def bind(cls, cfg: str) -> Env:
         """Parse + bind an environment configuration string."""
         ffi, lib = _shim()
         out = ffi.new("tapi_env **")
@@ -115,7 +115,7 @@ class Env:
             h, self._h = self._h, None   # struct is freed even on error
             check(lib.pyte_env_free(h), "env free", EnvError)
 
-    def __enter__(self) -> "Env":
+    def __enter__(self) -> Env:
         return self
 
     def _handle(self):

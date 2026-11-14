@@ -3,8 +3,8 @@
 """pyte.expand: the ${NAME}/${NAME:-default} substitution subset."""
 import pytest
 
-from pyte.expand import kvpairs
 from pyte.errors import ExpandError
+from pyte.expand import kvpairs
 
 
 def test_no_references_passes_through():

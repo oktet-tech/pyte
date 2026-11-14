@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import base64
 import json as jsonlib
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 
 from pyte import log, remote
 from pyte.errors import HttpError, RemotePythonError

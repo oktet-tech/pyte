@@ -12,22 +12,22 @@ import re
 import shutil
 import signal
 import sys
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Callable
 
 from pyte import log
-from pyte._util import shim_lib as _shim_lib
 from pyte._params import Compound, Params, parse_argv  # noqa: F401
-from pyte.errors import TestFail, TestSkip
 from pyte._util import enc as _enc
 from pyte._util import format_exc_chain as _format_exc_chain
 from pyte._util import format_remote_tracebacks as _remote_detail
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import TestFail, TestSkip
 
 EXIT_SIGINT = 0x2
 EXIT_SIGUSR2 = 0x4
 EXIT_SKIP = 0x5
 
-_current: "Test | None" = None
+_current: Test | None = None
 
 # The server-side unpack script rejects a whole run for a name outside
 # this set, so refuse it here, where the test can still react.

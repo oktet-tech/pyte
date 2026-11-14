@@ -10,7 +10,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "docs" / "_ext"))
 import showcase_gen as sg  # noqa: E402
 
-
 TEST_PY = '''\
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0

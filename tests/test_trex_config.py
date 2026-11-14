@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex ServerOpts unit tests (offline: yaml + cmdline)."""
 import pytest
+
 from pyte.tools.trex import ServerOpts
 
 

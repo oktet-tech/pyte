@@ -130,7 +130,7 @@ class Mke2fs(_tool.ToolHandle):
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: create, start, and clean up an mke2fs job.
 
     Yields a :class:`Mke2fs`; call :meth:`Mke2fs.wait` inside the block.
@@ -153,7 +153,7 @@ def run(pco: "RpcServer", opts: Opts):
 
 
 @contextmanager
-def do(pco: "RpcServer", opts: Opts, timeout: float = 60.0):
+def do(pco: RpcServer, opts: Opts, timeout: float = 60.0):
     """Convenience CM mirroring tapi_mke2fs_do (create + start + wait).
 
     Yields a waited :class:`Mke2fs`; call :meth:`Mke2fs.check_journal`

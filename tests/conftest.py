@@ -9,12 +9,12 @@ import sys
 import pytest
 
 from pyte import log, test
-from pyte.testing import fake_shim, current_test, mi_logger  # noqa: F401
+from pyte.testing import current_test, fake_shim, mi_logger  # noqa: F401
 
 _SIGNALS = (signal.SIGINT, signal.SIGUSR1, signal.SIGUSR2)
 
 
-@pytest.fixture()
+@pytest.fixture
 def start_state(monkeypatch):
     """A test command line, and what test.start() changes undone after.
 
@@ -34,7 +34,7 @@ def start_state(monkeypatch):
     test._current = None
 
 
-@pytest.fixture()
+@pytest.fixture
 def run_test(start_state):
     """``run_test(body, name=None)``: run ``body(t)`` as the body of a
     test.start() test and return its exit code."""

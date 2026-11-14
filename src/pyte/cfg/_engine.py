@@ -24,13 +24,11 @@ exactly these shapes.
 from __future__ import annotations
 
 import functools
-
-from pyte._util import shim_lib as _shim_lib
-
 from contextlib import contextmanager
 
 from pyte import cfg
 from pyte._cleanup import cleanup_all
+from pyte._util import shim_lib as _shim_lib
 
 
 def _cvt_int(name: str) -> int:

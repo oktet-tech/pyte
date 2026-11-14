@@ -77,10 +77,17 @@ def add_streams(cli, port, stream_specs):
     the trex.stl.api namespace. Returns the count of streams added.
     """
     import base64
+
     import trex.stl.api as _api
-    from trex.stl.api import (STLStream, STLPktBuilder, STLTXCont,
-                              STLTXSingleBurst, STLTXMultiBurst,
-                              STLFlowStats, STLFlowLatencyStats)
+    from trex.stl.api import (
+        STLFlowLatencyStats,
+        STLFlowStats,
+        STLPktBuilder,
+        STLStream,
+        STLTXCont,
+        STLTXMultiBurst,
+        STLTXSingleBurst,
+    )
 
     def _mode(m):
         if m["type"] == "continuous":

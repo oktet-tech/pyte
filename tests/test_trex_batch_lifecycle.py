@@ -195,7 +195,7 @@ class _FakeRcfAgent:
     owning _FakePco's files_put, same shape as the old pco.file_put()
     fake it replaces."""
 
-    def __init__(self, pco: "_FakePco"):
+    def __init__(self, pco: _FakePco):
         self._pco = pco
 
     def put_bytes(self, data: bytes, remote: str) -> None:
@@ -206,7 +206,7 @@ class _FakePco:
     #: ta name -> the live _FakePco, so the _fake_rcf_agent fixture's
     #: patched rcf.agent(ta) can hand batch.create() a _FakeRcfAgent
     #: wired back to the right fake (rcf.agent() only takes a ta name).
-    registry: dict[str, "_FakePco"] = {}
+    registry: dict[str, _FakePco] = {}
 
     def __init__(self, ta: str = "agentA"):
         self.ta = ta

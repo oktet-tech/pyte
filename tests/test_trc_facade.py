@@ -12,7 +12,7 @@ from pyte import trc  # noqa: E402
 DATA = Path(__file__).parent / "data" / "trc_basic.xml"
 
 
-@pytest.fixture()
+@pytest.fixture
 def db():
     with trc.Db.open(DATA) as handle:
         yield handle

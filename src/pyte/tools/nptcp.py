@@ -54,8 +54,10 @@ from typing import TYPE_CHECKING
 
 from pyte.errors import NptcpError
 from pyte.tools import _tool
-from pyte.tools._clientserver import serve
-from pyte.tools._clientserver import Endpoint  # noqa: F401  (re-exported)
+from pyte.tools._clientserver import (
+    Endpoint,  # noqa: F401  (re-exported)
+    serve,
+)
 
 if TYPE_CHECKING:
     from pyte.rpc import RpcServer
@@ -232,7 +234,7 @@ class Nptcp(_tool.ToolHandle):
 
 
 @contextmanager
-def server(pco: "RpcServer", opts: "Opts | None" = None, *,
+def server(pco: RpcServer, opts: Opts | None = None, *,
            host: str = "127.0.0.1", ready_delay: float = 2.0):
     """Context manager: run an NPtcp receiver for the block's duration.
 
@@ -256,7 +258,7 @@ def server(pco: "RpcServer", opts: "Opts | None" = None, *,
 
 
 @contextmanager
-def run(pco: "RpcServer", opts: Opts):
+def run(pco: RpcServer, opts: Opts):
     """Context manager: run an NPtcp *transmitter*; yield a :class:`Nptcp`.
 
     The results table is on **stderr** — a readable filter is attached

@@ -63,7 +63,7 @@ class _Rpcs:
         return self.out
 
 
-@pytest.fixture()
+@pytest.fixture
 def tags(monkeypatch, fake_shim):
     """A recording add_trc_tag, with logging captured by fake_shim."""
     rec = _Tags()
@@ -71,7 +71,7 @@ def tags(monkeypatch, fake_shim):
     return rec
 
 
-@pytest.fixture()
+@pytest.fixture
 def hw(monkeypatch):
     """Machine type and thread count, as tags_cpus() reads them."""
     from pyte import cfg, net

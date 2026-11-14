@@ -26,9 +26,9 @@ Usage (in ts/prologue.py)::
 from __future__ import annotations
 
 from pyte import log
+from pyte._util import enc as _enc
 from pyte._util import shim_lib as _shim_lib
 from pyte.errors import RpcError, TeError, check
-from pyte._util import enc as _enc
 
 
 def modify_reqs(expr: str) -> None:

@@ -19,7 +19,7 @@ from pyte import log, test
 from pyte.testing import FakeShimLib, RecordingMiLogger
 
 
-@pytest.fixture()
+@pytest.fixture
 def lib(fake_shim, start_state, mi_logger):
     """fake_shim, with a clean RecordingMiLogger registry."""
     return fake_shim

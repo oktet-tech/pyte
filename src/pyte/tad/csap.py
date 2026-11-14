@@ -11,9 +11,10 @@ from __future__ import annotations
 import warnings
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import ClosedResourceError, check
 from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import ClosedResourceError, check
 from pyte.tad.dsl import Layer, Stack, stack
 
 #: Default receive timeout (seconds).
@@ -143,7 +144,7 @@ class Packet:
 class Receiver:
     """An in-progress receive operation started by Csap.listen()."""
 
-    def __init__(self, csap: "Csap"):
+    def __init__(self, csap: Csap):
         self._csap = csap
         self._done = False
 
@@ -204,7 +205,7 @@ class Csap:
         self._setup(ta, st.stack_id, st.csap_spec())
 
     @classmethod
-    def from_asn(cls, ta: str, stack_id: str, spec_text: str) -> "Csap":
+    def from_asn(cls, ta: str, stack_id: str, spec_text: str) -> Csap:
         """Escape hatch: create a CSAP from raw NDN spec text."""
         obj = cls.__new__(cls)
         obj._setup(ta, stack_id, spec_text)
@@ -327,7 +328,7 @@ class Csap:
             "destroyed (missing destroy() or a context manager); the "
             "agent-side CSAP has leaked", ResourceWarning)
 
-    def __enter__(self) -> "Csap":
+    def __enter__(self) -> Csap:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:

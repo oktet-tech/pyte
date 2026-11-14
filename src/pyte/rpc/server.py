@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-
-from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import ClosedResourceError, RpcError, TestFail, check
-from pyte._util import enc as _enc
 from typing import TYPE_CHECKING
 
+from pyte._cleanup import cleanup_all
+from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import ClosedResourceError, RpcError, TestFail, check
 from pyte.rpc.iomux import Kind
 from pyte.rpc.socket import Family, SockType
 
@@ -61,7 +61,7 @@ class RpcServer:
         return self._h
 
     @classmethod
-    def create(cls, ta: str, name: str) -> "RpcServer":
+    def create(cls, ta: str, name: str) -> RpcServer:
         ffi, lib = _shim()
         out = ffi.new("rcf_rpc_server **")
         check(lib.pyte_rpc_server_create(_enc(ta), _enc(name), out),
@@ -377,12 +377,12 @@ class RpcServer:
                          f"setenv({name}={value!r})")
 
     def socket(self, family: Family = Family.INET,
-               type: SockType = SockType.STREAM) -> "RpcSocket":
+               type: SockType = SockType.STREAM) -> RpcSocket:
         """Create an :class:`~pyte.rpc.socket.RpcSocket` on this server."""
         from pyte.rpc.socket import RpcSocket
         return RpcSocket.open(self, family, type)
 
-    def iomux(self, kind: Kind = Kind.EPOLL) -> "IoMux":
+    def iomux(self, kind: Kind = Kind.EPOLL) -> IoMux:
         """Create an :class:`~pyte.rpc.iomux.IoMux` on this server.
 
         Returns an ``IoMux`` context manager that calls ``close()`` on

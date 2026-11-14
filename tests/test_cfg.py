@@ -9,7 +9,6 @@ import pytest
 
 from pyte import cfg
 
-
 # -- _to_py_kind: pure decode -----------------------------------------
 
 def test_to_py_kind_none():

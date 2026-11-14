@@ -20,7 +20,6 @@ from pyte import mi, test
 from pyte.mi import Aggr, Meas, Mult
 from pyte.testing import FakeShimLib
 
-
 # ---------------------------------------------------------------------------
 # Fake shim objects
 # ---------------------------------------------------------------------------
@@ -441,7 +440,7 @@ class LifecycleLib(FakeLib, FakeShimLib):
         return [c for c in self.calls if c[0] in ("step", "destroy")]
 
 
-@pytest.fixture()
+@pytest.fixture
 def run_lib(monkeypatch, start_state):
     """A LifecycleLib installed for test.start()."""
     lib = LifecycleLib()

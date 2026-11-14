@@ -37,9 +37,10 @@ import re
 from contextlib import contextmanager
 
 from pyte._cleanup import cleanup_all
-from pyte._util import shim as _shim, shim_lib as _shim_lib
-from pyte.errors import CfgError, check
 from pyte._util import enc as _enc
+from pyte._util import shim as _shim
+from pyte._util import shim_lib as _shim_lib
+from pyte.errors import CfgError, check
 
 _INT_CVT_NAMES = ("INT8", "UINT8", "INT16", "UINT16",
                   "INT32", "UINT32", "INT64", "UINT64")

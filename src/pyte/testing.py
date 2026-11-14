@@ -165,7 +165,7 @@ class FakeShimLib:
         return [text for lvl, text in self.logs if lvl == level]
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_shim(monkeypatch):
     """Install a :class:`FakeShimLib` as ``sys.modules["pyte._shim"]``.
 
@@ -180,7 +180,7 @@ def fake_shim(monkeypatch):
     return lib
 
 
-@pytest.fixture()
+@pytest.fixture
 def mi_logger():
     """A clean :class:`RecordingMiLogger` registry around one test.
 
@@ -196,7 +196,7 @@ def mi_logger():
     RecordingMiLogger.reset()
 
 
-@pytest.fixture()
+@pytest.fixture
 def current_test(fake_shim):
     """A real :class:`pyte.test.Test` installed as the current test.
 
@@ -304,7 +304,7 @@ class RecordingMiLogger:
     had recorded at the write, None without one.
     """
 
-    registry: ClassVar[list["RecordingMiLogger"]] = []
+    registry: ClassVar[list[RecordingMiLogger]] = []
 
     def __init__(self, tool):
         self.tool = tool
