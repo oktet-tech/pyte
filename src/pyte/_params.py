@@ -3,6 +3,7 @@
 """Test parameter parsing: argv entries of the form name=value."""
 from __future__ import annotations
 
+import enum as _enum
 import os
 from collections.abc import Mapping
 
@@ -133,9 +134,21 @@ class _Readers:
         """
         return self._read(name, default, _to_flag, "TRUE or FALSE")
 
-    def enum(self, name: str, mapping: dict[str, object],
+    def enum(self, name: str, mapping: dict[str, object] | type[_enum.Enum],
              default=_UNSET) -> object:
-        """The value *mapping* gives for the parameter's text."""
+        """The value *mapping* gives for the parameter's text.
+
+        *mapping* is a dict from the text to the value, or an Enum
+        class whose member values are the texts the parameter takes::
+
+            fw_layer = p.enum("fw_layer", FwLayer)
+
+        The dict form is for a parameter whose texts are not the
+        values of an Enum, or a test that takes only some of them.
+        """
+        if isinstance(mapping, type) and issubclass(mapping, _enum.Enum):
+            mapping = {str(member.value): member for member in mapping}
+
         def conv(value):
             if value not in mapping:
                 raise ValueError(value)

@@ -178,6 +178,33 @@ def test_enum_error_names_the_parameter_and_the_choices():
         p.enum("mode", {"a": 1, "b": 2})
 
 
+def test_enum_takes_an_enum_class_and_reads_by_member_value():
+    import enum
+
+    from pyte.errors import ParamError
+
+    class Mode(enum.Enum):
+        FAST = "fast"
+        SLOW = "slow"
+
+    assert Params({"mode": "slow"}).enum("mode", Mode) is Mode.SLOW
+    assert Params({}).enum("mode", Mode, None) is None
+    # The member name is not the text of the parameter.
+    with pytest.raises(ParamError,
+                       match=r"mode='FAST': want one of \['fast', 'slow'\]"):
+        Params({"mode": "FAST"}).enum("mode", Mode)
+
+
+def test_enum_class_with_integer_values_is_read_by_their_text():
+    import enum
+
+    class Level(enum.IntEnum):
+        LOW = 1
+        HIGH = 2
+
+    assert Params({"level": "2"}).enum("level", Level) is Level.HIGH
+
+
 def test_flag_takes_only_the_te_spelling():
     p = Params({"a": "TRUE", "b": "FALSE"})
     assert p.flag("a") is True and p.flag("b") is False
