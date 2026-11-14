@@ -235,7 +235,7 @@ def test_vfio_configure_with_iommu_only_loads_the_modules(
     assert [m.name for m in fake_module.created] == ["vfio", "vfio-pci"]
     assert cfg.sets == []
     assert fake_shim.texts(FakeShimLib.TE_LL_RING) == [
-        "iommu enabled on Agt_A"]
+        "IOMMU enabled on Agt_A"]
 
 
 def test_vfio_configure_loads_an_unloaded_module(fake_cfg, monkeypatch,
@@ -267,8 +267,8 @@ def test_vfio_configure_without_iommu_sets_unsafe_mode(
     assert cfg.sets == [(_NOIOMMU_OID, "Y")]
     assert cfg.gets[-1] == (_NOIOMMU_OID, True)  # read with sync=True
     assert fake_shim.texts(FakeShimLib.TE_LL_RING) == [
-        "iommu disabled on Agt_A",
-        "trying to use unsafe no-iommu mode for vfio module"]
+        "IOMMU disabled on Agt_A",
+        "Trying to use unsafe no-iommu mode for vfio module"]
 
 
 def test_vfio_configure_without_iommu_leaves_an_enabled_mode_alone(
@@ -279,8 +279,8 @@ def test_vfio_configure_without_iommu_leaves_an_enabled_mode_alone(
 
     assert cfg.sets == []
     assert fake_shim.texts(FakeShimLib.TE_LL_RING) == [
-        "iommu disabled on Agt_A",
-        "module parameter vfio/enable_unsafe_noiommu_mode is already "
+        "IOMMU disabled on Agt_A",
+        "Module parameter vfio/enable_unsafe_noiommu_mode is already "
         "set to Y"]
 
 
@@ -300,7 +300,7 @@ def test_vfio_configure_raises_when_the_parameter_is_missing(
     assert [m.name for m in fake_module.created] == ["vfio"]
     errors = fake_shim.texts(FakeShimLib.TE_LL_ERROR)
     assert errors == [
-        "iommu is disabled on Agt_A, but the vfio module has no "
+        "IOMMU is disabled on Agt_A, but the vfio module has no "
         "enable_unsafe_noiommu_mode parameter (the kernel lacks "
         "CONFIG_VFIO_NOIOMMU)"]
 

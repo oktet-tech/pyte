@@ -32,7 +32,7 @@ def tmp_dir(ta: str) -> str | None:
     try:
         value = Agent(ta).tmp_dir
     except Exception as exc:        # noqa: BLE001  optional lookup
-        log.warn(f"could not read /agent:{ta}/tmp_dir: ({exc}); TRex "
+        log.warn(f"Could not read /agent:{ta}/tmp_dir: ({exc}); TRex "
                  f"temp files go to the default temp directory")
         return None
     if not value:

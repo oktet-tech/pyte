@@ -162,9 +162,9 @@ class Client:
         log.step_push(f"load_profile {name!r}")
         if tunables:
             for key in sorted(tunables):
-                log.ring(f"tunable {key}={tunables[key]}")
+                log.ring(f"Tunable {key}={tunables[key]}")
         else:
-            log.ring("no tunables, profile defaults apply")
+            log.ring("No tunables, profile defaults apply")
         try:
             path = self._rem.call(_ops.write_profile, text, ".py",
                                   self._tmp_dir)
@@ -189,7 +189,7 @@ class Client:
         log.step_push(f"start mult={mult} duration={duration} "
                       f"latency_pps={latency_pps}")
         self._call(_ops.start, mult, duration, nc, latency_pps)
-        log.ring("trex: ASTF traffic started")
+        log.ring("Trex: ASTF traffic started")
         log.step_pop("traffic started")
 
     def stop(self) -> None:
@@ -260,7 +260,7 @@ class Client:
             try:
                 raw = self._call(_ops.get_counter_desc)
             except TrexError as exc:
-                log.warn(f"could not read TRex counter descriptions, "
+                log.warn(f"Could not read TRex counter descriptions, "
                          f"the counter table loses its help column "
                          f"and its error marking: {exc}")
                 raw = []
@@ -408,7 +408,7 @@ class Client:
                     t1: float) -> None:
         """RING a rendered end-of-run summary block."""
         log.step_push("log_summary (ASTF run summary)")
-        log.ring(f"steady-state window {t0:.1f}s .. {t1:.1f}s")
+        log.ring(f"Steady-state window {t0:.1f}s .. {t1:.1f}s")
         for attr, unit in (("tx_bps", "bps"), ("rx_bps", "bps"),
                            ("tx_pps", "pps"), ("rx_pps", "pps"),
                            ("active_flows", "flows")):
@@ -417,7 +417,7 @@ class Client:
                      f"median "
                      f"{_rate(series.median(attr, t0, t1), unit)}")
         traffic = self.get_traffic()
-        log.ring(f"connections: attempted {traffic.connect_attempts}, "
+        log.ring(f"Connections: attempted {traffic.connect_attempts}, "
                  f"established {traffic.connects}, "
                  f"closed {traffic.closes}, "
                  f"dropped {traffic.drops} "
@@ -432,7 +432,7 @@ class Client:
         # drops connections the client never notices shows up as a
         # difference here and nowhere else.
         srv = traffic.server
-        log.ring("server side: accepted "
+        log.ring("Server side: accepted "
                  f"{int(srv.get('tcps_accepts', 0))}, connects "
                  f"{int(srv.get('tcps_connects', 0))}, closed "
                  f"{int(srv.get('tcps_closed', 0))}, drops "
@@ -441,17 +441,17 @@ class Client:
                  f"{int(srv.get('udps_accepts', 0))}, udp closed "
                  f"{int(srv.get('udps_closed', 0))}")
         for port, lat in sorted(self.get_latency().items()):
-            log.ring(f"latency port {port}: avg {lat.avg:.1f}us, "
+            log.ring(f"Latency port {port}: avg {lat.avg:.1f}us, "
                      f"max {lat.max:.1f}us, jitter {lat.jitter:.1f}us, "
                      f"p95 {lat.percentile(95):.1f}us")
         errs = traffic.flow_table_errors(self.counter_desc())
         if errs:
             for name in sorted(errs):
-                log.warn(f"flow table error {name}: {errs[name]}")
+                log.warn(f"Flow table error {name}: {errs[name]}")
         else:
-            log.ring("flow table errors: none")
+            log.ring("Flow table errors: none")
         for tmpl in self.get_template_stats():
-            log.ring(f"template {tmpl.name}: {tmpl.counters}")
+            log.ring(f"Template {tmpl.name}: {tmpl.counters}")
         self.log_counters(traffic)
         log.step_pop("summary logged")
 
@@ -562,7 +562,7 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     log.step_push(f"TRex ASTF: bring up on {pco.ta} as process {name!r}")
     tmp_dir = _agent.tmp_dir(pco.ta)
     cfg_path = _write_cfg_on_agent(pco, opts, tmp_dir)
-    log.ring(f"trex cfg: {cfg_path}")
+    log.ring(f"TRex cfg: {cfg_path}")
     # The console redraws a table every second; in a file it can be
     # read back as screens instead of flooding the log. Named after the
     # cfg file, which mkstemp made unique: the agent truncates the file
@@ -751,7 +751,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
         with remote.python(pco) as rem:
             cfg_path = rem.call(_stl_ops.write_cfg, opts.cfg_yaml(),
                                 tmp_dir)
-            log.ring(f"trex cfg: {cfg_path}")
+            log.ring(f"TRex cfg: {cfg_path}")
             try:
                 job = pco.job("/bin/sh",
                               ["-c", opts.shell_command(cfg_path)])
@@ -769,7 +769,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
                     raise TrexError(
                         f"TRex ASTF server did not come up on "
                         f"{pco.ta}: {exc}") from exc
-                log.ring("trex: ASTF client connected")
+                log.ring("Trex: ASTF client connected")
                 # Which compatibility shims fired and which were not
                 # needed. Each of them is independently guarded so an
                 # unnecessary one cannot break bring-up, which also
@@ -779,9 +779,9 @@ def session(pco: "RpcServer", opts: ServerOpts,
                 try:
                     report = rem.call(_ops.shim_report, cli)
                     for note in report.get("notes", ()):
-                        log.ring(f"trex shim: {note}")
+                        log.ring(f"TRex shim: {note}")
                 except Exception:       # noqa: BLE001 diagnostics only
-                    log.ring("trex: no compatibility-shim report")
+                    log.ring("Trex: no compatibility-shim report")
                 client = Client(rem, cli, ports, tmp_dir=tmp_dir)
                 # A freshly connected client owns nothing: every
                 # command that changes state, load_profile included,

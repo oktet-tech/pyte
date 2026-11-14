@@ -446,7 +446,7 @@ def test_log_summary_logs_the_server_side_counters_too(fake_shim):
     c = _client(rem)
     c.log_summary(astf._stats.Series(), 0.0, 1.0)
     rings = "\n".join(fake_shim.texts(FakeShimLib.TE_LL_RING))
-    assert "server side: accepted 28" in rings
+    assert "Server side: accepted 28" in rings
     assert "drops 2" in rings
     # UDP is udps_accepts on the server, not
     # udps_connects: that name is client-side only, and

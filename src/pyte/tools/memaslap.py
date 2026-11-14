@@ -240,7 +240,7 @@ def run(pco: "RpcServer", opts: Opts, cfg_opts: CfgOpts | None = None):
         if cfg_opts is not None:
             cfg_fn = (f"/tmp/pyte_memaslap_{os.getpid()}"
                       f"_{uuid.uuid4().hex[:8]}.cfg")
-            log.ring(f"memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
+            log.ring(f"Memaslap config file {cfg_fn}:\n{cfg_opts.render()}")
             pco.file_put(cfg_fn, cfg_opts.render().encode())
             opts = replace(opts, cfg_cmd=cfg_fn)
         argv = opts.to_argv()

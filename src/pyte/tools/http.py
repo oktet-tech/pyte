@@ -63,7 +63,7 @@ class Response:
 
 def _ship(rem, fn, label: str, *args, timeout: float | None = None,
           **kwargs):
-    log.verb(f"http op: {label}")
+    log.verb(f"HTTP op: {label}")
     if timeout is not None:
         kwargs["timeout"] = timeout
     try:
@@ -149,7 +149,7 @@ class Session:
         popped = False
         try:
             if headers:
-                log.verb(f"request headers: {self._headers_line(headers)}")
+                log.verb(f"Request headers: {self._headers_line(headers)}")
             if json is not None:
                 self._log_text("request body", jsonlib.dumps(json), limit)
             elif form is not None:
@@ -162,7 +162,7 @@ class Session:
             resp = Response(status=raw["status"], reason=raw["reason"],
                             headers=raw["headers"], body=raw["body"],
                             url=raw["url"], elapsed=raw["elapsed"])
-            log.verb(f"response headers: {self._headers_line(resp.headers)}")
+            log.verb(f"Response headers: {self._headers_line(resp.headers)}")
             self._log_text("response body", resp.body, limit)
             log.step_pop(f"{resp.status} {resp.reason} "
                          f"({resp.elapsed:.3f}s)")

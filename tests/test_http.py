@@ -177,7 +177,7 @@ def test_headers_redacted_in_verb(logs):
     assert "sekret" not in text and "t0k" not in text
     assert text.count(http.REDACTED) >= 2
     assert "visible" in text
-    assert "http op: request GET /x" in text
+    assert "HTTP op: request GET /x" in text
 
 
 def test_set_header_and_cookies_ship_ops(logs):
@@ -254,7 +254,7 @@ def test_call_and_bootstrap_log_verb_op_lines(monkeypatch, logs):
         pass
 
     s.call(custom)
-    assert "http op: call custom" in logs["verb"]
+    assert "HTTP op: call custom" in logs["verb"]
     rem = _FakeRem({"bootstrap": CLIENT})
 
     @contextmanager
@@ -264,7 +264,7 @@ def test_call_and_bootstrap_log_verb_op_lines(monkeypatch, logs):
     monkeypatch.setattr(http.remote, "python", fake_python)
     with http.session(object(), "https://d"):
         pass
-    assert "http op: bootstrap https://d" in logs["verb"]
+    assert "HTTP op: bootstrap https://d" in logs["verb"]
 
 
 def test_step_popped_on_remote_error(logs):

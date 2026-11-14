@@ -199,16 +199,16 @@ def vfio_configure(ta: str) -> None:
 
     iommu = cfg.get(f"/agent:{ta}/hardware:/iommu:")
     if iommu == "on":
-        log.ring(f"iommu enabled on {ta}")
+        log.ring(f"IOMMU enabled on {ta}")
     else:
-        log.ring(f"iommu disabled on {ta}")
+        log.ring(f"IOMMU disabled on {ta}")
 
         noiommu_oid = _VFIO_UNSAFE_NOIOMMU_OID_FMT.format(ta)
         try:
             param_val = cfg.get(noiommu_oid, sync=True)
         except CfgNotFoundError as e:
             log.error(
-                f"iommu is disabled on {ta}, but the vfio module has no "
+                f"IOMMU is disabled on {ta}, but the vfio module has no "
                 "enable_unsafe_noiommu_mode parameter (the kernel lacks "
                 "CONFIG_VFIO_NOIOMMU)")
             raise DpdkError(
@@ -216,10 +216,10 @@ def vfio_configure(ta: str) -> None:
                 "parameter") from e
 
         if param_val == "Y":
-            log.ring("module parameter vfio/enable_unsafe_noiommu_mode "
+            log.ring("Module parameter vfio/enable_unsafe_noiommu_mode "
                      "is already set to Y")
         else:
-            log.ring("trying to use unsafe no-iommu mode for vfio module")
+            log.ring("Trying to use unsafe no-iommu mode for vfio module")
             cfg.set(noiommu_oid, "Y")
 
     vfio_pci = Module(ta, "vfio-pci")

@@ -296,7 +296,7 @@ class AgentNet:
             try:
                 dst, prefix, opts = _parse_route_inst(n.name)
             except ValueError:
-                log.warn(f"skipping route instance {n.name!r}")
+                log.warn(f"Skipping route instance {n.name!r}")
                 continue          # unknown encoding: skip, don't crash
             gw = n.value
             gw = None if gw in ("", "0.0.0.0", None) else gw

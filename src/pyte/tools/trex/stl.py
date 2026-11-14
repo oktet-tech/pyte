@@ -111,7 +111,7 @@ class Client:
             # Summary/len are computed engine-side (Scapy), so log before
             # shipping — no round-trip needed just to render the log line.
             for sp in specs:
-                log.ring(f"stream {sp['name']!r}: {sp['summary']} "
+                log.ring(f"Stream {sp['name']!r}: {sp['summary']} "
                          f"({sp['len']} B)")
             self._call(_ops.add_streams, port, specs)
             log.step_pop(f"{len(specs)} stream(s) on port {port}")
@@ -121,7 +121,7 @@ class Client:
         log.step_push(f"start ports={ports} mult={mult} "
                       f"duration={duration}s")
         self._call(_ops.start, ports, mult, duration, force)
-        log.ring("trex: traffic started")
+        log.ring("Trex: traffic started")
         log.step_pop("traffic started")
 
     def wait_on_traffic(self, timeout: float) -> None:
@@ -181,7 +181,7 @@ class Client:
             snap = self.get_stats(ports=ports)
             for p in ports:
                 s = snap[p]
-                log.ring(f"port{p} tx={s.tx_bps/1e9:.2f} Gbps/"
+                log.ring(f"Port{p} tx={s.tx_bps/1e9:.2f} Gbps/"
                          f"{s.tx_pps/1e6:.2f} Mpps rx={s.rx_bps/1e9:.2f} Gbps "
                          f"loss={s.loss_pct:.2f}%")
             yield snap
@@ -230,7 +230,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
         with remote.python(pco) as rem:
             cfg_path = rem.call(_ops.write_cfg, opts.cfg_yaml(),
                                 _agent.tmp_dir(pco.ta))
-            log.ring(f"trex cfg: {cfg_path}")
+            log.ring(f"TRex cfg: {cfg_path}")
             try:
                 job = pco.job("/bin/sh", ["-c", opts.shell_command(cfg_path)])
                 job.stdout.log(level="RING")
@@ -246,7 +246,7 @@ def session(pco: "RpcServer", opts: ServerOpts,
                     raise TrexError(
                         f"TRex STL server did not come up on {pco.ta}: "
                         f"{exc}") from exc
-                log.ring("trex: STL client connected")
+                log.ring("Trex: STL client connected")
                 log.step_pop(f"TRex STL ready on {pco.ta}")
                 popped = True
                 client = Client(rem, cli, ports)

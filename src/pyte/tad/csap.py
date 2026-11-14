@@ -300,7 +300,7 @@ class Csap:
                 self._rx.stop()
             except Exception as e:  # noqa: BLE001
                 import pyte.log as _log
-                _log.warn(f"csap receive stop failed during destroy: {e}")
+                _log.warn(f"CSAP receive stop failed during destroy: {e}")
         check(lib.pyte_csap_destroy(_enc(self.ta), self._session,
                                     self._handle),
               f"csap_destroy({self.stack_id})")
