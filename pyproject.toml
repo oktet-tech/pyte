@@ -26,3 +26,29 @@ dev = ["pytest>=8", "PyYAML>=6"]
 # the commit this used to name).
 min_te_commit = "v1.77.0"
 
+[tool.ruff]
+line-length = 96
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
+    "PIE",  # flake8-pie
+    "RUF",  # Ruff-specific rules
+    "EXE",  # flake8-executable
+]
+ignore = [
+    # Test scripts carry a shebang but are run through the
+    # interpreter, so they are not executable in git.
+    "EXE001",
+    # "assert a and b" reads fine; splitting it is pure style.
+    "PT018",
+]
