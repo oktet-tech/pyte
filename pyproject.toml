@@ -28,6 +28,9 @@ min_te_commit = "v1.77.0"
 
 [tool.ruff]
 line-length = 96
+# Generated from TE's Configurator model by pyte.cfg._gen, and pinned
+# against it by a unit test: a fix here would be undone or fail it.
+extend-exclude = ["src/pyte/cfg/gen"]
 
 [tool.ruff.lint]
 select = [
@@ -37,6 +40,7 @@ select = [
     "I",    # isort
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
+    "BLE",  # flake8-blind-except
     "C4",   # flake8-comprehensions
     "SIM",  # flake8-simplify
     "PT",   # flake8-pytest-style
