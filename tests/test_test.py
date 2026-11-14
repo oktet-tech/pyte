@@ -269,6 +269,43 @@ def test_check_fails_with_given_message(t):
     assert str(ei.value) == "port must be open"
 
 
+# -- need() -----------------------------------------------------------
+
+
+def test_need_returns_the_value(t):
+    assert t.need("eth0", "no interface") == "eth0"
+
+
+@pytest.mark.parametrize("value", [0, "", [], False])
+def test_need_takes_only_none_for_a_miss(t, value):
+    assert t.need(value, "missing") == value
+
+
+def test_need_fails_with_the_text_on_none(t):
+    with pytest.raises(TestFail) as ei:
+        t.need(None, "the env binds no iut_pf0")
+    assert str(ei.value) == "the env binds no iut_pf0"
+
+
+def test_need_hands_the_verdict_to_fail(lib, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            t.need(None, "no window in 65s", verdict="Nothing to measure")
+    assert ei.value.code == 1
+    assert lib.verdicts == [
+        (FakeShimLib.TE_LL_ERROR, "Nothing to measure")]
+
+
+def test_verdict_recorder_need_matches_the_handle():
+    from pyte.testing import VerdictRecorder
+    rec = VerdictRecorder()
+    assert rec.need(3, "missing") == 3
+    with pytest.raises(TestFail):
+        rec.need(None, "no window", verdict="Nothing to measure")
+    assert rec.verdicts == [("Nothing to measure", True)]
+
+
 # -- default_param() / default_uint() ----------------------------------
 #
 # Per-test defaults live in the Configurator, so these need nothing but

@@ -248,6 +248,11 @@ class VerdictRecorder:
             self.verdict(verdict, error=True)
         raise TestFail(text)
 
+    def need(self, value, text: str, *, verdict: str | bool = False):
+        if value is None:
+            self.fail(text, verdict=verdict)
+        return value
+
     def skip(self, text: str = "") -> None:
         from pyte.errors import TestSkip
         raise TestSkip(text)

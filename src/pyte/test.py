@@ -93,6 +93,23 @@ class Test:
         if not cond:
             self.fail(msg)
 
+    def need(self, value, text: str, *, verdict: str | bool = False):
+        """Return ``value``, or fail with ``text`` when it is None.
+
+        For a lookup that answers None on a miss, where the test
+        cannot go on without the value::
+
+            ifname = t.need(env.find_iface("iut_pf0"),
+                            "the env binds no iut_pf0")
+
+        Only None is a miss: 0, an empty string and an empty list are
+        values and come back as they are. ``verdict`` is handed to
+        :meth:`fail` unchanged.
+        """
+        if value is None:
+            self.fail(text, verdict=verdict)
+        return value
+
     def cleanup(self, fn: Callable, *args, **kwargs) -> None:
         """Register fn to run at test end (LIFO), pass or fail."""
         self._cleanups.append((fn, args, kwargs))
