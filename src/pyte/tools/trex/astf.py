@@ -25,10 +25,11 @@ from typing import TYPE_CHECKING, Callable, Iterator
 from pyte import log, mi
 from pyte._cleanup import cleanup_all
 from pyte.errors import RemotePythonError, TrexError
-from pyte.process import Process
+from pyte.process import Output, Process
 from pyte.tools.trex import _agent
 from pyte.tools.trex import _astf_ops as _ops
 from pyte.tools.trex import _astf_stats as _stats
+from pyte.tools.trex import console as _console
 from pyte.tools.trex._config import ServerOpts
 
 if TYPE_CHECKING:
@@ -322,7 +323,9 @@ class Client:
             self._call(_ops.get_tg_stats, self._tg_names))
 
     def poll(self, every: float = 1.0,
-             until: Callable[[], bool] | None = None
+             until: Callable[[], bool] | None = None, *,
+             console: Output | None = None,
+             screen_every: float | None = None
              ) -> _stats.Series:
         """Sample until ``until()`` is false, RINGing one line a tick.
 
@@ -334,9 +337,17 @@ class Client:
         whatever nesting level is current, so an unbracketed poll is
         the one window where that flood lands beside the step's own
         lines instead of one level deeper under them.
+
+        With ``console`` (an :class:`~pyte.process.Output` on the
+        server's console file) and ``screen_every``, the newest
+        complete console screen is logged at most that often. A screen
+        is logged once: when none completed since the last one, nothing
+        is logged.
         """
         series = _stats.Series()
         t0 = time.time()
+        pending = ""
+        last_screen_t = 0.0
         log.step_push("watch the traffic")
         try:
             while until is None or until():
@@ -353,6 +364,18 @@ class Client:
                     f"rx={_rate(glob.rx_bps, 'bps')}/"
                     f"{_rate(glob.rx_pps, 'pps')} "
                     f"drops={traffic.drop_pct:.2f}%")
+                if console is not None and screen_every is not None:
+                    pending += console.new()
+                    if now - last_screen_t >= screen_every:
+                        screen = _console.last_screen(pending)
+                        if screen is not None:
+                            log.ring(f"TRex console at t={now:.0f}s\n"
+                                     f"{screen}")
+                            last_screen_t = now
+                            # The last marker opens the next screen;
+                            # keep from it so this one cannot repeat.
+                            pending = pending[pending.rfind(
+                                _console.CLEAR):]
                 if every:
                     time.sleep(every)
         finally:
@@ -432,6 +455,7 @@ class ServerInfo:
     async_port: int
     nports: int
     tmp_dir: str | None = None
+    console_path: str = ""
 
 
 def _write_cfg_on_agent(pco: "RpcServer", opts: ServerOpts,
@@ -490,13 +514,18 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     tmp_dir = _agent.tmp_dir(pco.ta)
     cfg_path = _write_cfg_on_agent(pco, opts, tmp_dir)
     log.ring(f"trex cfg: {cfg_path}")
+    # The console redraws a table every second; in a file it can be
+    # read back as screens instead of flooding the log.
+    console_path = os.path.join(tmp_dir or "/tmp", "trex-console.txt")
     info = ServerInfo(ta=pco.ta, process=name, cfg_path=cfg_path,
                       workdir=opts.workdir, sync_port=opts.sync_port,
                       async_port=opts.async_port,
-                      nports=len(opts.ports), tmp_dir=tmp_dir)
+                      nports=len(opts.ports), tmp_dir=tmp_dir,
+                      console_path=console_path)
     Process.create(pco.ta, name, opts.trex_exec,
                    args=opts.argv(cfg_path), env=opts.env(),
-                   workdir=opts.workdir).start()
+                   workdir=opts.workdir, stdout_file=console_path,
+                   stdout_log_level="none").start()
     try:
         _wait_sync_port(pco, opts, connect_timeout)
     except BaseException as exc:
@@ -515,7 +544,7 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
 
 
 def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
-    """Stop the process and remove the config it was started with.
+    """Stop the process and remove the config and console file it was started with.
 
     The order is load-bearing, and is the one session()'s teardown
     keeps for the same reason: TRex reopens its config while shutting
@@ -535,13 +564,15 @@ def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
             proc.stop()
             proc.destroy()
 
-    def _remove_cfg() -> None:
+    def _remove_files() -> None:
         if pco is None:
             return
         with remote.python(pco) as rem:
             rem.call(_stl_ops.remove_file, info.cfg_path)
+            if info.console_path:
+                rem.call(_stl_ops.remove_file, info.console_path)
 
-    cleanup_all(_stop, _remove_cfg)
+    cleanup_all(_stop, _remove_files)
 
 
 @contextmanager

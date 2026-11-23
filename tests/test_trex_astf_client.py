@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.tools.trex.astf Client unit tests (fake remote, no agent)."""
 import dataclasses
+import time
 import types
 
 import pytest
@@ -10,6 +11,7 @@ from pyte.errors import RemotePythonError, TrexError
 from pyte.testing import FakeShimLib
 from pyte.tools.trex import _agent, astf
 from pyte.tools.trex._config import ServerOpts
+from pyte.tools.trex.console import CLEAR
 
 
 class FakeRemote:
@@ -120,6 +122,73 @@ def test_poll_brackets_the_watch_window_in_a_step(fake_shim):
     assert len(push) == len(pop) == 1
     assert push[0] < ticks_at[0]
     assert ticks_at[-1] < pop[0]
+
+
+class _FakeConsole:
+    """Hands out one new screen per new() call."""
+
+    def __init__(self):
+        self.n = 0
+
+    def new(self):
+        self.n += 1
+        return f"{CLEAR}screen {self.n}\n{CLEAR}"
+
+
+def _fake_clock(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(astf.time, "time", lambda: now[0])
+    monkeypatch.setattr(astf.time, "sleep",
+                        lambda s: now.__setitem__(0, now[0] + s))
+
+
+def _console_logs(fake_shim):
+    return [t for k, t in fake_shim.logs
+            if k == FakeShimLib.TE_LL_RING and t.startswith("TRex console")]
+
+
+def _poll_five_seconds(c, **kw):
+    t0 = time.time()
+    return c.poll(every=1.0, until=lambda: time.time() - t0 < 5, **kw)
+
+
+def test_poll_logs_screen_when_asked(fake_shim, monkeypatch):
+    _fake_clock(monkeypatch)
+    rem = FakeRemote(results={
+        "get_stats": {"global": {"active_flows": 5}},
+        "get_traffic_stats": {"client": {}, "server": {}}})
+    _poll_five_seconds(_client(rem), console=_FakeConsole(),
+                       screen_every=2.0)
+    logged = _console_logs(fake_shim)
+    assert len(logged) == 2
+    assert logged[0].startswith("TRex console at t=2s\nscreen ")
+    kinds = [k for k, _ in fake_shim.logs]
+    first = fake_shim.logs.index((FakeShimLib.TE_LL_RING, logged[0]))
+    assert kinds.index("STEP_PUSH") < first
+    assert first < len(kinds) - 1 - kinds[::-1].index("STEP_POP")
+
+
+def test_poll_does_not_log_screens_by_default(fake_shim, monkeypatch):
+    _fake_clock(monkeypatch)
+    rem = FakeRemote(results={
+        "get_stats": {"global": {"active_flows": 5}},
+        "get_traffic_stats": {"client": {}, "server": {}}})
+    _poll_five_seconds(_client(rem), console=_FakeConsole())
+    assert _console_logs(fake_shim) == []
+
+
+def test_poll_logs_a_screen_only_once(fake_shim, monkeypatch):
+    _fake_clock(monkeypatch)
+    rem = FakeRemote(results={
+        "get_stats": {"global": {"active_flows": 5}},
+        "get_traffic_stats": {"client": {}, "server": {}}})
+    quiet = types.SimpleNamespace(new=lambda: "")
+    _poll_five_seconds(_client(rem), console=quiet, screen_every=1.0)
+    assert _console_logs(fake_shim) == []
+    console = types.SimpleNamespace(
+        new=iter([CLEAR + "A" + CLEAR] + [""] * 10).__next__)
+    _poll_five_seconds(_client(rem), console=console, screen_every=1.0)
+    assert len(_console_logs(fake_shim)) == 1
 
 
 def test_poll_pops_the_watch_step_when_a_poll_raises(fake_shim):
@@ -398,11 +467,13 @@ class _FakeProcess:
         return self.state["exit_status"]
 
     @classmethod
-    def create(cls, ta, name, exe, args=(), env=None, workdir=None):
+    def create(cls, ta, name, exe, args=(), env=None, workdir=None,
+               stdout_file=None, stdout_log_level=None):
         cls.state["exists"] = True
         cls.state["created"] = dict(
             ta=ta, name=name, exe=exe, args=list(args),
-            env=dict(env or {}), workdir=workdir, started=False)
+            env=dict(env or {}), workdir=workdir, started=False,
+            stdout_file=stdout_file, stdout_log_level=stdout_log_level)
         return cls(ta, name)
 
     def start(self):
@@ -466,7 +537,24 @@ def test_start_server_creates_configures_and_starts(server_fakes):
     assert info == astf.ServerInfo(
         ta="TST1", process="trex", cfg_path="/tmp/trex.yaml",
         workdir="/usr/local/trex", sync_port=opts.sync_port,
-        async_port=opts.async_port, nports=2, tmp_dir="/tmp/agt")
+        async_port=opts.async_port, nports=2, tmp_dir="/tmp/agt",
+        console_path="/tmp/agt/trex-console.txt")
+
+
+def test_start_server_routes_stdout_to_file(server_fakes, fake_shim):
+    info = astf.start_server(types.SimpleNamespace(ta="TST1"),
+                             _server_opts())
+    created = server_fakes.state["created"]
+    assert created["stdout_file"].endswith("trex-console.txt")
+    assert created["stdout_log_level"] == "none"
+    assert info.console_path == created["stdout_file"]
+
+
+def test_server_info_console_path_defaults_to_empty():
+    info = astf.ServerInfo(ta="TST1", process="trex", cfg_path="c",
+                           workdir="w", sync_port=1, async_port=2,
+                           nports=2)
+    assert info.console_path == ""
 
 
 def test_start_server_launches_trex_not_a_shell(server_fakes):
