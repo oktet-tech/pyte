@@ -16,8 +16,9 @@ reach the log and nothing else. The entry's output settings change
 that (``Process.create(stdout_file=..., stdout_log_level=...)``): the
 agent also writes a stream to a file on its host, which
 :class:`Output` reads back by offset, and a level of ``"none"`` keeps
-the stream out of the log. Code that must react to output as it
-arrives (wait for a line, match a pattern) still wants
+the stream out of the log. An agent built from an older TE has no
+such settings, see :meth:`Process.create`. Code that must react to
+output as it arrives (wait for a line, match a pattern) still wants
 :mod:`pyte.job`.
 
 The model is ``doc/cm/cm_process.yml`` in TE.
@@ -26,7 +27,7 @@ from __future__ import annotations
 
 from pyte import cfg, errors
 from pyte._cleanup import cleanup_all
-from pyte.errors import RpcError
+from pyte.errors import ProcessOutputUnsupportedError, RpcError
 from pyte.rpc.files import open_file
 
 
@@ -81,9 +82,28 @@ class Process:
         logs the stream at (``"none"`` turns the log off). Each is
         written only when given, so an unset one leaves the agent's
         default alone. :class:`Output` reads such a file back.
+
+        An agent built from a TE older than these settings has no
+        ``output`` nodes. Asking for one there raises
+        :class:`~pyte.errors.ProcessOutputUnsupportedError` (a
+        :class:`~pyte.errors.CfgNotFoundError`) before anything else is
+        written, and the entry just added is removed again, so the
+        caller can create it once more without them.
         """
         self = cls(ta, name)
+        outputs = [(stream, path, level) for stream, path, level in (
+                       ("stdout", stdout_file, stdout_log_level),
+                       ("stderr", stderr_file, stderr_log_level))
+                   if path is not None or level is not None]
         cfg.add(self.oid)
+        for stream, _path, _level in outputs:
+            if not cfg.exists(f"{self.oid}/output:{stream}"):
+                exc = ProcessOutputUnsupportedError(
+                    f"Agent {ta} has no process output settings "
+                    f"({self.oid}/output:{stream} does not exist): it "
+                    f"runs a TE older than them")
+                cleanup_all(self.destroy, primary=exc)
+                raise exc
         cfg.set(f"{self.oid}/exe:", exe)
         for order, arg in enumerate(args, start=1):
             cfg.add(f"{self.oid}/arg:{order}", arg)
@@ -91,9 +111,7 @@ class Process:
             cfg.add(f"{self.oid}/env:{key}", value)
         if workdir is not None:
             cfg.set(f"{self.oid}/workdir:", workdir)
-        for stream, path, level in (
-                ("stdout", stdout_file, stdout_log_level),
-                ("stderr", stderr_file, stderr_log_level)):
+        for stream, path, level in outputs:
             if path is not None:
                 cfg.set(f"{self.oid}/output:{stream}/file:", path)
             if level is not None:

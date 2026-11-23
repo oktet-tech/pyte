@@ -1,27 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Konstantin Ushakov
 """pyte.process unit tests (offline: a fake Configurator)."""
+import re
 import sys
 import types
 
 import cffi
 import pytest
 
-from pyte import process
+from pyte import errors, process
 from pyte.errors import RpcError
 from pyte.rpc.server import RpcServer
 
 
 class FakeCfg:
-    """The slice of pyte.cfg that pyte.process uses."""
+    """The slice of pyte.cfg that pyte.process uses.
+
+    Adding a process instance creates its two read-only ``output``
+    children, as an agent with the output settings does; with
+    ``output`` False the agent is an older one that has none.
+    """
+
+    _PROCESS = re.compile(r"/agent:[^/]+/process:[^/]+")
 
     def __init__(self):
         self.tree = {}
         self.calls = []
+        self.output = True
 
     def add(self, oid, value=None):
         self.calls.append(("add", oid, value))
         self.tree[oid] = value
+        if self.output and self._PROCESS.fullmatch(oid):
+            for stream in ("stdout", "stderr"):
+                self.tree[f"{oid}/output:{stream}"] = None
 
     def set(self, oid, value, cvt=None):
         self.calls.append(("set", oid, value))
@@ -197,6 +209,33 @@ def test_create_sets_stderr_nodes(fake_cfg):
 def test_create_without_output_arguments_sets_no_output_nodes(fake_cfg):
     process.Process.create("TST1", "p", "/bin/true")
     assert not [o for _k, o, _v in fake_cfg.calls if "/output:" in o]
+
+
+@pytest.mark.parametrize("kw", [
+    {"stdout_file": "/tmp/o"},
+    {"stdout_log_level": "none"},
+    {"stderr_file": "/tmp/e"},
+], ids=["stdout file", "stdout level", "stderr file"])
+def test_create_refuses_output_settings_an_older_agent_lacks(fake_cfg,
+                                                             kw):
+    """An agent built from an older TE has no output nodes. Asking for
+    them is an error the caller can catch and act on, and it leaves no
+    half-configured entry behind, so the caller can create it again
+    without them."""
+    fake_cfg.output = False
+    with pytest.raises(errors.ProcessOutputUnsupportedError) as err:
+        process.Process.create("TST1", "p", "/bin/true", **kw)
+    assert isinstance(err.value, errors.CfgNotFoundError)
+    assert "TST1" in str(err.value)
+    assert not fake_cfg.exists("/agent:TST1/process:p")
+    process.Process.create("TST1", "p", "/bin/true")
+    assert fake_cfg.exists("/agent:TST1/process:p")
+
+
+def test_create_without_output_settings_suits_an_older_agent(fake_cfg):
+    fake_cfg.output = False
+    proc = process.Process.create("TST1", "p", "/bin/true", args=["x"])
+    assert proc.exists
 
 
 # -- Output: offset reads through a fake shim -------------------------------

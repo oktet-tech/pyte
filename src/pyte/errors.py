@@ -55,6 +55,16 @@ class CfgNotFoundError(CfgError):
     """
 
 
+class ProcessOutputUnsupportedError(_RcOrMsg, CfgNotFoundError):
+    """The agent has no ``/agent/process/output`` settings.
+
+    Raised by :meth:`pyte.process.Process.create` when it is asked for
+    an output file or log level on an agent built from a TE older than
+    those settings. Message-only (rc 0): the nodes were looked for and
+    are not there.
+    """
+
+
 class TrcError(_RcOrMsg, TeError):
     """TRC database access failure."""
 
