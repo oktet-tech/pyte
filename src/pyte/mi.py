@@ -241,6 +241,12 @@ class Logger:
         Either way the logger is closed for the caller: add() and the
         rest raise RuntimeError.  A second call does nothing, also when
         the first one deferred.
+
+        A deferred logger is written only if the test reaches that
+        step: close it before the finalizers return (a close from
+        another thread racing the write can be lost), and use
+        *immediate* for data that must survive SIGINT, or SIGUSR2 with
+        TE_TEST_SIGUSR2_STOP, which end the test process at once.
         """
         if self._closed:
             return

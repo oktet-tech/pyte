@@ -205,8 +205,11 @@ class Test:
         stops before the session's own finalizer runs.  They run under
         a "Collect results" step, opened only when at least one is
         registered, so what they log is not mistaken for the last body
-        step's work.  A raising finalizer is logged and the rest still
-        run.  An ordinary error leaves the exit code as the body left
+        step's work.  Every logger must be closed by the time they
+        return: a close() from another thread racing the Measurements
+        step can miss it, so a sampling thread is stopped and joined in
+        its finalizer.  A raising finalizer is logged and the rest
+        still run.  An ordinary error leaves the exit code as the body left
         it; an interrupt, an exit or a TestFail (which the signal
         handler raises too) turns a pass into a failure, as it does in
         a cleanup.

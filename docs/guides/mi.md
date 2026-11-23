@@ -24,7 +24,8 @@ emits.  `destroy` flushes the artifact; no MI data is written if
 
 Inside a running test `close()`, and leaving the `with` block (also
 by an exception), does not write: the logger is handed to the test.
-When the body ends, however it ends, the test:
+When the body ends, however it ends (short of the two immediate exits
+below), the test:
 
 1. sets `t.failed`: True unless the body passed or was skipped;
 2. if any finalizer is registered with `t.finalize(fn, *args)`,
@@ -44,6 +45,11 @@ sampler.start()
 t.finalize(sampler.stop)    # stop() closes its mi.Logger
 ```
 
+Every logger must be closed by the time the finalizers return.  A
+sampler that closes its logger from its own thread has to be stopped
+and joined in its finalizer: a `close()` that races the Measurements
+step from another thread can miss it, and its data is lost.
+
 The end of a test therefore reads: the body's steps, "Collect
 results", "Measurements", "Cleanup", each opened only when it has
 something to run.  A step that cannot be opened is logged as an error
@@ -53,6 +59,13 @@ cleanups still run.  An ordinary error does not change the exit code;
 an interrupt, an exit or a `TestFail` (which a signal raises too)
 turns a pass into a failure, as it does in a cleanup.  Prologues and
 epilogues are tests and get the same steps.
+
+Two endings skip all of this.  SIGINT, and SIGUSR2 when
+`TE_TEST_SIGUSR2_STOP` is set, end the process at once (`os._exit`, as
+TE's C handler does): no finalizer, Measurements step or cleanup runs,
+and a logger closed before the signal is lost with its data.  A
+measurement that must survive such a stop is written at once with
+`close(immediate=True)`.
 
 `close(immediate=True)` writes at once, and so does `close()` outside
 a test (unit tests, tools) or in a cleanup, once the test is past the
