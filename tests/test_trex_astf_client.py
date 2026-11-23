@@ -7,7 +7,8 @@ import types
 
 import pytest
 
-from pyte.errors import RemotePythonError, TrexError
+from pyte.errors import (CfgNotFoundError, ProcessOutputUnsupportedError,
+                         RemotePythonError, TrexError)
 from pyte.testing import FakeShimLib
 from pyte.tools.trex import _agent, astf
 from pyte.tools.trex._config import ServerOpts
@@ -451,8 +452,10 @@ class _FakeProcess:
 
     @classmethod
     def reset(cls):
+        # output: whether the agent has the /agent/process/output nodes
         cls.state = {"exists": False, "running": False,
-                     "exit_status": (2, 0), "created": None}
+                     "exit_status": (2, 0), "created": None,
+                     "output": True}
 
     @property
     def exists(self):
@@ -469,6 +472,10 @@ class _FakeProcess:
     @classmethod
     def create(cls, ta, name, exe, args=(), env=None, workdir=None,
                stdout_file=None, stdout_log_level=None):
+        if (not cls.state["output"]
+                and (stdout_file, stdout_log_level) != (None, None)):
+            raise ProcessOutputUnsupportedError(
+                f"Agent {ta} has no process output settings")
         cls.state["exists"] = True
         cls.state["created"] = dict(
             ta=ta, name=name, exe=exe, args=list(args),
@@ -548,6 +555,40 @@ def test_start_server_routes_stdout_to_file(server_fakes, fake_shim):
     assert created["stdout_file"].endswith("trex-console.txt")
     assert created["stdout_log_level"] == "none"
     assert info.console_path == created["stdout_file"]
+
+
+def test_start_server_on_an_older_agent_logs_the_console(server_fakes,
+                                                         fake_shim):
+    """An agent without the output settings cannot keep the console in
+    a file. That costs a flooded log, not the run: TRex starts with its
+    stdout logged by the agent, and no console file is published."""
+    server_fakes.state["output"] = False
+    info = astf.start_server(types.SimpleNamespace(ta="TST1"),
+                             _server_opts())
+    created = server_fakes.state["created"]
+    assert created["started"] is True
+    assert created["stdout_file"] is None
+    assert created["stdout_log_level"] is None
+    assert info.console_path == ""
+    assert fake_shim.texts(FakeShimLib.TE_LL_WARN) == [
+        "TRex console goes to the log: agent TST1 has no process "
+        "output settings"]
+
+
+def test_start_server_does_not_swallow_other_cfg_errors(server_fakes,
+                                                        fake_shim,
+                                                        monkeypatch):
+    """Only the missing output settings are survivable; a missing node
+    of any other kind is a broken setup and fails the bring-up."""
+    def _create(*a, **k):
+        raise CfgNotFoundError(1, "cfg set /agent:TST1/process:trex/exe:")
+
+    monkeypatch.setattr(server_fakes, "create", _create)
+    with pytest.raises(CfgNotFoundError) as err:
+        astf.start_server(types.SimpleNamespace(ta="TST1"),
+                          _server_opts())
+    assert not isinstance(err.value, ProcessOutputUnsupportedError)
+    assert fake_shim.texts(FakeShimLib.TE_LL_WARN) == []
 
 
 def test_server_info_console_path_defaults_to_empty():

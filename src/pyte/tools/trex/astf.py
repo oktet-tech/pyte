@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING, Callable, Iterator
 
 from pyte import log, mi
 from pyte._cleanup import cleanup_all
-from pyte.errors import RemotePythonError, TrexError
+from pyte.errors import (ProcessOutputUnsupportedError, RemotePythonError,
+                         TrexError)
 from pyte.process import Output, Process
 from pyte.tools.trex import _agent
 from pyte.tools.trex import _astf_ops as _ops
@@ -509,6 +510,12 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     ``sh -c``: ``/agent/process`` models workdir and env natively,
     which is all session()'s shell wrapper supplies, and a wrapper
     would make status and kill act on the shell instead of on TRex.
+
+    TRex's console goes to a file on the agent, kept out of the log,
+    and :attr:`ServerInfo.console_path` names it. An agent
+    built from a TE without the process output settings cannot do
+    that: it logs the console as it is written, the bring-up warns
+    once, and ``console_path`` is empty.
     """
     log.step_push(f"TRex ASTF: bring up on {pco.ta} as process {name!r}")
     tmp_dir = _agent.tmp_dir(pco.ta)
@@ -517,15 +524,25 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     # The console redraws a table every second; in a file it can be
     # read back as screens instead of flooding the log.
     console_path = os.path.join(tmp_dir or "/tmp", "trex-console.txt")
+    launch = dict(args=opts.argv(cfg_path), env=opts.env(),
+                  workdir=opts.workdir)
+    try:
+        proc = Process.create(pco.ta, name, opts.trex_exec,
+                              stdout_file=console_path,
+                              stdout_log_level="none", **launch)
+    except ProcessOutputUnsupportedError:
+        # Readable without the file, only louder: the agent logs the
+        # console as it is written, as it did before the file existed.
+        log.warn(f"TRex console goes to the log: agent {pco.ta} has no "
+                 f"process output settings")
+        console_path = ""
+        proc = Process.create(pco.ta, name, opts.trex_exec, **launch)
     info = ServerInfo(ta=pco.ta, process=name, cfg_path=cfg_path,
                       workdir=opts.workdir, sync_port=opts.sync_port,
                       async_port=opts.async_port,
                       nports=len(opts.ports), tmp_dir=tmp_dir,
                       console_path=console_path)
-    Process.create(pco.ta, name, opts.trex_exec,
-                   args=opts.argv(cfg_path), env=opts.env(),
-                   workdir=opts.workdir, stdout_file=console_path,
-                   stdout_log_level="none").start()
+    proc.start()
     try:
         _wait_sync_port(pco, opts, connect_timeout)
     except BaseException as exc:
