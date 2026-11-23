@@ -511,8 +511,8 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     which is all session()'s shell wrapper supplies, and a wrapper
     would make status and kill act on the shell instead of on TRex.
 
-    TRex's console goes to a file on the agent, kept out of the log,
-    and :attr:`ServerInfo.console_path` names it. An agent
+    TRex's console goes to a file next to the cfg file, kept out of
+    the log, and :attr:`ServerInfo.console_path` names it. An agent
     built from a TE without the process output settings cannot do
     that: it logs the console as it is written, the bring-up warns
     once, and ``console_path`` is empty.
@@ -522,8 +522,11 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
     cfg_path = _write_cfg_on_agent(pco, opts, tmp_dir)
     log.ring(f"trex cfg: {cfg_path}")
     # The console redraws a table every second; in a file it can be
-    # read back as screens instead of flooding the log.
-    console_path = os.path.join(tmp_dir or "/tmp", "trex-console.txt")
+    # read back as screens instead of flooding the log. Named after the
+    # cfg file, which mkstemp made unique: the agent truncates the file
+    # at each start and stop_server() deletes it, so two servers must
+    # never share one.
+    console_path = os.path.splitext(cfg_path)[0] + "-console.txt"
     launch = dict(args=opts.argv(cfg_path), env=opts.env(),
                   workdir=opts.workdir)
     try:

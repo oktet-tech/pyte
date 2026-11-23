@@ -545,14 +545,14 @@ def test_start_server_creates_configures_and_starts(server_fakes):
         ta="TST1", process="trex", cfg_path="/tmp/trex.yaml",
         workdir="/usr/local/trex", sync_port=opts.sync_port,
         async_port=opts.async_port, nports=2, tmp_dir="/tmp/agt",
-        console_path="/tmp/agt/trex-console.txt")
+        console_path="/tmp/trex-console.txt")
 
 
 def test_start_server_routes_stdout_to_file(server_fakes, fake_shim):
     info = astf.start_server(types.SimpleNamespace(ta="TST1"),
                              _server_opts())
     created = server_fakes.state["created"]
-    assert created["stdout_file"].endswith("trex-console.txt")
+    assert created["stdout_file"] == "/tmp/trex-console.txt"
     assert created["stdout_log_level"] == "none"
     assert info.console_path == created["stdout_file"]
 
@@ -589,6 +589,39 @@ def test_start_server_does_not_swallow_other_cfg_errors(server_fakes,
                           _server_opts())
     assert not isinstance(err.value, ProcessOutputUnsupportedError)
     assert fake_shim.texts(FakeShimLib.TE_LL_WARN) == []
+
+
+def test_console_file_is_named_after_the_cfg_file(server_fakes, fake_shim,
+                                                 monkeypatch):
+    """The cfg file is unique (mkstemp), a fixed console name is not:
+    two servers on one agent, or two sessions on a host without a
+    tmp_dir, would share one file that each start truncates and either
+    stop_server() deletes."""
+    cfgs = iter(["/tmp/agt/pyte_trex_a1.yaml", "/tmp/agt/pyte_trex_b2.yaml"])
+    monkeypatch.setattr(astf, "_write_cfg_on_agent",
+                        lambda pco, opts, tmp_dir: next(cfgs))
+    pco = types.SimpleNamespace(ta="TST1")
+    first = astf.start_server(pco, _server_opts(), name="trex1")
+    second = astf.start_server(pco, _server_opts(), name="trex2")
+    assert first.console_path == "/tmp/agt/pyte_trex_a1-console.txt"
+    assert second.console_path == "/tmp/agt/pyte_trex_b2-console.txt"
+    assert server_fakes.state["created"]["stdout_file"] == \
+        second.console_path
+
+
+def test_stop_server_removes_the_cfg_and_the_console_file(server_fakes,
+                                                          monkeypatch):
+    rem = FakeRemote()
+    _fake_remote_python(monkeypatch, rem)
+    info = astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/agt/pyte_trex_a1.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2,
+                           console_path="/tmp/agt/pyte_trex_a1-console.txt")
+    astf.stop_server(info, types.SimpleNamespace(ta="TST1"))
+    assert rem.calls == [
+        ("remove_file", ("/tmp/agt/pyte_trex_a1.yaml",)),
+        ("remove_file", ("/tmp/agt/pyte_trex_a1-console.txt",))]
 
 
 def test_server_info_console_path_defaults_to_empty():
