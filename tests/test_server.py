@@ -363,6 +363,59 @@ def test_silent_pass_restores_an_ambient_setting(monkeypatch):
     assert lib.silent_pass == 1
 
 
+# -- silent_pass_once: one quiet call --------------------------------------
+
+def _te_consumes(lib):
+    """What TAPI_RPC_LOG does after a silenced call that completed:
+    silent_pass goes back to silent_pass_default, which is false."""
+    lib.silent_pass = 0
+
+
+def test_silent_pass_once_sets_then_restores_what_it_found(monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with srv.silent_pass_once():
+        assert lib.silent_pass == 1
+        _te_consumes(lib)
+    assert lib.silent_pass == 0
+    assert srv._silent_pass_depth == 0
+
+
+def test_silent_pass_once_sets_the_flag_inside_silent_pass(monkeypatch):
+    """Inside silent_pass() a nested silent_pass() is a no-op, so once
+    TE has consumed the flag the rest of the block would be logged.
+    silent_pass_once() sets the flag again for its own call."""
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with srv.silent_pass():
+        _te_consumes(lib)                  # the block's first call
+        with srv.silent_pass_once():
+            assert lib.silent_pass == 1
+            _te_consumes(lib)
+        assert lib.silent_pass == 0        # as it found it
+    assert lib.silent_pass == 0
+
+
+def test_silent_pass_once_keeps_an_unconsumed_flag(monkeypatch):
+    """A flag an enclosing block set and no call has consumed yet is
+    still set afterwards, for the call that block was opened for."""
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with srv.silent_pass():
+        with srv.silent_pass_once():
+            _te_consumes(lib)
+        assert lib.silent_pass == 1
+
+
+def test_silent_pass_once_restores_on_exception(monkeypatch):
+    lib = _fake_silent_pass_shim(monkeypatch)
+    srv = _bare_server()
+    with pytest.raises(ValueError, match="boom"):
+        with srv.silent_pass_once():
+            raise ValueError("boom")
+    assert lib.silent_pass == 0
+
+
 class _LifecycleLib:
     """Fake shim for the RpcServer destroy/getpid lifecycle."""
 

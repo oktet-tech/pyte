@@ -199,6 +199,10 @@ class RpcServer:
                 flt = job.filter(stdout=True, regex=r"...")
             job.start()             # still silenced (baked in at creation)
             flt.drain()             # silenced (baked in at attach time)
+
+        A plain RPC (open, read, lseek, close...) has no object to bake
+        the flag into, and TE consumes it: only the first such call in
+        the block is silent, see :meth:`silent_pass_once`.
         """
         lib = _shim_lib()
         h = self._handle()
@@ -212,6 +216,43 @@ class RpcServer:
             self._silent_pass_depth -= 1
             if self._silent_pass_depth == 0:
                 lib.pyte_rpc_set_silent_pass(h, self._silent_pass_was)
+
+    @contextmanager
+    def silent_pass_once(self):
+        """Do not log the one plain RPC in this block, unless it fails.
+
+        For a plain RPC ``rcf_rpc_server.silent_pass`` covers one call.
+        TAPI_RPC_LOG (te/lib/tapi_rpc/tapi_rpc_internal.h) skips the
+        log row of a call that completed while the flag is set and then
+        resets the flag to ``silent_pass_default``, which nothing sets,
+        so it is false: every later call is logged at RING again.
+        "Completed" means the RPC itself worked; pyte always awaits
+        errors, so a call that returned -1 with an errno counts, and is
+        silent too. A call that failed as an RPC (a timeout, a lost
+        agent) is logged at ERROR and leaves the flag set.
+
+        So put exactly one call in the block, and a new block around
+        each call. Unlike :meth:`silent_pass` this sets the flag even
+        inside another block, where a nested :meth:`silent_pass` does
+        nothing, and on exit it puts back the value it found: a flag an
+        enclosing block set and no call consumed is still set for the
+        call that block was opened for. Calls on a job or a filter
+        follow the flag baked into that object instead, see
+        :meth:`silent_pass`::
+
+            with pco.silent_pass_once():
+                f = pco.open(path)
+            with pco.silent_pass_once():
+                data = f.read(4096)
+        """
+        lib = _shim_lib()
+        h = self._handle()
+        was = lib.pyte_rpc_get_silent_pass(h)
+        lib.pyte_rpc_set_silent_pass(h, 1)
+        try:
+            yield self
+        finally:
+            lib.pyte_rpc_set_silent_pass(h, was)
 
     # -- curated calls -------------------------------------------------
     def getpid(self) -> int:
