@@ -192,6 +192,53 @@ def test_poll_logs_a_screen_only_once(fake_shim, monkeypatch):
     assert len(_console_logs(fake_shim)) == 1
 
 
+def _stats_remote():
+    return FakeRemote(results={
+        "get_stats": {"global": {"active_flows": 5}},
+        "get_traffic_stats": {"client": {}, "server": {}}})
+
+
+def test_poll_reads_the_console_only_when_a_screen_is_due(fake_shim,
+                                                          monkeypatch):
+    """Every read is a handful of RPCs; between screens they buy
+    nothing, the file keeps what was written until the next one."""
+    _fake_clock(monkeypatch)
+    console = _FakeConsole()
+    _poll_five_seconds(_client(_stats_remote()), console=console,
+                       screen_every=2.0)
+    assert console.n == 2                  # at t=2s and t=4s
+
+
+def test_poll_keeps_the_console_buffer_bounded(fake_shim, monkeypatch):
+    """A console that never completes a screen must not grow a buffer
+    that is split again on every tick for the whole poll."""
+    _fake_clock(monkeypatch)
+    seen = []
+    last_screen = astf._console.last_screen
+
+    def _last_screen(text):
+        seen.append(len(text))
+        return last_screen(text)
+
+    monkeypatch.setattr(astf._console, "last_screen", _last_screen)
+    console = types.SimpleNamespace(new=lambda: "x" * 1000)
+    _poll_five_seconds(_client(_stats_remote()), console=console,
+                       screen_every=1.0)
+    assert len(seen) == 4
+    assert max(seen) <= 1000 + len(CLEAR) - 1
+
+
+def test_poll_joins_a_clear_marker_split_between_reads(fake_shim,
+                                                       monkeypatch):
+    _fake_clock(monkeypatch)
+    console = types.SimpleNamespace(new=iter(
+        ["junk" + CLEAR[:3], CLEAR[3:] + "S\n" + CLEAR] + [""] * 5
+    ).__next__)
+    _poll_five_seconds(_client(_stats_remote()), console=console,
+                       screen_every=1.0)
+    assert _console_logs(fake_shim) == ["TRex console at t=2s\nS\n"]
+
+
 def test_poll_pops_the_watch_step_when_a_poll_raises(fake_shim):
     """A raised poll must not leave the nesting pushed: everything
     the test logs afterwards would shift one level deeper."""

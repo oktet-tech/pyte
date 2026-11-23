@@ -343,7 +343,7 @@ class Client:
         server's console file) and ``screen_every``, the newest
         complete console screen is logged at most that often. A screen
         is logged once: when none completed since the last one, nothing
-        is logged.
+        is logged. The file is read only when a screen is due.
         """
         series = _stats.Series()
         t0 = time.time()
@@ -365,18 +365,24 @@ class Client:
                     f"rx={_rate(glob.rx_bps, 'bps')}/"
                     f"{_rate(glob.rx_pps, 'pps')} "
                     f"drops={traffic.drop_pct:.2f}%")
-                if console is not None and screen_every is not None:
+                if (console is not None and screen_every is not None
+                        and now - last_screen_t >= screen_every):
+                    # Read only when a screen is due: the file keeps
+                    # what was written in between.
                     pending += console.new()
-                    if now - last_screen_t >= screen_every:
-                        screen = _console.last_screen(pending)
-                        if screen is not None:
-                            log.ring(f"TRex console at t={now:.0f}s\n"
-                                     f"{screen}")
-                            last_screen_t = now
-                            # The last marker opens the next screen;
-                            # keep from it so this one cannot repeat.
-                            pending = pending[pending.rfind(
-                                _console.CLEAR):]
+                    screen = _console.last_screen(pending)
+                    if screen is not None:
+                        log.ring(f"TRex console at t={now:.0f}s\n"
+                                 f"{screen}")
+                        last_screen_t = now
+                    # Keep only what can still become a screen: from
+                    # the last marker, which opens the next one (so a
+                    # logged screen cannot repeat), or with no marker
+                    # the tail a marker split between reads may start
+                    # in.
+                    cut = pending.rfind(_console.CLEAR)
+                    pending = (pending[cut:] if cut >= 0 else
+                               pending[-(len(_console.CLEAR) - 1):])
                 if every:
                     time.sleep(every)
         finally:
