@@ -3,9 +3,13 @@
 """Test lifecycle: the Python counterpart of TEST_START/TEST_END."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+import pathlib
 import random
+import re
+import shutil
 import signal
 import sys
 from contextlib import contextmanager
@@ -25,12 +29,25 @@ EXIT_SKIP = 0x5
 
 _current: "Test | None" = None
 
+# The server-side unpack script rejects a whole run for a name outside
+# this set, so refuse it here, where the test can still react.
+_ATTACH_NAME = re.compile(r"[-_.:0-9a-zA-Z]{1,128}")
+
+
+def _human_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KiB"
+    return f"{size / (1024 * 1024):.1f} MiB"
+
 
 class Test:
     def __init__(self, params: Params):
         self.params = params
         self._cleanups: list[tuple[Callable, tuple, dict]] = []
         self._env = None
+        self._attach_warned = False
 
     # -- structure ---------------------------------------------------
     def step(self, text: str) -> None:
@@ -49,6 +66,62 @@ class Test:
     def artifact(self, text: str) -> None:
         lib = _shim_lib()
         lib.pyte_artifact(lib.TE_LL_RING, _enc(text))
+
+    def attach(self, name: str, source, description: str = ""
+               ) -> pathlib.Path | None:
+        """Attach a file to this test's result.
+
+        *source* is the content when ``bytes``, otherwise a local file
+        (``str`` or path-like) to copy.  The file lands in
+        ``$TE_LOG_DIR/attachments/node_id<id>/<name>`` (``$TE_RUN_DIR``
+        when no log dir is set), with an entry in the ``attachments.json``
+        next to it, which is what the log viewer reads.  Attaching the
+        same *name* again replaces the file and its entry.
+
+        *name* must match ``[-_.:0-9a-zA-Z]{1,128}`` and not be ``.``
+        or ``..``, else ValueError.  Returns the destination path, or
+        None (with one warning per test) when there is nowhere to put
+        it: no log directory, or no test id.
+        """
+        if (not _ATTACH_NAME.fullmatch(name)
+                or name in (".", "..")):
+            raise ValueError(f"Invalid attachment name {name!r}")
+        test_id = int(self.params.get("te_test_id", "0") or "0")
+        root = (os.environ.get("TE_LOG_DIR")
+                or os.environ.get("TE_RUN_DIR"))
+        if test_id == 0 or not root:
+            if not self._attach_warned:
+                self._attach_warned = True
+                log.warn("Attachments are not available here (no test "
+                         f"id or log directory), skipping {name}")
+            return None
+
+        node_dir = pathlib.Path(root) / "attachments" / f"node_id{test_id}"
+        node_dir.mkdir(parents=True, exist_ok=True)
+        dest = node_dir / name
+        if isinstance(source, (bytes, bytearray)):
+            dest.write_bytes(source)
+        else:
+            shutil.copyfile(source, dest)
+
+        index = node_dir / "attachments.json"
+        data = (json.loads(index.read_text()) if index.exists()
+                else {"version": 1, "attachments": []})
+        path = f"./{name}"
+        entry = {
+            "type": "text",
+            "view_type": "inline",
+            "name": os.path.splitext(name)[0],
+            "description": description,
+            "download_enabled": True,
+            "path": path,
+        }
+        data["attachments"] = [a for a in data["attachments"]
+                               if a.get("path") != path] + [entry]
+        index.write_text(json.dumps(data, indent=2))
+
+        log.ring(f"Attachment: {name} ({_human_size(dest.stat().st_size)})")
+        return dest
 
     # -- outcome -----------------------------------------------------
     def fail(self, text: str, *, verdict: str | bool = False) -> None:
