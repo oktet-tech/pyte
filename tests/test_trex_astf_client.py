@@ -239,6 +239,29 @@ def test_poll_joins_a_clear_marker_split_between_reads(fake_shim,
     assert _console_logs(fake_shim) == ["TRex console at t=2s\nS\n"]
 
 
+@pytest.mark.parametrize("error", [
+    RuntimeError("agent gone"), TimeoutError("read timed out")],
+    ids=["error", "timeout"])
+def test_poll_keeps_watching_when_the_console_fails(fake_shim, monkeypatch,
+                                                    error):
+    """The console is an opt-in diagnostic; losing it must not cost the
+    traffic watch it decorates. One WARN, then no more reads."""
+    _fake_clock(monkeypatch)
+    calls = []
+
+    def _new():
+        calls.append(1)
+        raise error
+
+    series = _poll_five_seconds(
+        _client(_stats_remote()),
+        console=types.SimpleNamespace(new=_new), screen_every=1.0)
+    assert len(series.samples) == 5
+    assert len(calls) == 1
+    warns = fake_shim.texts(FakeShimLib.TE_LL_WARN)
+    assert len(warns) == 1 and str(error) in warns[0]
+
+
 def test_poll_pops_the_watch_step_when_a_poll_raises(fake_shim):
     """A raised poll must not leave the nesting pushed: everything
     the test logs afterwards would shift one level deeper."""
