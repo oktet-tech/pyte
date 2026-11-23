@@ -45,9 +45,11 @@ t.finalize(sampler.stop)    # stop() closes its mi.Logger
 
 Finalizers get no step of their own: what they log lands at the end
 of the last body step.  A failing finalizer or logger write is logged
-as an error with its traceback; the others still run and the exit
-code does not change.  Prologues and epilogues are tests and get the
-same step.
+as an error with its traceback, and the others and the cleanups still
+run.  An ordinary error does not change the exit code; an interrupt,
+an exit or a `TestFail` (which a signal raises too) turns a pass into
+a failure, as it does in a cleanup.  Prologues and epilogues are tests
+and get the same step.
 
 `close(immediate=True)` writes at once, and so does `close()` outside
 a test (unit tests, tools) or in a cleanup, once the test is past the

@@ -200,8 +200,10 @@ class Test:
         stops and closes its mi.Logger, so its rows join the other
         measurements.  They get no step of their own: what they log
         lands at the end of the last body step.  A raising finalizer
-        is logged and the rest still run; the exit code stays as the
-        body left it.
+        is logged and the rest still run.  An ordinary error leaves
+        the exit code as the body left it; an interrupt, an exit or a
+        TestFail (which the signal handler raises too) turns a pass
+        into a failure, as it does in a cleanup.
         """
         self._finalizers.append((fn, args, kwargs))
 
@@ -293,45 +295,54 @@ class Test:
 
         False once the test is past that step; the caller writes then.
         """
-        if self._pending_mi is None:
+        pending = self._pending_mi
+        if pending is None:
             return False
-        self._pending_mi.append(write)
+        pending.append(write)
         return True
 
-    def _run_finalizers(self) -> None:
+    def _run_finalizers(self) -> bool:
+        ok = True
         for fn, args, kwargs in self._finalizers:
-            try:
-                fn(*args, **kwargs)
-            except BaseException:  # noqa: BLE001  as in _run_cleanups()
-                log.error("Finalizer failed:\n" + _format_exc_chain())
+            ok = _guarded("Finalizer", fn, *args, **kwargs) and ok
+        return ok
 
-    def _write_measurements(self) -> None:
+    def _write_measurements(self) -> bool:
         pending, self._pending_mi = self._pending_mi or [], None
+        ok = True
         if pending:
-            self.step("Measurements")
+            # Guarded on its own: without the step the rows still count.
+            ok = _guarded("Opening the Measurements step", self.step,
+                          "Measurements")
         for write in pending:
-            try:
-                write()
-            except BaseException:  # noqa: BLE001  as in _run_cleanups()
-                log.error("MI write failed:\n" + _format_exc_chain())
+            ok = _guarded("MI write", write) and ok
+        return ok
 
     def _finish(self, failed: bool) -> bool:
-        """Run everything after the body; False if a cleanup failed.
+        """Run everything after the body; False if that fails the test.
 
         In order: set :attr:`failed`, run the finalizers, write the
         pending MI loggers under "Measurements", run the cleanups.
-        Neither a finalizer nor an MI write can stop the rest.
+        Neither a finalizer nor an MI write can stop the rest.  False
+        when a cleanup failed, or a finalizer or an MI write raised
+        what fails the test (see :func:`_fails_the_test`).
         """
         self._failed = failed
-        try:
-            self._run_finalizers()
-            self._write_measurements()
-        except BaseException:  # noqa: BLE001  never skip the cleanups
-            # Only what escapes the per-item guards lands here, e.g. a
-            # signal arriving between two items.
-            log.error("Finalizers or measurements failed:\n"
-                      + _format_exc_chain())
-        return self._run_cleanups()
+        ok = True
+        for what, phase in (("Running the finalizers", self._run_finalizers),
+                            ("Writing the measurements",
+                             self._write_measurements)):
+            try:
+                ok = phase() and ok
+            except BaseException as exc:  # noqa: BLE001  never skip the rest
+                # Only what escapes the per-item guards lands here,
+                # e.g. a signal arriving between two items.
+                log.error(f"{what} failed:\n" + _format_exc_chain())
+                ok = ok and not _fails_the_test(exc)
+        # Past the Measurements step on every path: a close from here
+        # on writes at once, not into a list nobody will read.
+        self._pending_mi = None
+        return self._run_cleanups() and ok
 
     @property
     def env(self):
@@ -348,6 +359,32 @@ class Test:
                 raise EnvError("test has no 'env' parameter to bind")
             self._env = Env.bind(cfg)
         return self._env
+
+
+def _fails_the_test(exc: BaseException) -> bool:
+    """Whether *exc*, caught in a finalizer or an MI write, fails the test.
+
+    An ordinary error is only logged.  An interrupt (KeyboardInterrupt,
+    SystemExit) fails the test, as it does in a cleanup, and so does
+    TestFail: t.fail() asks for exactly that, and the signal handler
+    raises it.
+    """
+    return not isinstance(exc, Exception) or isinstance(exc, TestFail)
+
+
+def _guarded(what: str, fn: Callable, /, *args, **kwargs) -> bool:
+    """Run *fn*, logging what it raises as "<what> failed".
+
+    Catches BaseException, as _run_cleanups() does, so nothing raised
+    here skips the rest of the test end.  False when what was caught
+    fails the test.
+    """
+    try:
+        fn(*args, **kwargs)
+    except BaseException as exc:  # noqa: BLE001  see the docstring
+        log.error(f"{what} failed:\n" + _format_exc_chain())
+        return not _fails_the_test(exc)
+    return True
 
 
 def _cleanup_detail(exc: BaseException) -> str:

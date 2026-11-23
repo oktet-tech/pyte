@@ -9,14 +9,12 @@ malformed te_rand_seed) flows through the same logged-error/cleanup/
 sys.exit path as a test-body failure instead of escaping as a raw
 exception that skips cleanup and leaves _current set.
 """
-import logging
-import signal
 import sys
 import types
 
 import pytest
 
-from pyte import log, test
+from pyte import test
 from pyte._cleanup import cleanup_all
 from pyte._params import Params
 from pyte.errors import RemotePythonError, TestFail
@@ -24,22 +22,11 @@ from pyte.testing import FakeShimLib
 
 
 @pytest.fixture()
-def lib(monkeypatch):
+def lib(monkeypatch, start_state):
     lib = FakeShimLib()
     monkeypatch.setitem(sys.modules, "pyte._shim",
                         types.SimpleNamespace(ffi=None, lib=lib))
-    # start() installs signal handlers and a root-logger handler and
-    # mutates test._current; undo all of it so tests stay independent.
-    saved = {s: signal.getsignal(s)
-             for s in (signal.SIGINT, signal.SIGUSR1, signal.SIGUSR2)}
-    yield lib
-    for s, h in saved.items():
-        signal.signal(s, h)
-    root = logging.getLogger()
-    for h in list(root.handlers):
-        if isinstance(h, log.TeLogHandler):
-            root.removeHandler(h)
-    test._current = None
+    return lib
 
 
 def test_start_success_exits_zero(lib, monkeypatch):
