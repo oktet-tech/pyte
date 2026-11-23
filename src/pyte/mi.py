@@ -251,6 +251,16 @@ class Logger:
             # The test keeps the bound method, and with it this logger,
             # so the never-closed finalizer cannot fire before the write.
             if t is not None and t._defer_mi(self._write):
+                # Only the test holds the logger now. Dropped unwritten
+                # (a unit test that never ends its test, an escape from
+                # the test end), it was closed all the same: say what
+                # was lost instead.
+                self._finalizer.detach()
+                self._finalizer = weakref.finalize(
+                    self, warnings.warn,
+                    f"mi.Logger({self._tool!r}) was closed but never "
+                    "written: its test ended without writing its "
+                    "measurements", ResourceWarning)
                 return
         self._write()
 

@@ -624,6 +624,25 @@ def test_deferred_logger_dropped_by_its_caller_is_still_written(run_lib,
     assert ("destroy", b"fio") in run_lib.calls
 
 
+def test_deferred_logger_dropped_unwritten_says_it_was_closed(monkeypatch):
+    """A logger handed to a test that never writes it (a unit test that
+    never ends its test, an escape from the test end) was closed: the
+    warning must say the write is what was lost, not blame a close()
+    the caller did make."""
+    from pyte._params import Params
+    _fake_shim(monkeypatch, FakeLib())
+    monkeypatch.setattr(test, "_current", test.Test(Params({})))
+    mi.Logger("fio").close()
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        test._current = None               # the test is dropped
+        gc.collect()
+    texts = [str(w.message) for w in got
+             if issubclass(w.category, ResourceWarning)]
+    assert texts == ["mi.Logger('fio') was closed but never written: "
+                     "its test ended without writing its measurements"]
+
+
 def test_logger_closed_in_cleanup_is_written_at_once(run_lib, run_test):
     """Past the Measurements step a close() writes where it happens."""
     def body(t):
