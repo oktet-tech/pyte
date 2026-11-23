@@ -20,6 +20,8 @@ The model is ``doc/cm/cm_process.yml`` in TE.
 from __future__ import annotations
 
 from pyte import cfg
+from pyte.errors import RpcError
+from pyte.rpc.files import open_file
 
 
 class Process:
@@ -44,7 +46,11 @@ class Process:
     def create(cls, ta: str, name: str, exe: str,
                args: "list[str] | tuple[str, ...]" = (),
                env: "dict[str, str] | None" = None,
-               workdir: str | None = None) -> "Process":
+               workdir: str | None = None,
+               stdout_file: str | None = None,
+               stdout_log_level: str | None = None,
+               stderr_file: str | None = None,
+               stderr_log_level: str | None = None) -> "Process":
         """Add the entry and configure it, without starting it.
 
         ``args`` are raw arguments, installed as ``arg:`` instances
@@ -62,6 +68,13 @@ class Process:
         with the parent instance and adding one returns CS-EEXIST,
         while ``arg`` and ``env`` are ``read_create`` and have to be
         added.
+
+        ``stdout_file`` and ``stderr_file`` ask the agent to write the
+        stream to that file on the agent instead of (or besides) the
+        log, and the ``*_log_level`` arguments set the level the agent
+        logs the stream at (``"none"`` turns the log off). Each is
+        written only when given, so an unset one leaves the agent's
+        default alone. :class:`Output` reads such a file back.
         """
         self = cls(ta, name)
         cfg.add(self.oid)
@@ -72,6 +85,13 @@ class Process:
             cfg.add(f"{self.oid}/env:{key}", value)
         if workdir is not None:
             cfg.set(f"{self.oid}/workdir:", workdir)
+        for stream, path, level in (
+                ("stdout", stdout_file, stdout_log_level),
+                ("stderr", stderr_file, stderr_log_level)):
+            if path is not None:
+                cfg.set(f"{self.oid}/output:{stream}/file:", path)
+            if level is not None:
+                cfg.set(f"{self.oid}/output:{stream}/log_level:", level)
         return self
 
     def start(self) -> None:
@@ -132,3 +152,96 @@ class Process:
         base = f"{self.oid}/status:/exit_status:"
         return (int(cfg.get(f"{base}/type:", sync=True)),
                 int(cfg.get(f"{base}/value:", sync=True)))
+
+
+#: Largest single read from the agent, bytes.
+_READ_CHUNK = 64 * 1024
+
+
+class Output:
+    """Offset-based reader of a file an agent process writes to.
+
+    Pair it with ``Process.create(stdout_file=...)``: the agent keeps
+    appending, and this class returns what appeared since a point the
+    test chose. The file is opened and closed on every call, so no
+    descriptor outlives a call and the object holds no RPC state of its
+    own. All of its RPCs run under ``server.silent_pass()``: polling
+    adds no rows to the test log.
+
+    There are two positions. The *cursor* moves with :meth:`new`; the
+    *mark* is set by :meth:`mark` and only :meth:`since_mark` and
+    :meth:`save_since_mark` look at it. Both start at 0, so before
+    :meth:`mark` is called they cover the whole file.
+
+    A file that is missing reads as empty. A file that is shorter than
+    a position (truncated or replaced) restarts from 0. ``cap`` bounds
+    what :meth:`new` and :meth:`since_mark` return to the newest
+    ``cap`` bytes; :meth:`save_since_mark` is not capped.
+    """
+
+    def __init__(self, server, path: str, cap: int = 1 << 20):
+        self.server = server
+        self.path = path
+        self.cap = cap
+        self._cursor = 0
+        self._mark = 0
+
+    def _read(self, start: int, cap: int | None, sink) -> int:
+        """Feed ``sink`` the bytes from ``start`` to the end; return
+        the end offset the read stopped at (``start`` if nothing)."""
+        with self.server.silent_pass():
+            try:
+                f = open_file(self.server, self.path, "r")
+            except RpcError:
+                return start
+            with f:
+                end = f.size()
+                if end < start:
+                    start = 0
+                if cap is not None and end - start > cap:
+                    start = end - cap
+                pos = start
+                if pos < end:
+                    f.seek(pos, 0)
+                while pos < end:
+                    chunk = f.read(min(_READ_CHUNK, end - pos))
+                    if not chunk:
+                        break
+                    sink(chunk)
+                    pos += len(chunk)
+                return end
+
+    def _text(self, start: int) -> tuple[str, int]:
+        parts: list[bytes] = []
+        end = self._read(start, self.cap, parts.append)
+        return b"".join(parts).decode("utf-8", errors="replace"), end
+
+    def mark(self) -> None:
+        """Set the cursor and the mark to the current end of the file."""
+        end = self._read(0, 0, lambda _chunk: None)
+        self._cursor = self._mark = end
+
+    def new(self) -> str:
+        """The text written since the cursor; advances the cursor."""
+        text, end = self._text(self._cursor)
+        self._cursor = end
+        return text
+
+    def since_mark(self) -> str:
+        """The text written since the mark; the cursor is untouched."""
+        return self._text(self._mark)[0]
+
+    def save_since_mark(self, local_path) -> int:
+        """Write everything since the mark to a local file.
+
+        Not capped, and copied chunk by chunk, so a large output never
+        sits in memory. Returns the number of bytes written.
+        """
+        written = 0
+        with open(local_path, "wb") as out:
+            def sink(chunk: bytes) -> None:
+                nonlocal written
+                out.write(chunk)
+                written += len(chunk)
+            self._read(self._mark, None, sink)
+        return written
