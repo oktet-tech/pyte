@@ -139,8 +139,6 @@ def bootstrap(base_url, verify, headers, max_body, timeout):
                 parsed = jsonlib.loads(text)
             except ValueError:
                 parsed = None
-            print(f"http: {method} {url} -> {status} {reason} "
-                  f"({elapsed:.3f}s)")
             return {"status": status, "reason": reason, "headers": hdrs,
                     "body": text, "url": final_url, "json": parsed,
                     "elapsed": elapsed}

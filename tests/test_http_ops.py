@@ -221,13 +221,11 @@ def test_request_op_caps_the_encoded_reply(server):
         srv.server_close()
 
 
-def test_request_prints_one_log_line(server, capsys):
+def test_http_op_prints_no_echo(server, capsys):
+    """The test logs the request itself; the agent adds no echo row."""
     bootstrap(server, True, {}, 8 << 20, None).request("GET", "/data")
-    out = capsys.readouterr().out.splitlines()
-    assert len(out) == 1
-    assert re.fullmatch(
-        re.escape("http: GET %s/data -> 401 Unauthorized (" % server)
-        + r"\d+\.\d{3}s\)", out[0])
+    out = capsys.readouterr().out
+    assert not any(line.startswith("http: ") for line in out.splitlines())
 
 
 def test_bootstrap_timeout_is_the_request_default(server):
