@@ -3,7 +3,7 @@
 """Test.finalize(), Test.failed and the Measurements step (fake shim).
 
 Every test ends in one order: the body ends, ``failed`` is set, the
-finalizers run in registration order, the MI loggers closed in the
+finalizers run last registered first, the MI loggers closed in the
 test are written under a "Measurements" step, then Cleanup.  The
 loggers here are pyte.testing's RecordingMiLogger, which defers like
 mi.Logger and records the step it was written under.  Tests run
@@ -82,8 +82,11 @@ def test_finalizers_run_before_measurements_on_fail(lib, run_test):
                          "Cleanup"]
 
 
-def test_finalizers_run_in_registration_order_with_their_args(lib,
+def test_finalizers_run_last_registered_first_with_their_args(lib,
                                                               run_test):
+    """Like cleanups: a sampler registered after a session stops before
+    the session's own finalizer reads the console, so what that reads
+    cannot land inside a live sampler tick."""
     order = []
 
     def body(t):
@@ -92,7 +95,7 @@ def test_finalizers_run_in_registration_order_with_their_args(lib,
         t.finalize(order.append, "last")
 
     assert run_test(body) == 0
-    assert order == ["first", ((1,), {"k": 2}), "last"]
+    assert order == ["last", ((1,), {"k": 2}), "first"]
 
 
 def test_finalizers_get_no_step_of_their_own(lib, run_test):
@@ -138,13 +141,13 @@ def test_failing_finalizer_does_not_stop_others(lib, run_test, raise_,
     ran = []
 
     def body(t):
-        t.finalize(raise_, t)
-        t.finalize(ran.append, "second")
+        t.finalize(ran.append, "after")
+        t.finalize(raise_, t)              # runs first: last registered
         t.cleanup(ran.append, "cleanup")
         body_end(t)
 
     assert run_test(body) == (1 if fails and code == 0 else code)
-    assert ran == ["second", "cleanup"]
+    assert ran == ["after", "cleanup"]
     failures = _errors(lib, "Finalizer failed")
     assert len(failures) == 1
     assert "Traceback" in failures[0]

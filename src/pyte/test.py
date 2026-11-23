@@ -197,16 +197,18 @@ class Test:
     def finalize(self, fn: Callable, *args, **kwargs) -> None:
         """Register fn to run when the body ends, before the MI step.
 
-        Finalizers run in registration order however the body ended
-        (pass, fail, skip), after :attr:`failed` is set and before the
-        "Measurements" step and the cleanups.  This is where a sampler
-        stops and closes its mi.Logger, so its rows join the other
-        measurements.  They get no step of their own: what they log
-        lands at the end of the last body step.  A raising finalizer
-        is logged and the rest still run.  An ordinary error leaves
-        the exit code as the body left it; an interrupt, an exit or a
-        TestFail (which the signal handler raises too) turns a pass
-        into a failure, as it does in a cleanup.
+        Finalizers run last registered first, like cleanups, however
+        the body ended (pass, fail, skip), after :attr:`failed` is set
+        and before the "Measurements" step and the cleanups.  This is
+        where a sampler stops and closes its mi.Logger, so its rows
+        join the other measurements; registered after a session, it
+        stops before the session's own finalizer runs.  They get no
+        step of their own: what they log lands at the end of the last
+        body step.  A raising finalizer is logged and the rest still
+        run.  An ordinary error leaves the exit code as the body left
+        it; an interrupt, an exit or a TestFail (which the signal
+        handler raises too) turns a pass into a failure, as it does in
+        a cleanup.
         """
         self._finalizers.append((fn, args, kwargs))
 
@@ -306,7 +308,7 @@ class Test:
 
     def _run_finalizers(self) -> bool:
         ok = True
-        for fn, args, kwargs in self._finalizers:
+        for fn, args, kwargs in reversed(self._finalizers):
             ok = _guarded("Finalizer", fn, *args, **kwargs) and ok
         return ok
 
@@ -324,8 +326,9 @@ class Test:
     def _finish(self, failed: bool) -> bool:
         """Run everything after the body; False if that fails the test.
 
-        In order: set :attr:`failed`, run the finalizers, write the
-        pending MI loggers under "Measurements", run the cleanups.
+        In order: set :attr:`failed`, run the finalizers (last
+        registered first), write the pending MI loggers under
+        "Measurements", run the cleanups.
         Neither a finalizer nor an MI write can stop the rest.  False
         when a cleanup failed, or a finalizer or an MI write raised
         what fails the test (see :func:`_fails_the_test`).

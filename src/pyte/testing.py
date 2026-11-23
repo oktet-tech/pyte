@@ -217,10 +217,11 @@ def current_test(fake_shim):
 def end_test(t, *, failed: bool = False) -> None:
     """End the body of test *t* the way ``test.start()`` does.
 
-    Sets ``t.failed`` to *failed*, runs the finalizers, writes the MI
-    loggers closed in the test under a "Measurements" step, then runs
-    the cleanups under "Cleanup".  For a :func:`current_test`, whose
-    body is the unit test itself, to check what lands where::
+    Sets ``t.failed`` to *failed*, runs the finalizers (last
+    registered first), writes the MI loggers closed in the test under
+    a "Measurements" step, then runs the cleanups under "Cleanup".
+    For a :func:`current_test`, whose body is the unit test itself, to
+    check what lands where::
 
         sampler.watch(current_test)    # registers its stop to finalize
         end_test(current_test)
@@ -237,9 +238,10 @@ class VerdictRecorder:
     handle's own surface is faked.  ``fail()``/``skip()`` raise the
     real :class:`~pyte.errors.TestFail`/:class:`~pyte.errors.TestSkip`
     so a caller's error path behaves as it does in a real test.
-    ``finalize()`` records ``(fn, args, kwargs)`` in ``finalizers``
-    without running anything; ``failed`` is a plain attribute a test
-    may set before calling them.
+    ``finalize()`` records ``(fn, args, kwargs)`` in ``finalizers``,
+    in registration order, without running anything; a test calling
+    them as the real test end does runs them in reverse.  ``failed``
+    is a plain attribute a test may set before calling them.
     """
 
     def __init__(self):

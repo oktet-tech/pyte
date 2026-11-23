@@ -27,8 +27,8 @@ by an exception), does not write: the logger is handed to the test.
 When the body ends, however it ends, the test:
 
 1. sets `t.failed`: True unless the body passed or was skipped;
-2. runs the finalizers registered with `t.finalize(fn, *args)`, in
-   registration order;
+2. runs the finalizers registered with `t.finalize(fn, *args)`, last
+   registered first, like the cleanups;
 3. if any logger is pending, opens a step named "Measurements" and
    writes the loggers in the order they were closed;
 4. runs the cleanups under "Cleanup", as before.
