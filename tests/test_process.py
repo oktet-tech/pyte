@@ -219,6 +219,7 @@ class _FileLib:
         #: silent_pass value seen by each file RPC
         self.seen = []
         self.reads = []          # sizes asked of read()
+        self.lseeks = []         # (offset, whence) asked of lseek()
 
     def pyte_rpc_set_silent_pass(self, h, on):
         self.silent_pass = on
@@ -264,6 +265,7 @@ class _FileLib:
 
     def pyte_rpc_lseek(self, h, fd, pos, whence, out):
         self.seen.append(self.silent_pass)
+        self.lseeks.append((pos, whence))
         path, cur = self.fds[fd]
         base = (0, cur, len(self.files[path]))[whence]
         self.fds[fd][1] = out[0] = base + pos
@@ -372,3 +374,15 @@ def test_output_leaves_no_descriptor_open(agent):
     out = _output(agent)
     out.new()
     assert agent.fds == {}
+
+
+def test_output_finds_the_end_with_one_lseek(agent):
+    """Every read costs RPCs; RpcFile.size() spends three lseeks to
+    restore a position the explicit seek after it overwrites anyway."""
+    out = _output(agent, b"abc")
+    out.mark()
+    assert agent.lseeks == [(0, 2)]
+    agent.lseeks.clear()
+    agent.files["/o"] += b"def"
+    assert out.new() == "def"
+    assert agent.lseeks == [(0, 2), (3, 0)]

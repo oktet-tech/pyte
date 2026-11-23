@@ -195,7 +195,9 @@ class Output:
             except RpcError:
                 return start
             with f:
-                end = f.size()
+                # Not f.size(): it restores the position, and the seek
+                # below overwrites it anyway.
+                end = f.seek(0, 2)
                 if end < start:
                     start = 0
                 if cap is not None and end - start > cap:
