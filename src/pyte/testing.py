@@ -221,9 +221,8 @@ def end_test(t, *, failed: bool = False) -> None:
     Sets ``t.failed`` to *failed*, runs the finalizers (last
     registered first) under a "Collect results" step, writes the MI
     loggers closed in the test under a "Measurements" step, then runs
-    the cleanups under "Cleanup".
-    For a :func:`current_test`, whose body is the unit test itself, to
-    check what lands where::
+    the cleanups under "Cleanup".  For a :func:`current_test`, whose
+    body is the unit test itself, to check what lands where::
 
         sampler.watch(current_test)    # registers its stop to finalize
         end_test(current_test)

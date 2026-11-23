@@ -209,8 +209,8 @@ class Test:
         return: a close() from another thread racing the Measurements
         step can miss it, so a sampling thread is stopped and joined in
         its finalizer.  A raising finalizer is logged and the rest
-        still run.  An ordinary error leaves the exit code as the body left
-        it; an interrupt, an exit or a TestFail (which the signal
+        still run.  An ordinary error leaves the exit code as the body
+        left it; an interrupt, an exit or a TestFail (which the signal
         handler raises too) turns a pass into a failure, as it does in
         a cleanup.
         """
