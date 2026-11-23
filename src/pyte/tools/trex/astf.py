@@ -666,42 +666,54 @@ def attach(pco: "RpcServer", info: ServerInfo,
             f"earlier iteration")
     log.step_push(f"TRex ASTF: attach on {info.ta}")
     popped = False
-    with remote.python(pco) as rem:
-        try:
-            cli = rem.call(
-                _ops.bootstrap,
-                os.path.join(info.workdir, TREX_ASTF_PYLIB),
-                "127.0.0.1", info.sync_port, info.async_port,
-                connect_timeout, timeout=connect_timeout + WAIT_MARGIN)
-        except RemotePythonError as exc:
-            log.step_pop(f"TRex ASTF attach failed on {info.ta}")
-            raise TrexError(
-                f"could not attach to the TRex on {info.ta}: "
-                f"{exc}") from exc
-        client = Client(rem, cli, list(range(info.nports)),
-                        tmp_dir=info.tmp_dir)
-        try:
-            # Takes the ports by force and clears whatever the previous
-            # iteration left loaded, so each test starts from an owned
-            # and empty state on a server it did not start itself.
-            client.reset()
-            log.step_pop(f"TRex ASTF attached on {info.ta}")
-            popped = True
-            yield client
-        finally:
-            if not popped:
-                log.step_pop(f"TRex ASTF attach failed on {info.ta}")
-            log.step_push(f"TRex ASTF: detach from {info.ta}")
-            detached = True
-            if client._profile is not None:
-                try:
-                    rem.call(_ops.remove_file, client._profile)
-                except Exception:   # noqa: BLE001  teardown
-                    detached = False
+    # The detach bracket opens inside the remote session and closes
+    # after it, so the session's own teardown rows land in it, and it
+    # closes however the detach ends: a bracket left open shifts the
+    # rest of the test one level deeper.
+    detaching = False
+    detached = False
+    try:
+        with remote.python(pco) as rem:
             try:
-                client._call(_ops.disconnect)
-            except Exception:       # noqa: BLE001  teardown
-                detached = False
+                cli = rem.call(
+                    _ops.bootstrap,
+                    os.path.join(info.workdir, TREX_ASTF_PYLIB),
+                    "127.0.0.1", info.sync_port, info.async_port,
+                    connect_timeout, timeout=connect_timeout + WAIT_MARGIN)
+            except RemotePythonError as exc:
+                log.step_pop(f"TRex ASTF attach failed on {info.ta}")
+                raise TrexError(
+                    f"could not attach to the TRex on {info.ta}: "
+                    f"{exc}") from exc
+            client = Client(rem, cli, list(range(info.nports)),
+                            tmp_dir=info.tmp_dir)
+            try:
+                # Takes the ports by force and clears whatever the
+                # previous iteration left loaded, so each test starts
+                # from an owned and empty state on a server it did not
+                # start itself.
+                client.reset()
+                log.step_pop(f"TRex ASTF attached on {info.ta}")
+                popped = True
+                yield client
+            finally:
+                if not popped:
+                    log.step_pop(f"TRex ASTF attach failed on {info.ta}")
+                log.step_push(f"TRex ASTF: detach from {info.ta}")
+                detaching = True
+                ok = True
+                if client._profile is not None:
+                    try:
+                        rem.call(_ops.remove_file, client._profile)
+                    except Exception:   # noqa: BLE001  teardown
+                        ok = False
+                try:
+                    client._call(_ops.disconnect)
+                except Exception:       # noqa: BLE001  teardown
+                    ok = False
+                detached = ok
+    finally:
+        if detaching:
             log.step_pop("TRex ASTF detached" if detached
                          else "TRex ASTF detach failed")
 

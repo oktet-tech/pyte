@@ -7,6 +7,7 @@ import types
 
 import pytest
 
+from pyte import log
 from pyte.errors import (CfgNotFoundError, ProcessOutputUnsupportedError,
                          RemotePythonError, TrexError)
 from pyte.testing import FakeShimLib
@@ -799,6 +800,68 @@ def test_attach_exit_bracket_says_when_the_detach_failed(fake_shim,
     steps = _attach_logs(fake_shim, monkeypatch, rem)
     assert steps[-2:] == [("STEP_PUSH", "TRex ASTF: detach from TST1"),
                           ("STEP_POP", "TRex ASTF detach failed")]
+
+
+class _InterruptedRemote(FakeRemote):
+    """A remote whose disconnect is interrupted (Ctrl-C, a signal)."""
+
+    def call(self, fn, *args, timeout=None, **kwargs):
+        if fn.__name__ == "disconnect":
+            self.calls.append((fn.__name__, args))
+            raise KeyboardInterrupt()
+        return super().call(fn, *args, timeout=timeout, **kwargs)
+
+
+def _detach_logs(fake_shim, monkeypatch, rem, raises=None):
+    """Run attach() on *rem*; return what it logged from the detach on.
+
+    The remote session's own teardown logs a row, as pyte.remote's
+    does, so where it lands relative to the bracket shows."""
+    _FakeProcess.reset()
+    _FakeProcess.state.update(exists=True, running=True)
+    monkeypatch.setattr(astf, "Process", _FakeProcess)
+
+    class _Ctx:
+        def __enter__(self):
+            return rem
+
+        def __exit__(self, *exc):
+            log.ring("Remote session closed")
+            return False
+
+    import pyte.remote as remote_mod
+    monkeypatch.setattr(remote_mod, "python", lambda p: _Ctx())
+    if raises is None:
+        with astf.attach(types.SimpleNamespace(ta="TST1"), _attach_info()):
+            pass
+    else:
+        with pytest.raises(raises):
+            with astf.attach(types.SimpleNamespace(ta="TST1"),
+                             _attach_info()):
+                pass
+    logs = [e for e in fake_shim.logs if e[0] != FakeShimLib.TE_LL_VERB]
+    return logs[logs.index(("STEP_PUSH", "TRex ASTF: detach from TST1")):]
+
+
+def test_attach_detach_bracket_holds_the_session_teardown(fake_shim,
+                                                          monkeypatch):
+    rem = FakeRemote(results={"bootstrap": object()})
+    assert _detach_logs(fake_shim, monkeypatch, rem) == [
+        ("STEP_PUSH", "TRex ASTF: detach from TST1"),
+        (FakeShimLib.TE_LL_RING, "Remote session closed"),
+        ("STEP_POP", "TRex ASTF detached")]
+
+
+def test_attach_detach_bracket_closes_on_an_interrupt(fake_shim,
+                                                      monkeypatch):
+    """An interrupt in the disconnect must not leave the bracket
+    pushed, which would shift the rest of the test one level deeper."""
+    rem = _InterruptedRemote(results={"bootstrap": object()})
+    assert _detach_logs(fake_shim, monkeypatch, rem,
+                        raises=KeyboardInterrupt) == [
+        ("STEP_PUSH", "TRex ASTF: detach from TST1"),
+        (FakeShimLib.TE_LL_RING, "Remote session closed"),
+        ("STEP_POP", "TRex ASTF detach failed")]
 
 
 def test_bringup_failure_survives_a_failing_cleanup(server_fakes,
