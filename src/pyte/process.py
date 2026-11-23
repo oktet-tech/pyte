@@ -11,9 +11,14 @@ several tests later can stop it -- and the *agent* attaches its stdout
 and stderr filters, at RING and WARN, without being asked (see the
 Test Agent's ``ps_enable_stdout_and_stderr_logging``).
 
-The trade is that those agent-side filters are not readable: the
-streams reach the log and nothing else. Code that must parse a
-process's output wants :mod:`pyte.job`, not this.
+Those agent-side filters are not readable: on their own the streams
+reach the log and nothing else. The entry's output settings change
+that (``Process.create(stdout_file=..., stdout_log_level=...)``): the
+agent also writes a stream to a file on its host, which
+:class:`Output` reads back by offset, and a level of ``"none"`` keeps
+the stream out of the log. Code that must react to output as it
+arrives (wait for a line, match a pattern) still wants
+:mod:`pyte.job`.
 
 The model is ``doc/cm/cm_process.yml`` in TE.
 """
@@ -200,7 +205,7 @@ class Output:
 
     def _read(self, start: int, cap: int | None, sink) -> int:
         """Feed ``sink`` the bytes from ``start`` to the end; return
-        the end offset the read stopped at (``start`` if nothing)."""
+        the size seen at open (``start`` when the file is missing)."""
         quiet = self._quiet
         try:
             f = quiet(open_file, self.server, self.path, "r")
@@ -242,7 +247,12 @@ class Output:
         self._cursor = self._mark = end
 
     def new(self) -> str:
-        """The text written since the cursor; advances the cursor."""
+        """The text written since the cursor; advances the cursor.
+
+        Calls do not join their bytes: a multibyte character split
+        across two calls decodes as two or more replacement characters,
+        at least one in each call's text.
+        """
         text, end = self._text(self._cursor)
         self._cursor = end
         return text
