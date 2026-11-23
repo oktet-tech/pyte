@@ -362,16 +362,18 @@ class RpcServer:
 
     def run(self, program: str, args: list[str] | None = None,
             env: dict[str, str] | None = None,
-            timeout: float | None = 10.0):
+            timeout: float | None = 10.0,
+            log_level: str | None = "RING"):
         """Run program to completion and capture its output.
 
         The subprocess.run() of tapi_job; returns a
         :class:`pyte.job.CompletedJob` (status + stdout + stderr, both
-        streams also logged).  The default timeout is
-        pyte.job.DEFAULT_TIMEOUT.
+        streams also logged at *log_level*; None logs nothing
+        agent-side).  The default timeout is pyte.job.DEFAULT_TIMEOUT.
         """
         from pyte.job import run
-        return run(self, program, args, env, timeout=timeout)
+        return run(self, program, args, env, timeout=timeout,
+                   log_level=log_level)
 
     def open(self, path: str, mode: str = "r"):
         from pyte.rpc.files import open_file

@@ -793,6 +793,29 @@ def test_run_one_shot_captures_output(monkeypatch):
     assert "destroy" in names and "factory_destroy" in names
 
 
+def _run_attach_levels(monkeypatch, **kw):
+    from pyte.job import run
+    lib = _fake_shim(monkeypatch)
+    server = types.SimpleNamespace(
+        _h="srv-h", name="pco", _handle=lambda: "srv-h")
+    lib.recv_queue = [(b"", True), (b"", True)]
+    run(server, "prog", **kw)
+    return lib, [(c[3], c[4]) for c in lib.calls
+                 if c[0] == "attach_filter"]
+
+
+def test_run_log_level_none_attaches_silent_filters(monkeypatch):
+    """log_level=None keeps both filters readable (the output is still
+    returned) but logs nothing agent-side."""
+    _, attaches = _run_attach_levels(monkeypatch, log_level=None)
+    assert attaches == [(1, 0), (1, 0)]
+
+
+def test_run_default_level_is_ring(monkeypatch):
+    lib, attaches = _run_attach_levels(monkeypatch)
+    assert attaches == [(1, lib.TE_LL_RING)] * 2
+
+
 def test_run_one_shot_reports_failure_status(monkeypatch):
     """A non-zero exit is a result, not an exception (subprocess.run
     parity without check=True)."""

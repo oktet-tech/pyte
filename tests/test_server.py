@@ -521,3 +521,17 @@ def test_rpcfile_size_restores_position(monkeypatch):
     f, lib = _seek_file(monkeypatch, 100, 7)
     assert f.size() == 100
     assert lib.pos == 7
+
+
+def test_server_run_passes_log_level_through(monkeypatch):
+    import pyte.job
+    seen = {}
+    monkeypatch.setattr(
+        pyte.job, "run",
+        lambda srv, prog, args, env, timeout, log_level: seen.update(
+            level=log_level))
+    srv = RpcServer.__new__(RpcServer)
+    srv.run("prog", log_level=None)
+    assert seen == {"level": None}
+    srv.run("prog")
+    assert seen == {"level": "RING"}
