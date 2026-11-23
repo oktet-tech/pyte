@@ -32,6 +32,8 @@ _current: "Test | None" = None
 # The server-side unpack script rejects a whole run for a name outside
 # this set, so refuse it here, where the test can still react.
 _ATTACH_NAME = re.compile(r"[-_.:0-9a-zA-Z]{1,128}")
+# The index the log viewer reads, next to the attached files.
+_ATTACH_INDEX = "attachments.json"
 
 
 def _human_size(size: int) -> str:
@@ -82,13 +84,14 @@ class Test:
         next to it, which is what the log viewer reads.  Attaching the
         same *name* again replaces the file and its entry.
 
-        *name* must match ``[-_.:0-9a-zA-Z]{1,128}`` and not be ``.``
-        or ``..``, else ValueError.  Returns the destination path, or
-        None (with one warning per test) when there is nowhere to put
-        it: no log directory, or no test id.
+        *name* must match ``[-_.:0-9a-zA-Z]{1,128}`` and not be ``.``,
+        ``..`` or ``attachments.json`` (the index itself), else
+        ValueError.  Returns the destination path, or None (with one
+        warning per test) when there is nowhere to put it: no log
+        directory, or no test id.
         """
         if (not _ATTACH_NAME.fullmatch(name)
-                or name in (".", "..")):
+                or name in (".", "..", _ATTACH_INDEX)):
             raise ValueError(f"Invalid attachment name {name!r}")
         test_id = int(self.params.get("te_test_id", "0") or "0")
         root = (os.environ.get("TE_LOG_DIR")
@@ -108,7 +111,7 @@ class Test:
         else:
             shutil.copyfile(source, dest)
 
-        index = node_dir / "attachments.json"
+        index = node_dir / _ATTACH_INDEX
         data = (json.loads(index.read_text()) if index.exists()
                 else {"version": 1, "attachments": []})
         path = f"./{name}"

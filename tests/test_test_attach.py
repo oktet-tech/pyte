@@ -99,7 +99,7 @@ def test_attach_with_test_id_zero_returns_none(
 
 @pytest.mark.parametrize("name", [
     "../x", "a/b", ".", "..", "a b", "", "x" * 129, "\u00e9.txt",
-    "a\n", "/etc/passwd"])
+    "a\n", "/etc/passwd", "attachments.json"])
 def test_attach_rejects_bad_name(t, tmp_path, name):
     with pytest.raises(ValueError):
         t.attach(name, b"1")
