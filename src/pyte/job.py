@@ -433,9 +433,10 @@ def run(server: "RpcServer", program: str, args: list[str] | None = None,
     The ``subprocess.run()`` of tapi_job: create the job, capture
     stdout/stderr (also logged at *log_level*, RING by default; None
     keeps the output readable but logs nothing agent-side), start,
-    wait, read the streams and destroy the job.  A non-zero exit is a result, not an
-    exception — check ``.status`` / ``.ok`` — but a job still running
-    when ``timeout`` expires raises :exc:`pyte.errors.TimeoutError`.
+    wait, read the streams and destroy the job.  A non-zero exit is a
+    result, not an exception — check ``.status`` / ``.ok`` — but a job
+    still running when ``timeout`` expires raises
+    :exc:`pyte.errors.TimeoutError`.
     """
     with Job.create(server, program, args or [], env) as job:
         out = job.stdout.attach_filter(name="stdout", log_level=log_level)

@@ -72,9 +72,8 @@ Inside it, request and response bodies go to the RING level, cut after
 per session or per request.  Headers are logged at VERB.
 
 Requests made inside `call()` are not logged as steps and their
-bodies are not logged at all.  Each one only leaves a single line
-`http: METHOD url -> status reason (elapsed)` that the agent writes to
-stderr, which TE logs.
+bodies are not logged at all.  The agent writes no line for them
+either.
 
 Header values of `Authorization`, `Cookie` and `Set-Cookie` are always
 logged as `<redacted>`; `redact=[...]` on `session()` adds more header
