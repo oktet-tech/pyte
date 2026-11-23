@@ -811,6 +811,14 @@ def test_run_log_level_none_attaches_silent_filters(monkeypatch):
     assert attaches == [(1, 0), (1, 0)]
 
 
+@pytest.mark.parametrize("level", ["none", "None", "NONE"])
+def test_run_log_level_none_by_name_logs_nothing(monkeypatch, level):
+    """Process.create() takes "none" for no log at all, as the agent
+    does; the same word here must mean the same, not ValueError."""
+    _, attaches = _run_attach_levels(monkeypatch, log_level=level)
+    assert attaches == [(1, 0), (1, 0)]
+
+
 def test_run_default_level_is_ring(monkeypatch):
     lib, attaches = _run_attach_levels(monkeypatch)
     assert attaches == [(1, lib.TE_LL_RING)] * 2

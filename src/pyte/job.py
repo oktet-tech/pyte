@@ -52,8 +52,13 @@ def _signo(sig: int | signal.Signals) -> int:
 
 
 def _log_level(level: int | str | None) -> int:
-    """Map a TE log level name ("RING", ...) or int to its value."""
-    if level is None:
+    """Map a TE log level name ("RING", ...) or int to its value.
+
+    None and ``"none"`` in any case mean no log at all, 0: the word is
+    what the agent's process output settings take for that.
+    """
+    if level is None or (isinstance(level, str)
+                         and level.lower() == "none"):
         return 0
     if isinstance(level, int):
         return level
@@ -432,10 +437,10 @@ def run(server: "RpcServer", program: str, args: list[str] | None = None,
 
     The ``subprocess.run()`` of tapi_job: create the job, capture
     stdout/stderr (also logged at *log_level*, RING by default; None
-    keeps the output readable but logs nothing agent-side), start,
-    wait, read the streams and destroy the job.  A non-zero exit is a
-    result, not an exception — check ``.status`` / ``.ok`` — but a job
-    still running when ``timeout`` expires raises
+    or "none" keeps the output readable but logs nothing agent-side),
+    start, wait, read the streams and destroy the job.  A non-zero
+    exit is a result, not an exception -- check ``.status`` /
+    ``.ok`` -- but a job still running when ``timeout`` expires raises
     :exc:`pyte.errors.TimeoutError`.
     """
     with Job.create(server, program, args or [], env) as job:
