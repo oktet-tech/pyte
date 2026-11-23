@@ -626,17 +626,21 @@ def attach(pco: "RpcServer", info: ServerInfo,
             popped = True
             yield client
         finally:
+            if not popped:
+                log.step_pop(f"TRex ASTF attach failed on {info.ta}")
+            log.step_push(f"TRex ASTF: detach from {info.ta}")
+            detached = True
             if client._profile is not None:
                 try:
                     rem.call(_ops.remove_file, client._profile)
                 except Exception:   # noqa: BLE001  teardown
-                    pass
+                    detached = False
             try:
                 client._call(_ops.disconnect)
             except Exception:       # noqa: BLE001  teardown
-                pass
-            if not popped:
-                log.step_pop(f"TRex ASTF attach failed on {info.ta}")
+                detached = False
+            log.step_pop("TRex ASTF detached" if detached
+                         else "TRex ASTF detach failed")
 
 
 @contextmanager

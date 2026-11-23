@@ -620,6 +620,43 @@ def test_attach_reports_a_server_that_died_with_its_exit_status(
             pass
 
 
+def _attach_info():
+    return astf.ServerInfo(ta="TST1", process="trex",
+                           cfg_path="/tmp/c.yaml",
+                           workdir="/usr/local/trex", sync_port=4501,
+                           async_port=4500, nports=2)
+
+
+def _attach_logs(fake_shim, monkeypatch, rem):
+    _FakeProcess.reset()
+    _FakeProcess.state.update(exists=True, running=True)
+    monkeypatch.setattr(astf, "Process", _FakeProcess)
+    _fake_remote_python(monkeypatch, rem)
+    with astf.attach(types.SimpleNamespace(ta="TST1"), _attach_info()):
+        pass
+    return [e for e in fake_shim.logs if e[0] in ("STEP_PUSH", "STEP_POP")]
+
+
+def test_attach_exit_is_bracketed(fake_shim, monkeypatch):
+    """Leaving attach() logs the disconnect inside its own bracket."""
+    rem = FakeRemote(results={"bootstrap": object()})
+    steps = _attach_logs(fake_shim, monkeypatch, rem)
+    assert [e for e in steps if "TRex ASTF" in e[1]] == [
+        ("STEP_PUSH", "TRex ASTF: attach on TST1"),
+        ("STEP_POP", "TRex ASTF attached on TST1"),
+        ("STEP_PUSH", "TRex ASTF: detach from TST1"),
+        ("STEP_POP", "TRex ASTF detached")]
+
+
+def test_attach_exit_bracket_says_when_the_detach_failed(fake_shim,
+                                                         monkeypatch):
+    rem = FakeRemote(results={"bootstrap": object()},
+                     raises={"disconnect": "gone"})
+    steps = _attach_logs(fake_shim, monkeypatch, rem)
+    assert steps[-2:] == [("STEP_PUSH", "TRex ASTF: detach from TST1"),
+                          ("STEP_POP", "TRex ASTF detach failed")]
+
+
 def test_bringup_failure_survives_a_failing_cleanup(server_fakes,
                                                     monkeypatch):
     """The diagnosis must outlive the diagnostic: a teardown that also
