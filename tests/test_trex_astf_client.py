@@ -749,6 +749,80 @@ def test_bringup_failure_survives_a_failing_cleanup(server_fakes,
     assert server_fakes.state["exists"] is False
 
 
+class _FakeOutput:
+    """Stands in for pyte.process.Output on the console file."""
+
+    made: list = []
+    text = ""
+    error: BaseException | None = None
+
+    def __init__(self, server, path, cap=1 << 20):
+        self.made.append((path, cap, _FakeProcess.state["exists"]))
+
+    def new(self):
+        if self.error is not None:
+            raise self.error
+        return self.text
+
+
+@pytest.fixture
+def failing_bringup(server_fakes, fake_shim, monkeypatch):
+    """A start_server() whose TRex never answers, console faked."""
+    def _boom(*a, **k):
+        raise TrexError("did not come up")
+
+    monkeypatch.setattr(astf, "_wait_sync_port", _boom)
+    _fake_remote_python(monkeypatch, FakeRemote())
+    monkeypatch.setattr(astf, "Output", _FakeOutput)
+    monkeypatch.setattr(_FakeOutput, "made", [])
+    return _FakeOutput
+
+
+def _bringup_fails():
+    with pytest.raises(TrexError, match="did not come up"):
+        astf.start_server(types.SimpleNamespace(ta="TST1"),
+                          _server_opts())
+
+
+def test_failed_bringup_logs_the_console_tail(failing_bringup, fake_shim,
+                                              monkeypatch):
+    """stop_server() removes the console file, and the agent does not
+    log what goes there: without this the reason TRex did not answer
+    is gone with it."""
+    monkeypatch.setattr(failing_bringup, "text",
+                        CLEAR + "\x1b[31mEAL: no free hugepages\x1b[0m\n")
+    _bringup_fails()
+    # Read once, the newest 64 KiB, while the process still existed.
+    assert failing_bringup.made == [
+        ("/tmp/trex-console.txt", 64 * 1024, True)]
+    logs = fake_shim.logs
+    start = logs.index(("STEP_PUSH", "TRex console: bring-up output"))
+    assert logs[start + 1:start + 3] == [
+        (FakeShimLib.TE_LL_RING, "EAL: no free hugepages\n"),
+        ("STEP_POP", "TRex console logged")]
+    assert logs[-1] == ("STEP_POP", "TRex ASTF bring-up failed on TST1")
+    assert _FakeProcess.state["exists"] is False
+
+
+def test_failed_bringup_survives_an_unreadable_console(failing_bringup,
+                                                       fake_shim,
+                                                       monkeypatch):
+    monkeypatch.setattr(failing_bringup, "error",
+                        RuntimeError("agent gone"))
+    _bringup_fails()
+    warns = fake_shim.texts(FakeShimLib.TE_LL_WARN)
+    assert len(warns) == 1 and "agent gone" in warns[0]
+    assert ("STEP_PUSH", "TRex console: bring-up output") not in \
+        fake_shim.logs
+    assert _FakeProcess.state["exists"] is False
+
+
+def test_failed_bringup_without_a_console_file_reads_none(failing_bringup):
+    _FakeProcess.state["output"] = False
+    _bringup_fails()
+    assert failing_bringup.made == []
+
+
 # ---------------------------------------------------------------------------
 # counter_desc / log_counters / mi_health
 # ---------------------------------------------------------------------------

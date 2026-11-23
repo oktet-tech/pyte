@@ -495,6 +495,28 @@ def _wait_sync_port(pco: "RpcServer", opts: ServerOpts,
             pass
 
 
+#: How much of the console a failed bring-up logs: the newest bytes.
+_BRINGUP_TAIL = 64 * 1024
+
+
+def _log_console_tail(pco: "RpcServer", path: str) -> None:
+    """Log the end of the console of a TRex that did not come up.
+
+    The console file is the only record of why: the agent does not log
+    what goes there, and stop_server() removes the file. Never raises
+    on a failed read, which is one WARN: the bring-up failure being
+    unwound is what the reader needs, not this.
+    """
+    try:
+        text = Output(pco, path, cap=_BRINGUP_TAIL).new()
+    except Exception as exc:       # noqa: BLE001  diagnostics only
+        log.warn(f"Could not read the TRex console {path}: {exc}")
+        return
+    log.step_push("TRex console: bring-up output")
+    log.ring(_console.strip_ansi(text) or "The console is empty")
+    log.step_pop("TRex console logged")
+
+
 def start_server(pco: "RpcServer", opts: ServerOpts,
                  name: str = "trex",
                  connect_timeout: float = CONNECT_TIMEOUT) -> ServerInfo:
@@ -555,8 +577,13 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
         # primary= is load-bearing: without it a teardown failure is
         # raised in place of the exception being unwound, and the
         # answer to "why did TRex not come up" is replaced by a
-        # complaint about the cleanup that followed.
-        cleanup_all(lambda: stop_server(info, pco), primary=exc)
+        # complaint about the cleanup that followed. The console is
+        # read first: stopping removes it.
+        steps = [lambda: stop_server(info, pco)]
+        if info.console_path:
+            steps.insert(0, lambda: _log_console_tail(pco,
+                                                      info.console_path))
+        cleanup_all(*steps, primary=exc)
         log.step_pop(f"TRex ASTF bring-up failed on {pco.ta}")
         raise
     log.step_pop(f"TRex ASTF ready on {pco.ta}")
