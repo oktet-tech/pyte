@@ -6,15 +6,20 @@ Uses the same fake-shim pattern as test_tester.py: inject a SimpleNamespace
 into sys.modules["pyte._shim"] so mi.py's lazy imports never touch the real
 compiled extension.
 """
+import gc
+import logging
 import re
+import signal
 import sys
 import types
+import warnings
 from pathlib import Path
 
 import pytest
 
-from pyte import mi
+from pyte import log, mi, test
 from pyte.mi import Aggr, Meas, Mult
+from pyte.testing import FakeShimLib
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +397,207 @@ def test_logger_dropped_without_close_warns(monkeypatch):
         del logger
         gc.collect()
     assert not got
+
+
+# ---------------------------------------------------------------------------
+# Deferred writes: one "Measurements" step per test
+# ---------------------------------------------------------------------------
+#
+# Inside a running test close() hands the logger to the test, which
+# writes all of them under one "Measurements" step after the body and
+# before Cleanup.  These run a real test.start() over a shim that has
+# both the test surface (FakeShimLib) and the MI calls (FakeLib), with
+# steps and MI writes on one timeline in ``calls``.
+
+class LifecycleLib(FakeLib, FakeShimLib):
+    """FakeLib plus what test.start() needs; steps join ``calls``.
+
+    Each logger's "pointer" is its tool name, so a ``("destroy",
+    tool)`` entry says which logger was written; a tool named in
+    *fail_tools* fails its write.
+    """
+
+    def __init__(self, fail_tools=()):
+        FakeShimLib.__init__(self)
+        FakeLib.__init__(self)
+        self.fail_tools = set(fail_tools)
+
+    def pyte_step(self, text):
+        FakeShimLib.pyte_step(self, text)
+        self.calls.append(("step", bytes(text).decode()))
+
+    def pyte_mi_meas_create(self, tool, out_ptr):
+        self.calls.append(("create", bytes(tool)))
+        out_ptr[0] = bytes(tool)
+        return self.create_rc
+
+    def pyte_mi_destroy(self, logger):
+        self.calls.append(("destroy", logger))
+        return 1 if logger in self.fail_tools else 0
+
+    def timeline(self):
+        """Steps and MI writes, in the order they happened."""
+        return [c for c in self.calls if c[0] in ("step", "destroy")]
+
+
+@pytest.fixture()
+def run_lib(monkeypatch):
+    """A LifecycleLib installed for test.start(); its state restored."""
+    lib = LifecycleLib()
+    _fake_shim(monkeypatch, lib)
+    monkeypatch.setattr(sys, "argv", ["mytest", "te_test_id=7"])
+    saved = {s: signal.getsignal(s)
+             for s in (signal.SIGINT, signal.SIGUSR1, signal.SIGUSR2)}
+    yield lib
+    for s, h in saved.items():
+        signal.signal(s, h)
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if isinstance(h, log.TeLogHandler):
+            root.removeHandler(h)
+    test._current = None
+
+
+def _run(body):
+    """Run ``body(t)`` as a test body; return the exit code."""
+    with pytest.raises(SystemExit) as ei:
+        with test.start() as t:
+            body(t)
+    return ei.value.code
+
+
+def test_close_defers_inside_test(run_lib):
+    seen = {}
+
+    def body(t):
+        t.step("Run fio")
+        t.cleanup(lambda: None)
+        with mi.Logger("fio") as logger:
+            logger.add(Meas.IOPS, "Read iops", Aggr.MEAN, 1.0)
+        seen["written in body"] = ("destroy", b"fio") in run_lib.calls
+        t.step("Check the result")
+
+    assert _run(body) == 0
+    assert seen["written in body"] is False
+    assert run_lib.timeline() == [
+        ("step", "Test start"), ("step", "Run fio"),
+        ("step", "Check the result"), ("step", "Measurements"),
+        ("destroy", b"fio"), ("step", "Cleanup")]
+
+
+def test_close_immediate_writes_now(run_lib):
+    def body(t):
+        t.step("Run fio")
+        mi.Logger("fio").close(immediate=True)
+        t.step("Check the result")
+
+    assert _run(body) == 0
+    assert run_lib.timeline() == [
+        ("step", "Test start"), ("step", "Run fio"), ("destroy", b"fio"),
+        ("step", "Check the result")]
+
+
+def test_close_outside_test_writes_now(monkeypatch):
+    lib = FakeLib()
+    _fake_shim(monkeypatch, lib)
+    assert test._current is None
+
+    logger = mi.Logger("fio")
+    logger.close()
+    assert lib.calls[-1] == ("destroy",)
+
+
+def test_no_loggers_no_measurements_step(run_lib):
+    def body(t):
+        t.step("Run fio")
+        t.cleanup(lambda: None)
+
+    assert _run(body) == 0
+    assert run_lib.steps == ["Test start", "Run fio", "Cleanup"]
+
+
+def test_loggers_written_in_close_order(run_lib):
+    def body(t):
+        with mi.Logger("outer"):
+            with mi.Logger("inner"):
+                pass
+        mi.Logger("last").close()
+
+    assert _run(body) == 0
+    assert run_lib.timeline()[-4:] == [
+        ("step", "Measurements"), ("destroy", b"inner"),
+        ("destroy", b"outer"), ("destroy", b"last")]
+
+
+def test_failing_logger_does_not_stop_others(run_lib):
+    run_lib.fail_tools = {b"bad"}
+
+    def body(t):
+        t.cleanup(lambda: None)
+        for tool in ("first", "bad", "last"):
+            mi.Logger(tool).close()
+
+    assert _run(body) == 0
+    assert run_lib.timeline()[-5:] == [
+        ("step", "Measurements"), ("destroy", b"first"),
+        ("destroy", b"bad"), ("destroy", b"last"), ("step", "Cleanup")]
+    errors = run_lib.texts(FakeShimLib.TE_LL_ERROR)
+    assert len(errors) == 1
+    assert "Traceback" in errors[0] and "'bad'" in errors[0]
+
+
+def test_with_body_raising_still_hands_the_logger_over(run_lib):
+    """Partial data is wanted on failure: a `with` block left by
+    t.fail() still gets its logger written under Measurements."""
+    def body(t):
+        with mi.Logger("fio") as logger:
+            logger.add(Meas.IOPS, "Read iops", Aggr.MEAN, 1.0)
+            t.fail("Traffic stalled")
+
+    assert _run(body) == 1
+    assert run_lib.timeline()[-2:] == [
+        ("step", "Measurements"), ("destroy", b"fio")]
+
+
+def test_deferred_logger_is_closed_for_the_caller(run_lib):
+    seen = {}
+
+    def body(t):
+        logger = mi.Logger("fio")
+        logger.close()
+        try:
+            logger.add(Meas.IOPS, "Read iops", Aggr.MEAN, 1.0)
+        except RuntimeError as exc:
+            seen["error"] = str(exc)
+
+    assert _run(body) == 0
+    assert "closed" in seen["error"]
+    assert [c for c in run_lib.calls if c[0] == "add"] == []
+
+
+def test_deferred_logger_dropped_by_its_caller_is_still_written(run_lib):
+    """The test holds the logger, so dropping the caller's reference
+    neither fires the never-closed warning nor loses the data."""
+    def body(t):
+        mi.Logger("fio").close()
+        gc.collect()
+
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        assert _run(body) == 0
+        gc.collect()
+    assert not [w for w in got if "never closed" in str(w.message)]
+    assert ("destroy", b"fio") in run_lib.calls
+
+
+def test_logger_closed_in_cleanup_is_written_at_once(run_lib):
+    """Past the Measurements step a close() writes where it happens."""
+    def body(t):
+        t.cleanup(lambda: mi.Logger("late").close())
+
+    assert _run(body) == 0
+    assert run_lib.timeline() == [
+        ("step", "Test start"), ("step", "Cleanup"), ("destroy", b"late")]
 
 
 # ---------------------------------------------------------------------------

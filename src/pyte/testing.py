@@ -13,6 +13,8 @@ therefore grows the same handful of doubles.  They live here instead:
   lookups in :mod:`pyte.log` and :mod:`pyte.test` resolve to it;
 * :func:`current_test` -- a real :class:`pyte.test.Test` installed as
   the current test, for code calling ``test.current()``;
+* :func:`end_test` -- what ``test.start()`` runs when the body ends,
+  for a :func:`current_test`: finalizers, Measurements, Cleanup;
 * :class:`VerdictRecorder` -- for code taking its test handle as an
   explicit parameter, where no current test is needed;
 * :class:`RecordingMiLogger` -- a stand-in for :class:`pyte.mi.Logger`;
@@ -212,6 +214,21 @@ def current_test(fake_shim):
     pyte_test._current = saved
 
 
+def end_test(t, *, failed: bool = False) -> None:
+    """End the body of test *t* the way ``test.start()`` does.
+
+    Sets ``t.failed`` to *failed*, runs the finalizers, writes the MI
+    loggers closed in the test under a "Measurements" step, then runs
+    the cleanups under "Cleanup".  For a :func:`current_test`, whose
+    body is the unit test itself, to check what lands where::
+
+        sampler.watch(current_test)    # registers its stop to finalize
+        end_test(current_test)
+        assert mi_logger.registry[0].written_step == "Measurements"
+    """
+    t._finish(failed)
+
+
 class VerdictRecorder:
     """A test handle that records instead of reaching the Logger.
 
@@ -220,6 +237,9 @@ class VerdictRecorder:
     handle's own surface is faked.  ``fail()``/``skip()`` raise the
     real :class:`~pyte.errors.TestFail`/:class:`~pyte.errors.TestSkip`
     so a caller's error path behaves as it does in a real test.
+    ``finalize()`` records ``(fn, args, kwargs)`` in ``finalizers``
+    without running anything; ``failed`` is a plain attribute a test
+    may set before calling them.
     """
 
     def __init__(self):
@@ -227,6 +247,8 @@ class VerdictRecorder:
         self.artifacts: list[str] = []
         self.steps: list[str] = []
         self.substeps: list[str] = []
+        self.finalizers: list[tuple] = []
+        self.failed = False
 
     def verdict(self, text: str, error: bool = False) -> None:
         self.verdicts.append((text, error))
@@ -239,6 +261,9 @@ class VerdictRecorder:
 
     def substep(self, text: str) -> None:
         self.substeps.append(text)
+
+    def finalize(self, fn, *args, **kwargs) -> None:
+        self.finalizers.append((fn, args, kwargs))
 
     def fail(self, text: str, *, verdict: str | bool = False) -> None:
         from pyte.errors import TestFail
@@ -267,6 +292,13 @@ class RecordingMiLogger:
     opening several ``with mi.Logger(tool):`` blocks can be checked
     block by block; reset it with :meth:`reset` before each test (a
     fixture doing that is one line).
+
+    Closing defers like the real logger: inside a current test (see
+    :func:`current_test`) ``closed`` turns True at once and ``written``
+    only when the test writes its measurements (:func:`end_test`);
+    outside one, or with ``close(immediate=True)``, both at once.
+    ``written_step`` is the last step the installed :class:`FakeShimLib`
+    had recorded at the write, None without one.
     """
 
     registry: ClassVar[list["RecordingMiLogger"]] = []
@@ -277,6 +309,8 @@ class RecordingMiLogger:
         self.graphs: list[tuple] = []
         self.comments: list[tuple] = []
         self.closed = False
+        self.written = False
+        self.written_step: str | None = None
         RecordingMiLogger.registry.append(self)
 
     @classmethod
@@ -293,14 +327,29 @@ class RecordingMiLogger:
     def line_graph(self, name, title, x_axis):
         self.graphs.append((name, title, x_axis))
 
-    def close(self) -> None:
+    def close(self, immediate: bool = False) -> None:
+        if self.closed:
+            return
         self.closed = True
+        if not immediate:
+            from pyte import test as pyte_test
+            t = pyte_test._current
+            if t is not None and t._defer_mi(self._write):
+                return
+        self._write()
+
+    def _write(self) -> None:
+        self.written = True
+        shim = sys.modules.get("pyte._shim")
+        lib = getattr(shim, "lib", None)
+        if isinstance(lib, FakeShimLib) and lib.steps:
+            self.written_step = lib.steps[-1]
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc_info):
-        self.closed = True
+        self.close()
         return False
 
 

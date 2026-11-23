@@ -10,9 +10,12 @@ three te_mi C functions::
     te_mi_logger_destroy(logger)               → pyte_mi_destroy
 
 The *tool* string passed to ``Logger("fio")`` becomes the ``"tool"`` key in
-the MI JSON artifact that TE's Logger emits.  ``destroy`` (called on CM exit
-or explicit ``close()``) flushes the artifact; no MI data is emitted if no
-measurements were added.
+the MI JSON artifact that TE's Logger emits.  ``destroy`` flushes the
+artifact; no MI data is emitted if no measurements were added.  Inside a
+running test ``close()`` (or CM exit) defers it: the test writes every
+logger closed in it under one "Measurements" step after the body, before
+Cleanup.  Outside a test, or with ``close(immediate=True)``, it is
+written at once.
 
 Design: thin and generic — pyte.tools.fio (and future perf tools) consume it from
 pure Python without any tapi_fio linkage.
@@ -98,9 +101,9 @@ def _const(member: enum.Enum) -> int:
 class Logger:
     """MI measurement logger context manager.
 
-    Creates a ``te_mi_logger`` on entry, flushes and destroys it on exit
-    (idempotent ``close()``).  ``add()`` raises ``RuntimeError`` after
-    close.
+    Creates a ``te_mi_logger`` on entry and closes it on exit (see
+    :meth:`close` for when the data is written).  ``add()`` raises
+    ``RuntimeError`` after close.
 
     Parameters
     ----------
@@ -224,14 +227,38 @@ class Logger:
                                         _const(x_axis))
         check(rc, f"mi.Logger.line_graph({name!r}) x-axis")
 
-    def close(self) -> None:
-        """Flush MI data and destroy the logger (idempotent)."""
+    def close(self, immediate: bool = False) -> None:
+        """Close the logger; its MI data is written now or at test end.
+
+        Inside a running test the logger is handed to the test, which
+        writes every logger closed in it, in close order, under one
+        "Measurements" step after the body and the finalizers and
+        before Cleanup, on failed tests too.  Outside a test, with
+        *immediate*, or once the test is past that step (a logger
+        closed in a cleanup), the data is flushed and the logger
+        destroyed at once, and a failure raises.
+
+        Either way the logger is closed for the caller: add() and the
+        rest raise RuntimeError.  A second call does nothing, also when
+        the first one deferred.
+        """
         if self._closed:
             return
         self._closed = True
+        if not immediate:
+            from pyte import test
+            t = test._current
+            # The test keeps the bound method, and with it this logger,
+            # so the never-closed finalizer cannot fire before the write.
+            if t is not None and t._defer_mi(self._write):
+                return
+        self._write()
+
+    def _write(self) -> None:
+        """Flush the MI data and destroy the C logger."""
         self._finalizer.detach()
         rc = self._lib.pyte_mi_destroy(self._logger)
-        check(rc, "mi.Logger.close()")
+        check(rc, f"mi.Logger({self._tool!r}).close()")
 
     # Context-manager protocol
 

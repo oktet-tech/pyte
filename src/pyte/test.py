@@ -46,6 +46,10 @@ class Test:
     def __init__(self, params: Params):
         self.params = params
         self._cleanups: list[tuple[Callable, tuple, dict]] = []
+        self._finalizers: list[tuple[Callable, tuple, dict]] = []
+        # MI writes held for the Measurements step; None once past it.
+        self._pending_mi: list[Callable[[], None]] | None = []
+        self._failed = False
         self._env = None
         self._attach_warned = False
 
@@ -187,6 +191,30 @@ class Test:
         """Register fn to run at test end (LIFO), pass or fail."""
         self._cleanups.append((fn, args, kwargs))
 
+    def finalize(self, fn: Callable, *args, **kwargs) -> None:
+        """Register fn to run when the body ends, before the MI step.
+
+        Finalizers run in registration order however the body ended
+        (pass, fail, skip), after :attr:`failed` is set and before the
+        "Measurements" step and the cleanups.  This is where a sampler
+        stops and closes its mi.Logger, so its rows join the other
+        measurements.  They get no step of their own: what they log
+        lands at the end of the last body step.  A raising finalizer
+        is logged and the rest still run; the exit code stays as the
+        body left it.
+        """
+        self._finalizers.append((fn, args, kwargs))
+
+    @property
+    def failed(self) -> bool:
+        """Whether the test failed, for finalizers and cleanups.
+
+        False while the body runs.  Set when the body ends, before the
+        finalizers: True unless the body passed (completed, or exited
+        with code 0) or was skipped.
+        """
+        return self._failed
+
     # -- environment -------------------------------------------------
     @property
     def agent(self) -> str:
@@ -260,6 +288,51 @@ class Test:
                 ok = False
         return ok
 
+    def _defer_mi(self, write: Callable[[], None]) -> bool:
+        """Hold an mi.Logger write for the Measurements step.
+
+        False once the test is past that step; the caller writes then.
+        """
+        if self._pending_mi is None:
+            return False
+        self._pending_mi.append(write)
+        return True
+
+    def _run_finalizers(self) -> None:
+        for fn, args, kwargs in self._finalizers:
+            try:
+                fn(*args, **kwargs)
+            except BaseException:  # noqa: BLE001  as in _run_cleanups()
+                log.error("Finalizer failed:\n" + _format_exc_chain())
+
+    def _write_measurements(self) -> None:
+        pending, self._pending_mi = self._pending_mi or [], None
+        if pending:
+            self.step("Measurements")
+        for write in pending:
+            try:
+                write()
+            except BaseException:  # noqa: BLE001  as in _run_cleanups()
+                log.error("MI write failed:\n" + _format_exc_chain())
+
+    def _finish(self, failed: bool) -> bool:
+        """Run everything after the body; False if a cleanup failed.
+
+        In order: set :attr:`failed`, run the finalizers, write the
+        pending MI loggers under "Measurements", run the cleanups.
+        Neither a finalizer nor an MI write can stop the rest.
+        """
+        self._failed = failed
+        try:
+            self._run_finalizers()
+            self._write_measurements()
+        except BaseException:  # noqa: BLE001  never skip the cleanups
+            # Only what escapes the per-item guards lands here, e.g. a
+            # signal arriving between two items.
+            log.error("Finalizers or measurements failed:\n"
+                      + _format_exc_chain())
+        return self._run_cleanups()
+
     @property
     def env(self):
         """The bound tapi_env environment (lazy; needs an env param).
@@ -313,6 +386,11 @@ def start(name: str | None = None):
 
     with test.start() as t:
         t.step(...)
+
+    However the body ends, the same order follows: :attr:`Test.failed`
+    is set, the finalizers run, the mi.Logger objects closed in the
+    test are written under a "Measurements" step, the cleanups run
+    under "Cleanup", and the process exits with the test's result.
     """
     global _current
     if _current is not None:
@@ -407,7 +485,10 @@ def start(name: str | None = None):
         log.error("Unhandled exception:\n" + _format_exc_chain())
         result = 1
     finally:
-        if not t._run_cleanups() and result == 0:
+        # Pass and skip are the only results that are not failures; an
+        # exception start() does not catch leaves result at 1.
+        failed = result not in (0, EXIT_SKIP)
+        if not t._finish(failed) and result == 0:
             result = 1
         if t._env is not None:
             try:

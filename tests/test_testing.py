@@ -10,7 +10,7 @@ import pytest
 from pyte import log, test as pyte_test
 from pyte.errors import TeError, TestFail, TestSkip
 from pyte.testing import (FakeShimLib, FakeTrexReport, RecordingMiLogger,
-                          VerdictRecorder)
+                          VerdictRecorder, end_test)
 
 
 # -- FakeShimLib -------------------------------------------------------
@@ -117,6 +117,13 @@ def test_verdict_recorder_fail_records_the_verdict_like_the_real_one():
     assert t.verdicts == [("Flows failed", True), ("no DUT", True)]
 
 
+def test_verdict_recorder_records_finalizers():
+    t = VerdictRecorder()
+    t.finalize(print, "stop", sep="")
+    assert t.finalizers == [(print, ("stop",), {"sep": ""})]
+    assert t.failed is False
+
+
 # -- RecordingMiLogger -------------------------------------------------
 
 def test_recording_mi_logger_records_in_creation_order():
@@ -140,6 +147,51 @@ def test_recording_mi_logger_reset_empties_the_registry():
     RecordingMiLogger("x")
     RecordingMiLogger.reset()
     assert RecordingMiLogger.registry == []
+
+
+def test_recording_mi_logger_writes_at_once_outside_a_test(mi_logger):
+    with mi_logger("tool") as lg:
+        pass
+    assert lg.closed and lg.written
+    assert lg.written_step is None
+
+
+def test_recording_mi_logger_defers_inside_a_test(current_test, fake_shim,
+                                                  mi_logger):
+    """Closed in the body, written by end_test() under Measurements,
+    as the real mi.Logger is in a test.start() test."""
+    current_test.step("Run traffic")
+    current_test.cleanup(lambda: None)
+    with mi_logger("tool") as lg:
+        pass
+    assert lg.closed and not lg.written
+
+    end_test(current_test)
+    assert lg.written
+    assert lg.written_step == "Measurements"
+    assert fake_shim.steps == ["Run traffic", "Measurements", "Cleanup"]
+
+
+def test_recording_mi_logger_immediate_writes_at_once(current_test,
+                                                     fake_shim, mi_logger):
+    current_test.step("Run traffic")
+    lg = mi_logger("tool")
+    lg.close(immediate=True)
+    assert lg.written_step == "Run traffic"
+
+
+def test_end_test_sets_failed_and_runs_finalizers(current_test, fake_shim,
+                                                  mi_logger):
+    seen = []
+
+    def stop():
+        seen.append(current_test.failed)
+        mi_logger("sampler").close()
+
+    current_test.finalize(stop)
+    end_test(current_test, failed=True)
+    assert seen == [True]
+    assert mi_logger.registry[0].written_step == "Measurements"
 
 
 # -- FakeTrexReport ----------------------------------------------------
