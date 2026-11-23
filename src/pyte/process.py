@@ -19,7 +19,7 @@ The model is ``doc/cm/cm_process.yml`` in TE.
 """
 from __future__ import annotations
 
-from pyte import cfg
+from pyte import cfg, errors
 from pyte._cleanup import cleanup_all
 from pyte.errors import RpcError
 from pyte.rpc.files import open_file
@@ -175,7 +175,8 @@ class Output:
     :meth:`save_since_mark` look at it. Both start at 0, so before
     :meth:`mark` is called they cover the whole file.
 
-    A file that is missing reads as empty. A file that is shorter than
+    A file that is missing reads as empty; any other failure to open
+    it raises :class:`~pyte.errors.RpcError`. A file that is shorter than
     a position (truncated or replaced) restarts from 0. ``cap`` bounds
     what :meth:`new` and :meth:`since_mark` return to the newest
     ``cap`` bytes; :meth:`save_since_mark` is not capped.
@@ -203,7 +204,9 @@ class Output:
         quiet = self._quiet
         try:
             f = quiet(open_file, self.server, self.path, "r")
-        except RpcError:
+        except RpcError as exc:
+            if exc.code != errors.ENOENT:
+                raise
             return start
         try:
             # Not f.size(): it restores the position, and the seek

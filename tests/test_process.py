@@ -8,6 +8,7 @@ import cffi
 import pytest
 
 from pyte import process
+from pyte.errors import RpcError
 from pyte.rpc.server import RpcServer
 
 
@@ -209,9 +210,15 @@ class _FileLib:
     PYTE_O_TRUNC = 4
     PYTE_O_APPEND = 8
     PYTE_MODE_0644 = 0o644
+    # errno values open() fails with; the error model passes them on
+    PYTE_ENOENT = 2
+    EACCES = 13
 
     def __init__(self):
         self.files = {}
+        #: paths open() refuses with EACCES
+        self.denied = set()
+        self.errno = 0
         self.fds = {}            # fd -> [path, position]
         self.next_fd = 3
         self.silent_pass = 0
@@ -241,7 +248,7 @@ class _FileLib:
         self.silent_pass = 0
 
     def pyte_rpc_errno(self, h):
-        return 2
+        return self.errno
 
     # The error model decodes the rc it is given; a fixed one will do.
     def pyte_rc_module(self, rc):
@@ -262,7 +269,12 @@ class _FileLib:
     def pyte_rpc_open(self, h, path, flags, mode, out):
         self._rpc()
         path = path.decode()
+        if path in self.denied:
+            self.errno = self.EACCES
+            out[0] = -1
+            return 0
         if path not in self.files:
+            self.errno = self.PYTE_ENOENT
             out[0] = -1
             return 0
         out[0] = self.next_fd
@@ -354,6 +366,18 @@ def test_output_missing_file_reads_as_empty(agent):
     out.mark()
     assert out.new() == ""
     assert out.since_mark() == ""
+
+
+def test_output_open_failing_otherwise_raises(agent):
+    """Only a missing file is an empty one: a file that is there but
+    cannot be read is a broken setup, and reading it as empty would
+    hide that behind an empty console."""
+    out = _output(agent)
+    agent.denied.add("/o")
+    with pytest.raises(RpcError) as err:
+        out.new()
+    assert err.value.code == agent.EACCES
+    assert agent.fds == {}
 
 
 def test_output_reads_in_chunks_of_at_most_64k(agent):
