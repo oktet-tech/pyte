@@ -347,6 +347,32 @@ pyte_rpc_read(rcf_rpc_server *rpcs, int fd, uint8_t *buf, size_t count,
 }
 
 te_errno
+pyte_rpc_lseek(rcf_rpc_server *rpcs, int fd, int64_t pos, int whence,
+               int64_t *out)
+{
+    rpc_lseek_mode mode;
+
+    switch (whence)
+    {
+        case 0:
+            mode = RPC_SEEK_SET;
+            break;
+        case 1:
+            mode = RPC_SEEK_CUR;
+            break;
+        case 2:
+            mode = RPC_SEEK_END;
+            break;
+        default:
+            return TE_RC(TE_TAPI, TE_EINVAL);
+    }
+
+    RPC_AWAIT_ERROR(rpcs);
+    PYTE_GUARD(*out = rpc_lseek(rpcs, fd, pos, mode));
+    return 0;
+}
+
+te_errno
 pyte_rpc_write(rcf_rpc_server *rpcs, int fd, const uint8_t *buf,
                size_t count, int *out)
 {

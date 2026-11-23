@@ -62,6 +62,31 @@ class RpcFile:
                                       f"read({self.path}, {size})")
         return bytes(ffi.buffer(buf, out[0]))
 
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """Reposition the descriptor; return the new position.
+
+        *whence* is 0 (from the start), 1 (from the current position)
+        or 2 (from the end), as in :func:`os.lseek`.
+        """
+        ffi, lib = _shim()
+        out = ffi.new("int64_t *")
+        rc = lib.pyte_rpc_lseek(self.server._handle(), self.fd, offset,
+                                whence, out)
+        return self.server._check_call(rc, out[0], lambda v: v >= 0,
+                                       f"lseek({self.path}, {offset}, "
+                                       f"{whence})")
+
+    def size(self) -> int:
+        """The file size, found by seeking to the end.
+
+        The position is restored, so a read sequence is not disturbed.
+        """
+        here = self.seek(0, 1)
+        end = self.seek(0, 2)
+        if end != here:
+            self.seek(here, 0)
+        return end
+
 
 def open_file(server, path: str, mode: str = "r") -> RpcFile | None:
     """Open a file on the RPC server; mode is "r", "w" or "a"."""

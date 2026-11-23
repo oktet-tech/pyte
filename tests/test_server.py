@@ -482,3 +482,42 @@ def test_context_manager_preserves_body_exception_when_destroy_fails(
 
     assert info.value is boom
     assert len(boom.cleanup_errors) == 1
+
+
+# -- RpcFile.seek()/size() -----------------------------------------------
+
+class _SeekLib:
+    def __init__(self, length):
+        self.length = length
+        self.pos = 0
+        self.calls = []
+
+    def pyte_rpc_lseek(self, h, fd, pos, whence, out):
+        self.calls.append((pos, whence))
+        self.pos = (pos, self.pos + pos, self.length + pos)[whence]
+        out[0] = self.pos
+        return 0
+
+
+def _seek_file(monkeypatch, length, pos):
+    import cffi
+    from pyte.rpc.files import RpcFile
+    lib = _SeekLib(length)
+    lib.pos = pos
+    monkeypatch.setitem(sys.modules, "pyte._shim",
+                        types.SimpleNamespace(ffi=cffi.FFI(), lib=lib))
+    return RpcFile(_bare_server(), 5, "/f"), lib
+
+
+def test_rpcfile_seek_returns_new_position(monkeypatch):
+    f, lib = _seek_file(monkeypatch, 100, 0)
+    assert f.seek(10) == 10
+    assert f.seek(5, 1) == 15
+    assert f.seek(-1, 2) == 99
+    assert [w for _p, w in lib.calls] == [0, 1, 2]
+
+
+def test_rpcfile_size_restores_position(monkeypatch):
+    f, lib = _seek_file(monkeypatch, 100, 7)
+    assert f.size() == 100
+    assert lib.pos == 7

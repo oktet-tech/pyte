@@ -217,6 +217,8 @@ extern te_errno pyte_rpc_open(rcf_rpc_server *rpcs, const char *path,
                               int flags, int mode, int *out);
 extern te_errno pyte_rpc_read(rcf_rpc_server *rpcs, int fd, uint8_t *buf,
                               size_t count, int *out);
+extern te_errno pyte_rpc_lseek(rcf_rpc_server *rpcs, int fd, int64_t pos,
+                               int whence, int64_t *out);
 extern te_errno pyte_rpc_write(rcf_rpc_server *rpcs, int fd,
                                const uint8_t *buf, size_t count, int *out);
 extern te_errno pyte_rpc_unlink(rcf_rpc_server *rpcs, const char *path,
