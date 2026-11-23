@@ -333,11 +333,13 @@ class Client:
         Returns the accumulated Series, so callers never collect
         snapshots themselves.
 
-        In its own step bracket, like every other long op: the
-        Configurator-owned server's stdout is logged by the agent at
-        whatever nesting level is current, so an unbracketed poll is
-        the one window where that flood lands beside the step's own
-        lines instead of one level deeper under them.
+        In its own step bracket, like every other long op. A
+        Configurator-owned server keeps its console in a file, out of
+        the log, but on an agent without the process output settings
+        (see :func:`start_server`) the agent logs it at whatever
+        nesting level is current, and an unbracketed poll is the one
+        window where that flood would land beside the step's own lines
+        instead of one level deeper under them.
 
         With ``console`` (an :class:`~pyte.process.Output` on the
         server's console file) and ``screen_every``, the newest
@@ -488,10 +490,12 @@ def _wait_sync_port(pco: "RpcServer", opts: ServerOpts,
                     timeout: float) -> None:
     """Block until an ASTF client can connect, or raise TrexError.
 
-    Readiness is a successful connect, not a banner in stdout: an
-    /agent/process entry's filters are log-only, so there is no stream
-    to match on. This is the same check :func:`session` makes, and it
-    has to hold before any test is allowed to attach.
+    Readiness is a successful connect, not a banner in the console:
+    the agent's own filters on an /agent/process entry cannot be read,
+    and the console file that can be is polled, not waited on, and is
+    missing on an agent without the process output settings. This is
+    the same check :func:`session` makes, and it has to hold before
+    any test is allowed to attach.
     """
     from pyte import remote
     with remote.python(pco) as rem:
@@ -607,14 +611,14 @@ def start_server(pco: "RpcServer", opts: ServerOpts,
 
 
 def stop_server(info: ServerInfo, pco: "RpcServer | None" = None) -> None:
-    """Stop the process and remove the config and console file it was started with.
+    """Stop the process, then remove its cfg file and console file.
 
     The order is load-bearing, and is the one session()'s teardown
     keeps for the same reason: TRex reopens its config while shutting
-    down, so the process has to be gone before the file is.
+    down, so the process has to be gone before the files are.
 
-    ``pco`` is needed only to remove the cfg file; omit it to leave the
-    file in place. Every step is attempted even when an earlier one
+    ``pco`` is needed only to remove the two files; omit it to leave
+    them in place. Every step is attempted even when an earlier one
     failed, because a process left running is what breaks the *next*
     session.
     """
