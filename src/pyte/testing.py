@@ -14,7 +14,8 @@ therefore grows the same handful of doubles.  They live here instead:
 * :func:`current_test` -- a real :class:`pyte.test.Test` installed as
   the current test, for code calling ``test.current()``;
 * :func:`end_test` -- what ``test.start()`` runs when the body ends,
-  for a :func:`current_test`: finalizers, Measurements, Cleanup;
+  for a :func:`current_test`: Collect results (the finalizers),
+  Measurements, Cleanup;
 * :class:`VerdictRecorder` -- for code taking its test handle as an
   explicit parameter, where no current test is needed;
 * :class:`RecordingMiLogger` -- a stand-in for :class:`pyte.mi.Logger`;
@@ -218,8 +219,9 @@ def end_test(t, *, failed: bool = False) -> None:
     """End the body of test *t* the way ``test.start()`` does.
 
     Sets ``t.failed`` to *failed*, runs the finalizers (last
-    registered first), writes the MI loggers closed in the test under
-    a "Measurements" step, then runs the cleanups under "Cleanup".
+    registered first) under a "Collect results" step, writes the MI
+    loggers closed in the test under a "Measurements" step, then runs
+    the cleanups under "Cleanup".
     For a :func:`current_test`, whose body is the unit test itself, to
     check what lands where::
 

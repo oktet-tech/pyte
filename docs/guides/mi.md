@@ -27,7 +27,8 @@ by an exception), does not write: the logger is handed to the test.
 When the body ends, however it ends, the test:
 
 1. sets `t.failed`: True unless the body passed or was skipped;
-2. runs the finalizers registered with `t.finalize(fn, *args)`, last
+2. if any finalizer is registered with `t.finalize(fn, *args)`,
+   opens a step named "Collect results" and runs the finalizers, last
    registered first, like the cleanups;
 3. if any logger is pending, opens a step named "Measurements" and
    writes the loggers in the order they were closed;
@@ -43,13 +44,15 @@ sampler.start()
 t.finalize(sampler.stop)    # stop() closes its mi.Logger
 ```
 
-Finalizers get no step of their own: what they log lands at the end
-of the last body step.  A failing finalizer or logger write is logged
-as an error with its traceback, and the others and the cleanups still
-run.  An ordinary error does not change the exit code; an interrupt,
-an exit or a `TestFail` (which a signal raises too) turns a pass into
-a failure, as it does in a cleanup.  Prologues and epilogues are tests
-and get the same step.
+The end of a test therefore reads: the body's steps, "Collect
+results", "Measurements", "Cleanup", each opened only when it has
+something to run.  A step that cannot be opened is logged as an error
+and what it holds still runs.  A failing finalizer or logger write is
+logged as an error with its traceback, and the others and the
+cleanups still run.  An ordinary error does not change the exit code;
+an interrupt, an exit or a `TestFail` (which a signal raises too)
+turns a pass into a failure, as it does in a cleanup.  Prologues and
+epilogues are tests and get the same steps.
 
 `close(immediate=True)` writes at once, and so does `close()` outside
 a test (unit tests, tools) or in a cleanup, once the test is past the

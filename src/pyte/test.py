@@ -202,9 +202,10 @@ class Test:
         and before the "Measurements" step and the cleanups.  This is
         where a sampler stops and closes its mi.Logger, so its rows
         join the other measurements; registered after a session, it
-        stops before the session's own finalizer runs.  They get no
-        step of their own: what they log lands at the end of the last
-        body step.  A raising finalizer is logged and the rest still
+        stops before the session's own finalizer runs.  They run under
+        a "Collect results" step, opened only when at least one is
+        registered, so what they log is not mistaken for the last body
+        step's work.  A raising finalizer is logged and the rest still
         run.  An ordinary error leaves the exit code as the body left
         it; an interrupt, an exit or a TestFail (which the signal
         handler raises too) turns a pass into a failure, as it does in
@@ -308,6 +309,10 @@ class Test:
 
     def _run_finalizers(self) -> bool:
         ok = True
+        if self._finalizers:
+            # Guarded on its own: without the step they still run.
+            ok = _guarded("Opening the Collect results step", self.step,
+                          "Collect results")
         for fn, args, kwargs in reversed(self._finalizers):
             ok = _guarded("Finalizer", fn, *args, **kwargs) and ok
         return ok
@@ -327,8 +332,8 @@ class Test:
         """Run everything after the body; False if that fails the test.
 
         In order: set :attr:`failed`, run the finalizers (last
-        registered first), write the pending MI loggers under
-        "Measurements", run the cleanups.
+        registered first) under "Collect results", write the pending
+        MI loggers under "Measurements", run the cleanups.
         Neither a finalizer nor an MI write can stop the rest.  False
         when a cleanup failed, or a finalizer or an MI write raised
         what fails the test (see :func:`_fails_the_test`).
@@ -431,9 +436,11 @@ def start(name: str | None = None):
         t.step(...)
 
     However the body ends, the same order follows: :attr:`Test.failed`
-    is set, the finalizers run, the mi.Logger objects closed in the
-    test are written under a "Measurements" step, the cleanups run
-    under "Cleanup", and the process exits with the test's result.
+    is set, the finalizers run under a "Collect results" step, the
+    mi.Logger objects closed in the test are written under a
+    "Measurements" step, the cleanups run under "Cleanup", and the
+    process exits with the test's result.  A step that would be empty
+    is not opened.
     """
     global _current
     if _current is not None:

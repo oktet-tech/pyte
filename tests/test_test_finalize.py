@@ -3,8 +3,9 @@
 """Test.finalize(), Test.failed and the Measurements step (fake shim).
 
 Every test ends in one order: the body ends, ``failed`` is set, the
-finalizers run last registered first, the MI loggers closed in the
-test are written under a "Measurements" step, then Cleanup.  The
+finalizers run last registered first under a "Collect results" step,
+the MI loggers closed in the test are written under a "Measurements"
+step, then Cleanup.  The
 loggers here are pyte.testing's RecordingMiLogger, which defers like
 mi.Logger and records the step it was written under.  Tests run
 through conftest's run_test.
@@ -78,8 +79,8 @@ def test_finalizers_run_before_measurements_on_fail(lib, run_test):
     assert seen["failed"] is True
     logger, = RecordingMiLogger.registry
     assert logger.written_step == "Measurements"
-    assert lib.steps == ["Test start", "Run traffic", "Measurements",
-                         "Cleanup"]
+    assert lib.steps == ["Test start", "Run traffic", "Collect results",
+                         "Measurements", "Cleanup"]
 
 
 def test_finalizers_run_last_registered_first_with_their_args(lib,
@@ -98,15 +99,51 @@ def test_finalizers_run_last_registered_first_with_their_args(lib,
     assert order == ["last", ((1,), {"k": 2}), "first"]
 
 
-def test_finalizers_get_no_step_of_their_own(lib, run_test):
-    """What a finalizer logs lands at the end of the last body step."""
+def test_finalizers_run_in_a_collect_results_step(lib, run_test):
+    """What the finalizers log is collecting results, not the last body
+    step's work: it gets a step of its own."""
+    seen = []
+
     def body(t):
         t.step("Run traffic")
+        t.finalize(lambda: seen.append(lib.steps[-1]))
         t.finalize(log.ring, "Sampler stopped")
 
     assert run_test(body) == 0
-    assert lib.steps == ["Test start", "Run traffic"]
+    assert lib.steps == ["Test start", "Run traffic", "Collect results"]
+    assert seen == ["Collect results"]
     assert "Sampler stopped" in lib.texts(FakeShimLib.TE_LL_RING)
+
+
+def test_no_finalizers_no_collect_results_step(lib, run_test):
+    def body(t):
+        t.step("Run traffic")
+        t.cleanup(lambda: None)
+
+    assert run_test(body) == 0
+    assert lib.steps == ["Test start", "Run traffic", "Cleanup"]
+
+
+def test_a_failing_collect_results_step_still_runs_the_finalizers(
+        lib, run_test, monkeypatch):
+    """The step call is guarded on its own, like the Measurements one."""
+    step = lib.pyte_step
+
+    def pyte_step(text):
+        if text == b"Collect results":
+            raise RuntimeError("step lost")
+        step(text)
+
+    monkeypatch.setattr(lib, "pyte_step", pyte_step)
+    ran = []
+
+    def body(t):
+        t.finalize(ran.append, "finalizer")
+
+    assert run_test(body) == 0
+    assert ran == ["finalizer"]
+    failures = _errors(lib, "Opening the Collect results step failed")
+    assert len(failures) == 1 and "step lost" in failures[0]
 
 
 def test_failed_is_false_while_the_body_runs(lib, run_test):
@@ -190,7 +227,8 @@ def test_every_exit_runs_finalizers_then_measurements_then_cleanup(
     assert run_test(body) == code
     assert seen == [("failed", failed), "cleanup"]
     assert RecordingMiLogger.registry[0].written_step == "Measurements"
-    assert lib.steps[-2:] == ["Measurements", "Cleanup"]
+    assert lib.steps[-3:] == ["Collect results", "Measurements",
+                              "Cleanup"]
 
 
 def test_a_failing_measurements_step_still_writes_the_loggers(
@@ -268,5 +306,6 @@ def test_an_interrupt_in_the_body_still_ends_the_test(lib):
             t.cleanup(lambda: seen.append("cleanup"))
             raise KeyboardInterrupt()
     assert seen == [("failed", True), "cleanup"]
-    assert lib.steps[-2:] == ["Measurements", "Cleanup"]
+    assert lib.steps[-3:] == ["Collect results", "Measurements",
+                              "Cleanup"]
     assert test._current is None

@@ -192,6 +192,7 @@ def test_end_test_sets_failed_and_runs_finalizers(current_test, fake_shim,
     end_test(current_test, failed=True)
     assert seen == [True]
     assert mi_logger.registry[0].written_step == "Measurements"
+    assert fake_shim.steps == ["Collect results", "Measurements"]
 
 
 def test_end_test_runs_finalizers_last_registered_first(current_test,
