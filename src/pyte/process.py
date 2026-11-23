@@ -20,6 +20,7 @@ The model is ``doc/cm/cm_process.yml`` in TE.
 from __future__ import annotations
 
 from pyte import cfg
+from pyte._cleanup import cleanup_all
 from pyte.errors import RpcError
 from pyte.rpc.files import open_file
 
@@ -165,8 +166,9 @@ class Output:
     appending, and this class returns what appeared since a point the
     test chose. The file is opened and closed on every call, so no
     descriptor outlives a call and the object holds no RPC state of its
-    own. All of its RPCs run under ``server.silent_pass()``: polling
-    adds no rows to the test log.
+    own. Each of its RPCs runs in its own
+    ``server.silent_pass_once()`` block: polling adds no rows to the
+    test log, only a failing call is logged.
 
     There are two positions. The *cursor* moves with :meth:`new`; the
     *mark* is set by :meth:`mark` and only :meth:`since_mark` and
@@ -186,32 +188,45 @@ class Output:
         self._cursor = 0
         self._mark = 0
 
+    def _quiet(self, call, *args):
+        """Make one RPC without a log row (unless it fails).
+
+        One call per :meth:`~pyte.rpc.server.RpcServer.silent_pass_once`
+        block: TE consumes the flag on the first call it skips.
+        """
+        with self.server.silent_pass_once():
+            return call(*args)
+
     def _read(self, start: int, cap: int | None, sink) -> int:
         """Feed ``sink`` the bytes from ``start`` to the end; return
         the end offset the read stopped at (``start`` if nothing)."""
-        with self.server.silent_pass():
-            try:
-                f = open_file(self.server, self.path, "r")
-            except RpcError:
-                return start
-            with f:
-                # Not f.size(): it restores the position, and the seek
-                # below overwrites it anyway.
-                end = f.seek(0, 2)
-                if end < start:
-                    start = 0
-                if cap is not None and end - start > cap:
-                    start = end - cap
-                pos = start
-                if pos < end:
-                    f.seek(pos, 0)
-                while pos < end:
-                    chunk = f.read(min(_READ_CHUNK, end - pos))
-                    if not chunk:
-                        break
-                    sink(chunk)
-                    pos += len(chunk)
-                return end
+        quiet = self._quiet
+        try:
+            f = quiet(open_file, self.server, self.path, "r")
+        except RpcError:
+            return start
+        try:
+            # Not f.size(): it restores the position, and the seek
+            # below overwrites it anyway.
+            end = quiet(f.seek, 0, 2)
+            if end < start:
+                start = 0
+            if cap is not None and end - start > cap:
+                start = end - cap
+            pos = start
+            if pos < end:
+                quiet(f.seek, pos, 0)
+            while pos < end:
+                chunk = quiet(f.read, min(_READ_CHUNK, end - pos))
+                if not chunk:
+                    break
+                sink(chunk)
+                pos += len(chunk)
+        except BaseException as exc:
+            cleanup_all(lambda: quiet(f.close), primary=exc)
+            raise
+        quiet(f.close)
+        return end
 
     def _text(self, start: int) -> tuple[str, int]:
         parts: list[bytes] = []

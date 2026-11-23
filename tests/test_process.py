@@ -216,7 +216,8 @@ class _FileLib:
         self.next_fd = 3
         self.silent_pass = 0
         self._msg = cffi.FFI().new("char[]", b"No such file")
-        #: silent_pass value seen by each file RPC
+        #: silent_pass value seen by each file RPC: 1 is a call TE
+        #: does not log, 0 one it logs at RING
         self.seen = []
         self.reads = []          # sizes asked of read()
         self.lseeks = []         # (offset, whence) asked of lseek()
@@ -226,6 +227,18 @@ class _FileLib:
 
     def pyte_rpc_get_silent_pass(self, h):
         return self.silent_pass
+
+    def _rpc(self):
+        """Account for one completed file RPC the way TE does.
+
+        TAPI_RPC_LOG does not log a completed call while silent_pass
+        is set, and then resets silent_pass to silent_pass_default,
+        which is false: the flag covers one call. pyte awaits errors,
+        so a call returning -1 has completed too; every call here
+        completes.
+        """
+        self.seen.append(self.silent_pass)
+        self.silent_pass = 0
 
     def pyte_rpc_errno(self, h):
         return 2
@@ -247,7 +260,7 @@ class _FileLib:
         return self._msg
 
     def pyte_rpc_open(self, h, path, flags, mode, out):
-        self.seen.append(self.silent_pass)
+        self._rpc()
         path = path.decode()
         if path not in self.files:
             out[0] = -1
@@ -258,13 +271,13 @@ class _FileLib:
         return 0
 
     def pyte_rpc_close(self, h, fd, out):
-        self.seen.append(self.silent_pass)
+        self._rpc()
         del self.fds[fd]
         out[0] = 0
         return 0
 
     def pyte_rpc_lseek(self, h, fd, pos, whence, out):
-        self.seen.append(self.silent_pass)
+        self._rpc()
         self.lseeks.append((pos, whence))
         path, cur = self.fds[fd]
         base = (0, cur, len(self.files[path]))[whence]
@@ -272,7 +285,7 @@ class _FileLib:
         return 0
 
     def pyte_rpc_read(self, h, fd, buf, size, out):
-        self.seen.append(self.silent_pass)
+        self._rpc()
         self.reads.append(size)
         path, cur = self.fds[fd]
         data = self.files[path][cur:cur + size]
@@ -370,10 +383,35 @@ def test_output_rpcs_run_under_silent_pass(agent, tmp_path):
     assert agent.silent_pass == 0          # restored afterwards
 
 
+def test_output_is_silent_inside_an_enclosing_silent_pass(agent):
+    """A caller's own silent_pass() block around a read must not make
+    the read loud (a nested silent_pass() does nothing, and TE consumes
+    the flag on the first call) nor eat the flag the block set for a
+    call of its own."""
+    out = _output(agent)
+    with agent.srv.silent_pass():
+        out.new()
+        out.new()
+        assert agent.silent_pass == 1
+    assert agent.seen and all(v == 1 for v in agent.seen)
+
+
 def test_output_leaves_no_descriptor_open(agent):
     out = _output(agent)
     out.new()
     assert agent.fds == {}
+
+
+def test_output_closes_the_descriptor_when_a_read_fails(agent):
+    out = _output(agent)
+
+    def sink(_chunk):
+        raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        out._read(0, None, sink)
+    assert agent.fds == {}
+    assert all(v == 1 for v in agent.seen)
 
 
 def test_output_finds_the_end_with_one_lseek(agent):
