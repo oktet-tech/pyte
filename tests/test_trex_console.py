@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2026 OKTET Labs Ltd. All rights reserved.
+# Copyright (C) 2026 Konstantin Ushakov
 from pyte.tools.trex.console import CLEAR, last_screen, screens, strip_ansi
 
 

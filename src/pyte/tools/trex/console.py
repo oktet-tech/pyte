@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2026 OKTET Labs Ltd. All rights reserved.
+# Copyright (C) 2026 Konstantin Ushakov
 """Parsing of the TRex server's console output.
 
 The interactive TRex redraws a table on its stdout every second, each
